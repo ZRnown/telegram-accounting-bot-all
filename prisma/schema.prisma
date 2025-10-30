@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Bot {
+  id           String           @id @default(cuid())
+  name         String
+  description  String?
+  token        String
+  proxyUrl     String?
+  enabled      Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  featureFlags BotFeatureFlag[]
+  chats        Chat[]
+}
+
+model BotFeatureFlag {
+  id      String  @id @default(cuid())
+  botId   String
+  feature String
+  enabled Boolean @default(true)
+  bot     Bot     @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, feature])
+}
+
+model Chat {
+  id           String            @id
+  title        String?
+  createdAt    DateTime          @default(now())
+  status       ChatStatus        @default(PENDING)
+  allowed      Boolean           @default(false)
+  botId        String?
+  bills        Bill[]
+  bot          Bot?              @relation(fields: [botId], references: [id])
+  featureFlags ChatFeatureFlag[]
+  commissions  Commission[]
+  dispatches   Dispatch[]
+  incomes      Income[]
+  operators    Operator[]
+  settings     Setting?
+}
+
+model ChatFeatureFlag {
+  id      String  @id @default(cuid())
+  chatId  String
+  feature String
+  enabled Boolean @default(true)
+  chat    Chat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, feature])
+}
+
+model Setting {
+  id                        String         @id @default(cuid())
+  chatId                    String         @unique
+  feePercent                Float          @default(0)
+  fixedRate                 Float?
+  realtimeRate              Float?
+  displayMode               Int            @default(1)
+  headerText                String?
+  everyoneAllowed           Boolean        @default(false)
+  accountingMode            AccountingMode @default(DAILY_RESET)
+  featureWarningMode        String         @default("always") // "always", "once", "daily", "silent"
+  chat                      Chat           @relation(fields: [chatId], references: [id])
+}
+
+model Operator {
+  id       String @id @default(cuid())
+  chatId   String
+  username String
+  chat     Chat   @relation(fields: [chatId], references: [id])
+
+  @@unique([chatId, username])
+}
+
+model Bill {
+  id       String     @id @default(cuid())
+  chatId   String
+  status   BillStatus @default(OPEN)
+  openedAt DateTime   @default(now())
+  savedAt  DateTime   @default(now())
+  closedAt DateTime?
+  chat     Chat       @relation(fields: [chatId], references: [id])
+  items    BillItem[]
+}
+
+model BillItem {
+  id        String   @id @default(cuid())
+  billId    String
+  type      ItemType
+  amount    Float
+  usdt      Float?
+  rate      Float?
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  bill      Bill     @relation(fields: [billId], references: [id])
+}
+
+model Income {
+  id        String   @id @default(cuid())
+  chatId    String
+  amount    Float
+  rate      Float?
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id])
+}
+
+model Dispatch {
+  id        String   @id @default(cuid())
+  chatId    String
+  amount    Float
+  usdt      Float
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id])
+}
+
+model Commission {
+  id       String @id @default(cuid())
+  chatId   String
+  username String
+  value    Int    @default(0)
+  chat     Chat   @relation(fields: [chatId], references: [id])
+
+  @@unique([chatId, username])
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model Admin {
+  id           String?   @id @default("lower(hex(randomblob(16)))")
+  username     String?   @unique(map: "sqlite_autoindex_Admin_2")
+  passwordHash String?
+  createdAt    DateTime? @default(now())
+  updatedAt    DateTime? @default(now())
+
+  @@ignore
+}
+
+model WhitelistedUser {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  username  String?
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InviteRecord {
+  id         String   @id @default(cuid())
+  chatId     String
+  chatTitle  String?
+  inviterId  String
+  inviterUsername String?
+  botId      String?
+  autoAllowed Boolean @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model FeatureWarningLog {
+  id        String   @id @default(cuid())
+  chatId    String
+  feature   String
+  warnedAt  DateTime @default(now())
+  
+  @@unique([chatId, feature])
+  @@index([chatId])
+}
+
+enum ItemType {
+  INCOME
+  DISPATCH
+}
+
+enum BillStatus {
+  OPEN
+  CLOSED
+}
+
+enum AccountingMode {
+  DAILY_RESET
+  CARRY_OVER
+}
+
+enum ChatStatus {
+  PENDING
+  APPROVED
+  BLOCKED
+}
