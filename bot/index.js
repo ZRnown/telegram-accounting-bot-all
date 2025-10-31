@@ -947,82 +947,25 @@ function isPublicUrl(u) {
 }
 
 /**
- * 🔥 从API获取OTC价格信息（优先使用内部API，带备用方案）
- * @param {boolean} detailed - 是否返回详细订单信息
- * @param {number} rows - 获取的订单数量，默认20
- * @returns {Promise<{buy: any, sell: any, fallback: boolean, rate: number} | null>}
+ * 🔥 获取OKX OTC价格（z0标识）
+ * 通过调用OKX API获取标记价格作为OTC价格参考
  */
-async function fetchOTCPriceFromAPI(detailed = false, rows = 20) {
+async function fetchOKXOTCPrice(timeout = 8000) {
   try {
-    // 优先使用内部API（如果BACKEND_URL配置了）
-    const apiUrl = BACKEND_URL ? `${BACKEND_URL}/api/otc-price?detailed=${detailed}&rows=${rows}` : null
-    
-    if (apiUrl) {
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 8000)
-        
-        const resp = await fetch(apiUrl, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-        })
-        
-        clearTimeout(timeoutId)
-        
-        if (resp.ok) {
-          const data = await resp.json()
-          if (data.success) {
-            return data
-          }
-        }
-      } catch (apiError) {
-        if (process.env.DEBUG_BOT === 'true') {
-          console.error('[OTC API调用失败，使用备用方案]', apiError)
-        }
-        // API调用失败，继续使用备用方案
-      }
-    }
-    
-    // 备用方案：直接调用币安P2P API（保持原有逻辑）
-    return await fetchBinanceP2PDetailedDirect()
-  } catch (e) {
-    if (process.env.DEBUG_BOT === 'true') {
-      console.error('[OTC价格获取失败]', e)
-    }
-    return null
-  }
-}
-
-/**
- * 🔥 直接获取币安P2P详细价格信息（备用方案）- 增强错误处理和超时控制
- * @param {string} tradeType - 'SELL' 或 'BUY'
- * @param {number} rows - 获取的订单数量，默认20
- * @param {number} timeout - 超时时间（毫秒），默认8000
- * @returns {Promise<{avg: number, min: number, max: number, prices: number[], orders: any[]} | null>}
- */
-async function fetchBinanceP2PDetailed(tradeType = 'SELL', rows = 20, timeout = 8000) {
-  try {
-    // 🔥 添加超时控制，避免长时间等待
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)
     
-    const resp = await fetch('https://p2p.binance.com/bapi/c2c/v2/public/c2c/adv/search', {
-      method: 'POST',
+    // 优先使用本地API端点（如果Next.js服务运行）
+    const backendUrl = process.env.BACKEND_URL || ''
+    const apiUrl = backendUrl 
+      ? `${backendUrl}/api/okx/otc-price?instType=SPOT`
+      : 'https://www.okx.com/api/v5/public/mark-price?instType=SPOT&instId=BTC-USDT'
+    
+    const resp = await fetch(apiUrl, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        page: 1,
-        rows: rows,
-        payTypes: [],
-        asset: 'USDT',
-        tradeType: tradeType,
-        fiat: 'CNY',
-        publisherType: null,
-      }),
       signal: controller.signal,
     })
     
@@ -1030,59 +973,47 @@ async function fetchBinanceP2PDetailed(tradeType = 'SELL', rows = 20, timeout = 
     
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
-    const orders = Array.isArray(data?.data) ? data.data : []
-    const prices = orders
-      .map((item) => Number(item?.adv?.price))
-      .filter((p) => Number.isFinite(p) && p > 0)
     
-    if (!prices.length) throw new Error('No valid price from Binance P2P')
-    
-    // 计算统计数据
-    const sortedPrices = [...prices].sort((a, b) => a - b)
-    const avg = prices.reduce((sum, p) => sum + p, 0) / prices.length
-    const min = sortedPrices[0]
-    const max = sortedPrices[sortedPrices.length - 1]
-    
-    return {
-      avg: Number(avg.toFixed(4)),
-      min: Number(min.toFixed(4)),
-      max: Number(max.toFixed(4)),
-      prices: sortedPrices,
-      orders: orders.slice(0, 10), // 只返回前10个订单详情
-      count: prices.length
+    // 如果使用本地API，返回格式不同
+    if (backendUrl && data.success) {
+      return {
+        price: data.price,
+        instId: data.instId,
+        timestamp: data.timestamp,
+        source: 'z0',
+      }
     }
+    
+    // 直接调用OKX API的返回格式
+    if (data.code === '0' && Array.isArray(data.data) && data.data.length > 0) {
+      const markPrice = parseFloat(data.data[0].markPx || '0')
+      if (markPrice > 0) {
+        return {
+          price: markPrice,
+          instId: data.data[0].instId,
+          timestamp: parseInt(data.data[0].ts || '0'),
+          source: 'z0',
+        }
+      }
+    }
+    
+    throw new Error('Invalid OKX API response')
   } catch (e) {
     if (process.env.DEBUG_BOT === 'true') {
       const errorMsg = e.name === 'AbortError' ? '请求超时' : e.message
-      console.error(`[Binance P2P ${tradeType}] 获取失败`, { error: errorMsg, timeout })
+      console.error('[OKX OTC z0] 获取失败', { error: errorMsg, timeout })
     }
     return null
   }
 }
 
 /**
- * 🔥 直接获取币安P2P数据（备用方案，并行获取买卖价格）
+ * 获取OKX OTC价格（简化版本，返回价格数值）
+ * 使用z0标识代表OKX OTC价格
  */
-async function fetchBinanceP2PDetailedDirect() {
-  const [buyData, sellData] = await Promise.all([
-    fetchBinanceP2PDetailed('BUY', 20),
-    fetchBinanceP2PDetailed('SELL', 20),
-  ])
-  
-  return {
-    buy: buyData,
-    sell: sellData,
-    fallback: false,
-    source: 'binance_p2p_direct'
-  }
-}
-
-/**
- * 获取币安P2P平均价格（简化版本，兼容旧代码）
- */
-async function fetchBinanceP2PRateUSDTtoCNY() {
-  const data = await fetchBinanceP2PDetailed('SELL', 10)
-  return data ? data.avg : null
+async function fetchOKXOTCRate() {
+  const data = await fetchOKXOTCPrice()
+  return data ? data.price : null
 }
 
 async function fetchCoinGeckoRateUSDTtoCNY() {
@@ -1118,8 +1049,9 @@ async function fetchExchangeRateHostUSDToCNY() {
 }
 
 async function fetchRealtimeRateUSDTtoCNY() {
-  const primary = await fetchBinanceP2PRateUSDTtoCNY()
-  if (primary) return Number(primary.toFixed(2)) // 🔥 保留2位小数
+  // 优先使用OKX OTC价格（z0）
+  const okxPrice = await fetchOKXOTCRate()
+  if (okxPrice) return Number(okxPrice.toFixed(2)) // 🔥 保留2位小数
   const secondary = await fetchCoinGeckoRateUSDTtoCNY()
   if (secondary) return Number(secondary.toFixed(2)) // 🔥 保留2位小数
   const tertiary = await fetchExchangeRateHostUSDToCNY()
@@ -1949,211 +1881,133 @@ bot.hears(/^激活设置汇率\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
   await ctx.reply(`机器人已激活并设置固定汇率为 ${rate}`)
 })
 
-// 🔥 OTC价格查询功能（使用API，带重试和降级处理）
-bot.hears(/^(OTC价格|查询OTC|币安价格|币安OTC|otc价格|查询币安价格)$/i, async (ctx) => {
+// 🔥 OTC价格查询功能（使用OKX API，z0标识）
+bot.hears(/^(OTC价格|查询OTC|OKX价格|OKX OTC|otc价格|查询OKX价格|z0|Z0)$/i, async (ctx) => {
   try {
-    await ctx.reply('🔄 正在获取OTC价格信息...')
+    await ctx.reply('🔄 正在获取OKX OTC价格信息（z0）...')
     
-    // 🔥 使用API获取价格（优先使用内部API，带备用方案）
-    const apiData = await fetchOTCPriceFromAPI(false, 20)
+    // 获取OKX OTC价格（z0）
+    const okxData = await fetchOKXOTCPrice()
     
-    // 处理备用汇率情况
-    if (apiData?.fallback && apiData.rate) {
-      const priceText = [
-        '━━━ 💰 OTC价格信息 ━━━',
-        '',
-        '⚠️ 币安P2P暂时不可用，使用备用汇率：',
-        '',
-        `📊 当前汇率：*${apiData.rate}* CNY/USDT`,
-        '',
-        '💡 提示：',
-        '• 币安P2P API暂时无法访问',
-        '• 上方显示的是实时汇率参考值',
-        '• 建议稍后重试或访问币安P2P平台查看',
-        '',
-        '🔗 币安P2P：https://p2p.binance.com'
-      ].join('\n')
-      return ctx.reply(priceText, { parse_mode: 'Markdown' })
-    }
-    
-    // 如果API返回失败，尝试使用实时汇率备用
-    if (!apiData || (!apiData.buy && !apiData.sell)) {
+    if (!okxData) {
+      // 如果OKX失败，尝试使用实时汇率备用
       const fallbackRate = await fetchRealtimeRateUSDTtoCNY()
       if (fallbackRate) {
         const priceText = [
-          '━━━ 💰 OTC价格信息 ━━━',
+          '━━━ 💰 OKX OTC价格信息（z0）━━━',
           '',
-          '⚠️ 币安P2P暂时不可用，使用备用汇率：',
+          '⚠️ OKX API暂时不可用，使用备用汇率：',
           '',
           `📊 当前汇率：*${fallbackRate}* CNY/USDT`,
           '',
           '💡 提示：',
-          '• 币安P2P API暂时无法访问',
+          '• OKX API暂时无法访问',
           '• 上方显示的是实时汇率参考值',
-          '• 建议稍后重试或访问币安P2P平台查看',
+          '• 建议稍后重试',
           '',
-          '🔗 币安P2P：https://p2p.binance.com'
+          '🔗 OKX：https://www.okx.com'
         ].join('\n')
         return ctx.reply(priceText, { parse_mode: 'Markdown' })
       }
       
       return ctx.reply(
-        '❌ 无法获取OTC价格信息，请稍后重试。\n\n' +
+        '❌ 无法获取OKX OTC价格信息，请稍后重试。\n\n' +
         '💡 可能原因：\n' +
         '• 网络连接问题\n' +
-        '• 币安API暂时不可用\n' +
+        '• OKX API暂时不可用\n' +
         '• 请检查网络连接后重试\n\n' +
-        '🔗 币安P2P：https://p2p.binance.com'
+        '🔗 OKX：https://www.okx.com'
       )
     }
     
-    const buyData = apiData.buy
-    const sellData = apiData.sell
+    const price = okxData.price
+    const instId = okxData.instId
+    const timestamp = okxData.timestamp
+    const updateTime = timestamp ? new Date(timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
     
     // 构建价格信息文本
-    let priceText = '━━━ 💰 币安P2P OTC价格 ━━━\n\n'
-    priceText += `📅 更新时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n\n`
+    let priceText = '━━━ 💰 OKX OTC价格（z0）━━━\n\n'
+    priceText += `📅 更新时间：${updateTime}\n\n`
+    priceText += `【💰 OKX标记价格】\n`
+    priceText += `📊 产品：*${instId}*\n`
+    priceText += `💵 标记价格：*${price.toFixed(2)}* CNY/USDT\n`
+    priceText += `🔖 数据源标识：z0\n\n`
     
-    // 卖价信息（用户卖出USDT获得CNY）
-    if (sellData) {
-      priceText += '【💰 卖出USDT价格（CNY）】\n'
-      priceText += `📊 平均价：*${sellData.avg}* CNY/USDT\n`
-      priceText += `📈 最高价：${sellData.max} CNY\n`
-      priceText += `📉 最低价：${sellData.min} CNY\n`
-      priceText += `📊 价格范围：${sellData.min} - ${sellData.max} CNY\n`
-      priceText += `📋 有效订单：${sellData.count} 单\n\n`
-    } else {
-      priceText += '【💰 卖出USDT价格】❌ 暂时无法获取\n\n'
-    }
-    
-    // 买价信息（用户买入USDT支付CNY）
-    if (buyData) {
-      priceText += '【💵 买入USDT价格（CNY）】\n'
-      priceText += `📊 平均价：*${buyData.avg}* CNY/USDT\n`
-      priceText += `📈 最高价：${buyData.max} CNY\n`
-      priceText += `📉 最低价：${buyData.min} CNY\n`
-      priceText += `📊 价格范围：${buyData.min} - ${buyData.max} CNY\n`
-      priceText += `📋 有效订单：${buyData.count} 单\n\n`
-    } else {
-      priceText += '【💵 买入USDT价格】❌ 暂时无法获取\n\n'
-    }
-    
-    // 价差分析
-    if (buyData && sellData) {
-      const spread = buyData.avg - sellData.avg
-      const spreadPercent = ((spread / sellData.avg) * 100).toFixed(2)
-      priceText += '【📊 价差分析】\n'
-      priceText += `💹 买卖价差：${spread.toFixed(4)} CNY (${spreadPercent}%)\n`
-      priceText += `💰 建议卖出价：${sellData.avg} CNY/USDT\n`
-      priceText += `💵 建议买入价：${buyData.avg} CNY/USDT\n\n`
-    }
-    
-    // 使用卖价（SELL）作为参考汇率计算常用金额映射
-    if (sellData) {
-      priceText += '【📋 常用金额映射（参考）】\n'
-      const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
-      amounts.forEach(amount => {
-        const cny = (amount * sellData.avg).toFixed(2)
-        priceText += `• ${amount} USDT ≈ ${cny} CNY\n`
-      })
-      priceText += '\n'
-    }
+    // 常用金额映射
+    priceText += '【📋 常用金额映射（参考）】\n'
+    const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+    amounts.forEach(amount => {
+      const cny = (amount * price).toFixed(2)
+      priceText += `• ${amount} USDT ≈ ${cny} CNY\n`
+    })
+    priceText += '\n'
     
     // 添加使用说明
     priceText += '💡 说明：\n'
-    priceText += '• 价格数据来源于币安P2P平台\n'
+    priceText += '• 价格数据来源于OKX标记价格（z0标识）\n'
+    priceText += '• 标记价格用于防止市场操控\n'
     priceText += '• 实际交易价格以平台显示为准\n'
-    priceText += '• 建议查看多个订单后再进行交易\n'
     priceText += '• 注意交易安全和资金安全\n\n'
-    priceText += '🔗 币安P2P：https://p2p.binance.com'
+    priceText += '🔗 OKX：https://www.okx.com'
     
     await ctx.reply(priceText, { parse_mode: 'Markdown' })
   } catch (e) {
-    console.error('[OTC价格查询失败]', e)
-    await ctx.reply('❌ 查询OTC价格失败，请稍后重试。\n\n如果问题持续，请联系管理员。')
+    console.error('[OKX OTC价格查询失败]', e)
+    await ctx.reply('❌ 查询OKX OTC价格失败，请稍后重试。\n\n如果问题持续，请联系管理员。')
   }
 })
 
-// 🔥 详细OTC价格查询（使用API，带订单列表）
-bot.hears(/^(详细OTC|OTC详情|币安详情)$/i, async (ctx) => {
+// 🔥 详细OKX价格查询（z0标识）
+bot.hears(/^(详细OKX|OKX详情|OKX价格详情)$/i, async (ctx) => {
   try {
-    await ctx.reply('🔄 正在获取详细OTC价格信息...')
+    await ctx.reply('🔄 正在获取OKX详细价格信息...')
     
-    // 🔥 使用API获取详细价格（优先使用内部API，带备用方案）
-    const apiData = await fetchOTCPriceFromAPI(true, 30)
+    // 获取多个产品的标记价格
+    const instIds = ['BTC-USDT', 'ETH-USDT', 'USDT-USDC']
+    const results = []
     
-    // 处理备用汇率情况
-    if (apiData?.fallback && apiData.rate) {
-      return ctx.reply(
-        '⚠️ 币安P2P暂时不可用，无法获取详细订单信息。\n\n' +
-        `📊 当前实时汇率参考值：*${apiData.rate}* CNY/USDT\n\n` +
-        '💡 建议稍后重试或访问币安P2P平台查看详细信息。\n' +
-        '🔗 https://p2p.binance.com',
-        { parse_mode: 'Markdown' }
-      )
-    }
-    
-    if (!apiData || (!apiData.buy && !apiData.sell)) {
-      const fallbackRate = await fetchRealtimeRateUSDTtoCNY()
-      if (fallbackRate) {
-        return ctx.reply(
-          '⚠️ 币安P2P暂时不可用，无法获取详细订单信息。\n\n' +
-          `📊 当前实时汇率参考值：*${fallbackRate}* CNY/USDT\n\n` +
-          '💡 建议稍后重试或访问币安P2P平台查看详细信息。\n' +
-          '🔗 https://p2p.binance.com',
-          { parse_mode: 'Markdown' }
-        )
+    for (const instId of instIds) {
+      try {
+        const backendUrl = process.env.BACKEND_URL || ''
+        const apiUrl = backendUrl 
+          ? `${backendUrl}/api/okx/mark-price?instType=SPOT&instId=${instId}`
+          : `https://www.okx.com/api/v5/public/mark-price?instType=SPOT&instId=${instId}`
+        
+        const resp = await fetch(apiUrl)
+        if (resp.ok) {
+          const data = await resp.json()
+          if (data.code === '0' && Array.isArray(data.data) && data.data.length > 0) {
+            results.push(data.data[0])
+          }
+        }
+      } catch (e) {
+        if (process.env.DEBUG_BOT === 'true') {
+          console.error(`[OKX详情] 获取${instId}失败`, e)
+        }
       }
-      return ctx.reply('❌ 无法获取详细价格信息，请稍后重试。')
     }
     
-    const buyData = apiData.buy
-    const sellData = apiData.sell
-    
-    let detailText = '━━━ 📊 币安P2P详细价格信息 ━━━\n\n'
-    
-    // 卖价详情
-    if (sellData) {
-      detailText += '【💰 卖出USDT订单（前5单）】\n'
-      const topSellOrders = sellData.orders.slice(0, 5)
-      topSellOrders.forEach((order, idx) => {
-        const price = Number(order?.adv?.price || 0)
-        const minAmount = order?.adv?.minSingleTransAmount || 0
-        const maxAmount = order?.adv?.maxSingleTransAmount || 0
-        const payMethods = order?.adv?.tradeMethods?.map(m => m?.tradeMethodName || '').filter(Boolean) || []
-        detailText += `${idx + 1}. 价格：*${price.toFixed(4)}* CNY\n`
-        detailText += `   限额：${minAmount} - ${maxAmount} USDT\n`
-        if (payMethods.length > 0) {
-          detailText += `   支付：${payMethods.join('、')}\n`
-        }
-        detailText += '\n'
-      })
+    if (results.length === 0) {
+      return ctx.reply('❌ 无法获取OKX详细价格信息，请稍后重试。')
     }
     
-    // 买价详情
-    if (buyData) {
-      detailText += '【💵 买入USDT订单（前5单）】\n'
-      const topBuyOrders = buyData.orders.slice(0, 5)
-      topBuyOrders.forEach((order, idx) => {
-        const price = Number(order?.adv?.price || 0)
-        const minAmount = order?.adv?.minSingleTransAmount || 0
-        const maxAmount = order?.adv?.maxSingleTransAmount || 0
-        const payMethods = order?.adv?.tradeMethods?.map(m => m?.tradeMethodName || '').filter(Boolean) || []
-        detailText += `${idx + 1}. 价格：*${price.toFixed(4)}* CNY\n`
-        detailText += `   限额：${minAmount} - ${maxAmount} USDT\n`
-        if (payMethods.length > 0) {
-          detailText += `   支付：${payMethods.join('、')}\n`
-        }
-        detailText += '\n'
-      })
-    }
+    let detailText = '━━━ 📊 OKX详细价格信息（z0）━━━\n\n'
     
-    detailText += '💡 提示：更多订单信息请访问币安P2P平台查看\n'
-    detailText += '🔗 https://p2p.binance.com'
+    results.forEach((item, idx) => {
+      const price = parseFloat(item.markPx || '0')
+      const time = item.ts ? new Date(parseInt(item.ts)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
+      detailText += `【${item.instId}】\n`
+      detailText += `💰 标记价格：*${price.toFixed(2)}* USDT\n`
+      detailText += `📅 更新时间：${time}\n`
+      if (idx < results.length - 1) detailText += '\n'
+    })
+    
+    detailText += '\n💡 提示：更多信息请访问OKX平台查看\n'
+    detailText += '🔗 https://www.okx.com'
     
     await ctx.reply(detailText, { parse_mode: 'Markdown' })
   } catch (e) {
-    console.error('[详细OTC价格查询失败]', e)
+    console.error('[OKX详细价格查询失败]', e)
     await ctx.reply('❌ 查询详细价格失败，请稍后重试')
   }
 })
@@ -3594,9 +3448,9 @@ bot.action('help', async (ctx) => {
     '• 设置操作人 @xxx - 添加员工权限',
     '',
     '【💰 OTC价格查询】',
-    '• OTC价格 / 查询OTC - 查看币安P2P实时价格',
-    '• 详细OTC / OTC详情 - 查看详细订单信息',
-    '• 支持查看买卖价格、价差分析、常用金额映射',
+    '• OTC价格 / 查询OTC / z0 - 查看OKX OTC实时价格（z0标识）',
+    '• 详细OKX / OKX详情 - 查看OKX详细价格信息',
+    '• 支持查看标记价格、常用金额映射',
   ].join('\n')
   await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
 })
@@ -3838,7 +3692,7 @@ bot.launch().then(async () => {
         '主要功能：\n' +
         '• 基础记账：+金额、下发金额、显示账单\n' +
         '• 数学计算：支持+100-50、+100*2等表达式\n' +
-        '• OTC价格：查询币安P2P实时买卖价格、价差分析\n' +
+        '• OTC价格（z0）：查询OKX OTC实时价格、标记价格\n' +
         '• 地址验证：检测钱包地址变更并提醒\n' +
         '• 功能开关：开启所有功能/关闭所有功能\n' +
         '• 多群组独立配置：每个群组独立设置\n\n' +
