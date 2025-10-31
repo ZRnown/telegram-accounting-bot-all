@@ -25,6 +25,67 @@ interface OTCPriceData {
 }
 
 /**
+ * 获取CoinGecko汇率
+ */
+async function fetchCoinGeckoRateUSDTtoCNY(): Promise<number | null> {
+  try {
+    const resp = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny',
+      { method: 'GET' }
+    )
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    const rate = Number(data?.tether?.cny)
+    if (!rate || !Number.isFinite(rate)) throw new Error('Invalid CoinGecko rate')
+    return Number(rate.toFixed(2))
+  } catch (e) {
+    console.error('[CoinGecko汇率获取失败]', e)
+    return null
+  }
+}
+
+/**
+ * 获取ExchangeRate Host的USD到CNY汇率（作为最后备用）
+ */
+async function fetchExchangeRateHostUSDToCNY(): Promise<number | null> {
+  try {
+    const resp = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=CNY', {
+      method: 'GET',
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    const rate = Number(data?.rates?.CNY)
+    if (!rate || !Number.isFinite(rate)) throw new Error('Invalid exchangerate.host rate')
+    return Number(rate.toFixed(2))
+  } catch (e) {
+    console.error('[exchangerate.host汇率获取失败]', e)
+    return null
+  }
+}
+
+/**
+ * 获取实时汇率（备用数据源）
+ * 优先级：币安P2P > CoinGecko > ExchangeRate Host
+ */
+async function fetchRealtimeRateUSDTtoCNY(): Promise<number | null> {
+  // 先尝试从币安P2P获取（使用SELL价格作为参考）
+  const p2pData = await fetchBinanceP2PDetailed('SELL', 10)
+  if (p2pData) {
+    return Number(p2pData.avg.toFixed(2))
+  }
+
+  // 备用方案1：CoinGecko
+  const coinGeckoRate = await fetchCoinGeckoRateUSDTtoCNY()
+  if (coinGeckoRate) {
+    return coinGeckoRate
+  }
+
+  // 备用方案2：ExchangeRate Host (USD/CNY，作为最后备用)
+  const exchangeRate = await fetchExchangeRateHostUSDToCNY()
+  return exchangeRate
+}
+
+/**
  * 获取币安P2P详细价格信息（OTC价格）
  * @param tradeType - 'SELL' 或 'BUY'
  * @param rows - 获取的订单数量，默认20
@@ -99,12 +160,30 @@ export async function GET(req: NextRequest) {
       fetchBinanceP2PDetailed('SELL', rows),
     ])
 
+    // 🔥 如果币安P2P不可用，尝试使用备用数据源
     if (!buyData && !sellData) {
+      const fallbackRate = await fetchRealtimeRateUSDTtoCNY()
+      if (fallbackRate) {
+        // 返回备用汇率格式（单价格）
+        return Response.json({
+          success: true,
+          timestamp: new Date().toISOString(),
+          fallback: true,
+          source: 'backup',
+          message: '币安P2P暂时不可用，使用备用汇率',
+          rate: fallbackRate,
+          buy: null,
+          sell: null,
+          spread: null,
+        })
+      }
+
+      // 所有数据源都失败
       return Response.json(
         {
           success: false,
           error: '无法获取OTC价格信息',
-          message: '币安P2P API暂时不可用，请稍后重试',
+          message: '所有数据源均不可用，请稍后重试',
         },
         { status: 503 }
       )
@@ -124,12 +203,15 @@ export async function GET(req: NextRequest) {
     const response: {
       success: true
       timestamp: string
+      fallback?: boolean
+      source?: string
       buy?: OTCPriceData
       sell?: OTCPriceData
       spread?: { value: number; percent: string }
     } = {
       success: true,
       timestamp: new Date().toISOString(),
+      source: 'binance_p2p',
     }
 
     if (buyData) {
