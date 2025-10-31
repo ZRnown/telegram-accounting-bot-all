@@ -202,34 +202,8 @@ export async function getOKXOTCPrice(
     })
   }
   
-  // 方法2: 如果指数价格不可用，尝试获取USDT相关的标记价格作为参考
-  try {
-    let markPrices: OKXMarkPrice[] = []
-
-    if (instType === 'SPOT') {
-      // 对于现货，获取BTC-USDT标记价格作为参考
-      markPrices = await getMarkPrice({ instType: 'SPOT', instId: 'BTC-USDT' })
-    } else {
-      // 对于永续合约，获取BTC-USDT-SWAP标记价格
-      markPrices = await getMarkPrice({ instType: 'SWAP', instId: 'BTC-USDT-SWAP' })
-    }
-
-    if (markPrices.length > 0 && markPrices[0]) {
-      const price = parseFloat(markPrices[0].markPx || '0')
-      if (price > 0) {
-        console.log('[OKX API] 使用标记价格作为参考:', price)
-        // 注意：这里返回的是BTC-USDT价格，不是USDT-CNY，仅作参考
-        return {
-          price,
-          instId: markPrices[0].instId,
-          timestamp: parseInt(markPrices[0].ts || '0'),
-          source: 'z0',
-        }
-      }
-    }
-  } catch (error: any) {
-    console.error('[OKX API] 获取标记价格失败:', error)
-  }
+  // 注意：不返回BTC价格，只返回USDT-CNY价格用于实时汇率
+  // 如果无法获取USDT-CNY价格，返回null，让其他备用方案处理
   
   // 所有方法都失败
   console.error('[OKX API] 获取OTC价格完全失败，最后错误:', {
