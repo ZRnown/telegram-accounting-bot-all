@@ -1425,7 +1425,7 @@ bot.on('my_chat_member', async (ctx) => {
       // 🔥 记录邀请信息（仅新加入时）
       // 使用 upsert 确保即使重复也能记录（可能因为网络问题导致重复）
       try {
-        // 先检查是否已存在记录（根据chatId和inviterId判断）
+        // 🔥 使用 findFirst 查找最近的记录（同一群组同一邀请人）
         const existing = await prisma.inviteRecord.findFirst({
           where: {
             chatId,
@@ -1436,7 +1436,7 @@ bot.on('my_chat_member', async (ctx) => {
         
         if (!existing) {
           // 不存在记录，创建新记录
-          await prisma.inviteRecord.create({
+          const newRecord = await prisma.inviteRecord.create({
             data: {
               chatId,
               chatTitle: title,
@@ -1446,11 +1446,16 @@ bot.on('my_chat_member', async (ctx) => {
               autoAllowed
             }
           })
-          if (process.env.DEBUG_BOT === 'true') {
-            console.log('[invite-record] ✅ 创建成功', { chatId, inviterId, inviterUsername, autoAllowed })
-          }
+          console.log('[invite-record] ✅ 创建成功', { 
+            id: newRecord.id,
+            chatId, 
+            inviterId, 
+            inviterUsername, 
+            autoAllowed,
+            title
+          })
         } else {
-          // 已存在记录，更新信息（可能用户名有变化）
+          // 已存在记录，更新信息（可能用户名或状态有变化）
           await prisma.inviteRecord.update({
             where: { id: existing.id },
             data: {
@@ -1460,9 +1465,14 @@ bot.on('my_chat_member', async (ctx) => {
               autoAllowed
             }
           })
-          if (process.env.DEBUG_BOT === 'true') {
-            console.log('[invite-record] ✅ 更新成功', { chatId, inviterId, inviterUsername, autoAllowed })
-          }
+          console.log('[invite-record] ✅ 更新成功', { 
+            id: existing.id,
+            chatId, 
+            inviterId, 
+            inviterUsername, 
+            autoAllowed,
+            title
+          })
         }
       } catch (e) {
         // 🔥 记录详细错误信息，帮助排查问题
@@ -1470,9 +1480,12 @@ bot.on('my_chat_member', async (ctx) => {
           chatId, 
           inviterId,
           inviterUsername,
+          title,
+          botId,
+          autoAllowed,
           error: e.message,
           code: e.code,
-          stack: process.env.DEBUG_BOT === 'true' ? e.stack : undefined
+          stack: e.stack
         })
       }
       
@@ -1911,25 +1924,46 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   // 将入款写入当天 OPEN 账单的 BillItem
   try {
     const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
+    const now = new Date()
+    const gte = startOfDay(now, cutoffHour)
+    const lt = endOfDay(now, cutoffHour)
+    
+    // 🔥 确保 openedAt 在正确的日期范围内（使用当天的起始时间作为 openedAt）
     let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
     if (!bill) {
-      bill = await prisma.bill.create({ data: { chatId, status: 'OPEN', openedAt: new Date(), savedAt: new Date() } })
+      // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
+      bill = await prisma.bill.create({ 
+        data: { 
+          chatId, 
+          status: 'OPEN', 
+          openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
+          savedAt: new Date() 
+        } 
+      })
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
+      }
     }
-    await prisma.billItem.create({ data: {
+    const billItem = await prisma.billItem.create({ data: {
       billId: bill.id,
       type: 'INCOME',
-      amount: Number(amountRMB),
-      rate: rate ?? undefined,
-      usdt: usdt ?? undefined,
-      replier: replierUsername || undefined,
-      operator: operatorUsername || replierUsername || undefined, // 🔥 优先保存带@的用户名，用于操作人分类统计
+      amount: Number(amountRMB), // 🔥 Float 类型，使用 Number
+      rate: rate ? Number(rate) : null,
+      usdt: usdt ? Number(usdt) : null,
+      replier: replierUsername || null,
+      operator: operatorUsername || replierUsername || null, // 🔥 优先保存带@的用户名，用于操作人分类统计
       createdAt: new Date(),
     } })
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[记账][入款已保存]', { chatId, billId: bill.id, amount: amountRMB, usdt })
-    }
+    
+    console.log('[记账][入款已保存]', { 
+      chatId, 
+      billId: bill.id, 
+      billItemId: billItem.id,
+      amount: amountRMB, 
+      usdt,
+      operator: operatorUsername || replierUsername,
+      openedAt: bill.openedAt
+    })
   } catch (e) {
     console.error('写入 BillItem(INCOME) 失败', e)
     console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
@@ -1990,25 +2024,46 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   // 将下发写入当天 OPEN 账单的 BillItem
   try {
     const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
+    const now = new Date()
+    const gte = startOfDay(now, cutoffHour)
+    const lt = endOfDay(now, cutoffHour)
+    
+    // 🔥 确保 openedAt 在正确的日期范围内（使用当天的起始时间作为 openedAt）
     let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
     if (!bill) {
-      bill = await prisma.bill.create({ data: { chatId, status: 'OPEN', openedAt: new Date(), savedAt: new Date() } })
+      // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
+      bill = await prisma.bill.create({ 
+        data: { 
+          chatId, 
+          status: 'OPEN', 
+          openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
+          savedAt: new Date() 
+        } 
+      })
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
+      }
     }
-    await prisma.billItem.create({ data: {
+    const billItem = await prisma.billItem.create({ data: {
       billId: bill.id,
       type: 'DISPATCH',
-      amount: Number(amountRMB),
-      rate: rate ?? undefined,
-      usdt: Number(usdtValue),
-      replier: replierUsername || undefined,
-      operator: operatorUsername || replierUsername || undefined, // 🔥 优先保存带@的用户名，用于操作人分类统计
+      amount: Number(amountRMB), // 🔥 Float 类型，使用 Number
+      rate: rate ? Number(rate) : null,
+      usdt: Number(usdtValue), // 🔥 Float 类型，使用 Number
+      replier: replierUsername || null,
+      operator: operatorUsername || replierUsername || null, // 🔥 优先保存带@的用户名，用于操作人分类统计
       createdAt: new Date(),
     } })
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[记账][下发已保存]', { chatId, billId: bill.id, amount: amountRMB, usdt: usdtValue })
-    }
+    
+    console.log('[记账][下发已保存]', { 
+      chatId, 
+      billId: bill.id, 
+      billItemId: billItem.id,
+      amount: amountRMB, 
+      usdt: usdtValue,
+      operator: operatorUsername || replierUsername,
+      openedAt: bill.openedAt
+    })
   } catch (e) {
     console.error('写入 BillItem(DISPATCH) 失败', e)
     console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })

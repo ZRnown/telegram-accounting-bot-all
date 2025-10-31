@@ -86,20 +86,16 @@ export async function GET(req: NextRequest) {
     }
 
     // 🔥 获取日切时间设置
-    const [settings, bills] = await Promise.all([
-      prisma.setting.findUnique({
-        where: { chatId },
-        select: {
-          feePercent: true,
-          fixedRate: true,
-          realtimeRate: true,
-          accountingMode: true,
-          dailyCutoffHour: true,
-        }
-      }),
-      // 暂时使用默认日切时间获取bills，后面会重新查询
-      (async () => { return [] as any[] })()
-    ])
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: {
+        feePercent: true,
+        fixedRate: true,
+        realtimeRate: true,
+        accountingMode: true,
+        dailyCutoffHour: true,
+      }
+    })
 
     // 🔥 使用日切时间计算日期范围
     const cutoffHour = settings?.dailyCutoffHour ?? 0
@@ -136,7 +132,8 @@ export async function GET(req: NextRequest) {
     // Build per-bill aggregates and records
     const billsAgg: any[] = []
     const billsRecords: { incomeRecords: any[]; dispatchRecords: any[] }[] = []
-    for (const b of bills as any[]) {
+    // 🔥 使用 billsData 而不是 bills（bills 是空数组）
+    for (const b of billsData) {
       const its = billItems.filter((x: any) => x.billId === b.id)
       const incs = its.filter((x: any) => x.type === 'INCOME')
       const disps = its.filter((x: any) => x.type === 'DISPATCH')
@@ -211,7 +208,7 @@ export async function GET(req: NextRequest) {
     const incomeByReplier: Record<string, number> = {}
     const incomeByOperator: Record<string, number> = {}
     const incomeByRate: Record<string, number> = {}
-    const selectedBillId = bills[selIdx]?.id
+    const selectedBillId = billsData[selIdx]?.id
     const selItems = selectedBillId ? billItems.filter((x: any) => x.billId === selectedBillId) : []
     const selIncs = selItems.filter((x: any) => x.type === 'INCOME')
     selIncs.forEach((i: any) => {
