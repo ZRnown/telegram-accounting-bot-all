@@ -890,7 +890,10 @@ async function fetchBinanceP2PRateUSDTtoCNY() {
     const avg = take.reduce((sum, p) => sum + p, 0) / take.length
     return Number(avg.toFixed(4))
   } catch (e) {
-    console.error('Binance P2P 汇率获取失败', e)
+    // 🔥 只在 DEBUG 模式下输出错误日志，避免正常情况下的冗余日志
+    if (process.env.DEBUG_BOT === 'true') {
+      console.error('Binance P2P 汇率获取失败', e)
+    }
     return null
   }
 }
@@ -904,7 +907,9 @@ async function fetchCoinGeckoRateUSDTtoCNY() {
     if (!rate || !Number.isFinite(rate)) throw new Error('Invalid CoinGecko rate')
     return rate
   } catch (e) {
-    console.error('CoinGecko 汇率获取失败', e)
+    if (process.env.DEBUG_BOT === 'true') {
+      console.error('CoinGecko 汇率获取失败', e)
+    }
     return null
   }
 }
@@ -918,7 +923,9 @@ async function fetchExchangeRateHostUSDToCNY() {
     if (!rate || !Number.isFinite(rate)) throw new Error('Invalid exchangerate.host rate')
     return rate
   } catch (e) {
-    console.error('exchangerate.host 汇率获取失败', e)
+    if (process.env.DEBUG_BOT === 'true') {
+      console.error('exchangerate.host 汇率获取失败', e)
+    }
     return null
   }
 }
@@ -1925,6 +1932,7 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
     }
   } catch (e) {
     console.error('写入 BillItem(INCOME) 失败', e)
+    console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
     // 🔥 即使保存失败，也继续执行（避免影响用户体验）
   }
   
@@ -2003,6 +2011,7 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
     }
   } catch (e) {
     console.error('写入 BillItem(DISPATCH) 失败', e)
+    console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
     // 🔥 即使保存失败，也继续执行（避免影响用户体验）
   }
   const summary = await formatSummary(ctx, chat, { title: '下发已记录' })

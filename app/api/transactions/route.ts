@@ -17,66 +17,88 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, Number(searchParams.get('page') || '1'))
     const size = Math.min(100, Math.max(1, Number(searchParams.get('size') || '20')))
 
-    // figure chatId default: last active
+    // 🔥 从 BillItem 表获取数据（新的存储方式）
     let chatIdFinal = chatId
     if (!chatIdFinal) {
-      const latestIncome = await prisma.income.findFirst({ orderBy: { createdAt: 'desc' } })
-      const latestDispatch = await prisma.dispatch.findFirst({ orderBy: { createdAt: 'desc' } })
-      chatIdFinal = latestIncome?.chatId || latestDispatch?.chatId || undefined
+      // 获取最近有活动的群组
+      const latestBill = await prisma.bill.findFirst({ 
+        orderBy: { openedAt: 'desc' },
+        select: { chatId: true }
+      })
+      chatIdFinal = latestBill?.chatId || undefined
     }
 
-    const dateFilter: any = {}
-    if (from) dateFilter.gte = from
-    if (to) dateFilter.lte = to
-
-    const whereIncome: any = { ...(chatIdFinal ? { chatId: chatIdFinal } : {}), ...(from || to ? { createdAt: dateFilter } : {}) }
-    const whereDispatch: any = { ...(chatIdFinal ? { chatId: chatIdFinal } : {}), ...(from || to ? { createdAt: dateFilter } : {}) }
-
-    let incomeCount = 0, dispatchCount = 0, incomes: any[] = [], dispatches: any[] = []
-    if (type === 'all' || type === 'income') {
-      incomeCount = await prisma.income.count({ where: whereIncome })
-      incomes = await prisma.income.findMany({ where: whereIncome, orderBy: { createdAt: 'desc' }, skip: (page - 1) * size, take: size })
-    }
-    if (type === 'all' || type === 'dispatch') {
-      dispatchCount = await prisma.dispatch.count({ where: whereDispatch })
-      dispatches = await prisma.dispatch.findMany({ where: whereDispatch, orderBy: { createdAt: 'desc' }, skip: (page - 1) * size, take: size })
+    // 构建日期过滤：通过 bill 的 openedAt 来过滤
+    const billWhere: any = {}
+    if (chatIdFinal) billWhere.chatId = chatIdFinal
+    if (from || to) {
+      billWhere.openedAt = {}
+      if (from) billWhere.openedAt.gte = from
+      if (to) {
+        const toEnd = new Date(to)
+        toEnd.setHours(23, 59, 59, 999)
+        billWhere.openedAt.lte = toEnd
+      }
     }
 
-    // compute usdt for incomes when possible
-    let rate = 0
-    if (chatIdFinal) {
-      const settings = await prisma.setting.findUnique({ where: { chatId: chatIdFinal } })
-      rate = settings?.fixedRate ?? settings?.realtimeRate ?? 0
+    // 获取符合条件的账单
+    const bills = await prisma.bill.findMany({
+      where: billWhere,
+      select: { id: true }
+    })
+    const billIds = bills.map(b => b.id)
+
+    if (billIds.length === 0) {
+      return Response.json({ page, size, total: 0, items: [] })
     }
 
-    const incomeItems = incomes.map((i) => ({
-      id: i.id,
-      type: 'income' as const,
-      amount: i.amount,
-      usdt: Number(((i.rate ?? rate) ? (i.amount / (i.rate ?? rate)) : 0).toFixed(2)),
-      rate: ((i.rate ?? rate) || null),
-      replier: i.replier || null,
-      operator: i.operator || null,
-      createdAt: i.createdAt,
-    }))
-    const dispatchItems = dispatches.map((d) => ({
-      id: d.id,
-      type: 'dispatch' as const,
-      amount: d.amount,
-      usdt: d.usdt,
-      rate: rate || null,
-      replier: d.replier || null,
-      operator: d.operator || null,
-      createdAt: d.createdAt,
-    }))
+    // 构建 BillItem 查询条件
+    const itemWhere: any = { billId: { in: billIds } }
+    if (type === 'income') {
+      itemWhere.type = 'INCOME'
+    } else if (type === 'dispatch') {
+      itemWhere.type = 'DISPATCH'
+    }
 
-    const items = (type === 'income' ? incomeItems : type === 'dispatch' ? dispatchItems : [...incomeItems, ...dispatchItems])
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, size)
+    // 获取记录
+    const [total, items] = await Promise.all([
+      prisma.billItem.count({ where: itemWhere }),
+      prisma.billItem.findMany({
+        where: itemWhere,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * size,
+        take: size,
+      })
+    ])
 
-    const total = (type === 'income' ? incomeCount : type === 'dispatch' ? dispatchCount : incomeCount + dispatchCount)
+    // 格式化数据
+    const formattedItems = items.map((item) => {
+      if (item.type === 'INCOME') {
+        return {
+          id: item.id,
+          type: 'income' as const,
+          amount: Number(item.amount),
+          usdt: item.usdt ? Number(item.usdt) : null,
+          rate: item.rate ? Number(item.rate) : null,
+          replier: item.replier || null,
+          operator: item.operator || null,
+          createdAt: item.createdAt,
+        }
+      } else {
+        return {
+          id: item.id,
+          type: 'dispatch' as const,
+          amount: Number(item.amount),
+          usdt: item.usdt ? Number(item.usdt) : null,
+          rate: item.rate ? Number(item.rate) : null,
+          replier: item.replier || null,
+          operator: item.operator || null,
+          createdAt: item.createdAt,
+        }
+      }
+    })
 
-    return Response.json({ page, size, total, items })
+    return Response.json({ page, size, total, items: formattedItems })
   } catch (e) {
     console.error(e)
     return new Response('Server error', { status: 500 })
