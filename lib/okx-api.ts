@@ -215,6 +215,95 @@ export async function getOKXOTCPrice(
 }
 
 /**
+ * OTC交易订单数据
+ */
+export interface OKXOTCOrder {
+  price: string
+  availableAmount: string
+  minAmount: string
+  maxAmount?: string
+  nickName: string
+  paymentMethods: string[]
+  isMerchant: boolean
+  [key: string]: any
+}
+
+/**
+ * 获取OKX OTC实时价格TOP 10（场外交易报价）
+ * @param side - 'sell' 表示卖U（你买入），'buy' 表示买U（你卖出）
+ */
+export async function getOTCTradingOrders(
+  side: 'sell' | 'buy' = 'sell',
+  limit: number = 10
+): Promise<OKXOTCOrder[]> {
+  try {
+    const url = new URL(`${OKX_BASE_URL}/v3/c2c/tradingOrders/book`)
+    url.searchParams.append('quoteCurrency', 'cny')
+    url.searchParams.append('baseCurrency', 'usdt')
+    url.searchParams.append('side', side)
+    url.searchParams.append('paymentMethod', 'all')
+    url.searchParams.append('userType', 'all')
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '')
+      throw new Error(`OTC订单接口 HTTP ${response.status}: ${errorText}`)
+    }
+
+    const data = await response.json()
+
+    if (data.code !== 0) {
+      throw new Error(`OTC订单接口错误: code=${data.code}, msg=${data.msg || '未知错误'}`)
+    }
+
+    if (!Array.isArray(data.data)) {
+      throw new Error('OTC订单接口返回数据格式错误')
+    }
+
+    // 按价格排序，取前limit条
+    const sorted = data.data
+      .filter((item: any) => item.price && parseFloat(item.price) > 0)
+      .sort((a: any, b: any) => {
+        const priceA = parseFloat(a.price)
+        const priceB = parseFloat(b.price)
+        // sell: 价格从低到高（买入时选便宜的）
+        // buy: 价格从高到低（卖出时选贵的）
+        return side === 'sell' ? priceA - priceB : priceB - priceA
+      })
+      .slice(0, limit)
+
+    return sorted.map((item: any) => ({
+      price: item.price,
+      availableAmount: item.availableAmount || '0',
+      minAmount: item.minAmount || '0',
+      maxAmount: item.maxAmount,
+      nickName: item.nickName || '未知商家',
+      paymentMethods: Array.isArray(item.paymentMethods) ? item.paymentMethods : [],
+      isMerchant: item.isMerchant || false,
+    }))
+  } catch (error: any) {
+    console.error('[OKX API] 获取OTC订单失败:', {
+      error: error.message,
+      stack: error.stack
+    })
+    throw error
+  }
+}
+
+/**
  * 获取多个产品的标记价格
  */
 export async function getMultipleMarkPrices(

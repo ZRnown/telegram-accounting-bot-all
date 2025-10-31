@@ -1949,244 +1949,261 @@ bot.hears(/^激活设置汇率\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
   await ctx.reply(`机器人已激活并设置固定汇率为 ${rate}`)
 })
 
-// 🔥 OTC价格查询功能（使用OKX API，z0标识）
+// 🔥 OTC价格查询功能（使用OKX API，获取实时U价TOP 10）
 bot.hears(/^(OTC价格|查询OTC|OKX价格|OKX OTC|otc价格|查询OKX价格|z0|Z0)$/i, async (ctx) => {
   try {
-    await ctx.reply('🔄 正在获取OKX OTC价格信息（z0）...')
+    await ctx.reply('🔄 正在获取OKX实时U价TOP 10...')
     
-    // 获取OKX OTC价格（z0）
-    const okxData = await fetchOKXOTCPrice()
-    
-    if (!okxData) {
-      // 如果OKX失败，输出详细错误信息
-      console.error('[OKX OTC z0] 获取失败，所有方法均无效')
-      
-      // 尝试使用实时汇率备用
-      const fallbackRate = await fetchRealtimeRateUSDTtoCNY()
-      if (fallbackRate) {
-        const priceText = [
-          '━━━ 💰 OKX OTC价格信息（z0）━━━',
-          '',
-          '⚠️ OKX API暂时不可用，使用备用汇率：',
-          '',
-          `📊 当前汇率：*${fallbackRate}* CNY/USDT`,
-          '',
-          '💡 提示：',
-          '• OKX API暂时无法访问（请查看服务器日志）',
-          '• 上方显示的是实时汇率参考值',
-          '• 建议检查网络连接和API配置',
-          '',
-          '🔗 OKX：https://www.okx.com'
-        ].join('\n')
-        return ctx.reply(priceText, { parse_mode: 'Markdown' })
-      }
-      
-      // 所有方法都失败，返回详细错误信息
-      console.error('[OKX OTC z0] 完全失败，无法获取任何价格数据')
-      return ctx.reply(
-        '❌ 无法获取OKX OTC价格信息，请稍后重试。\n\n' +
-        '💡 可能原因：\n' +
-        '• 网络连接问题\n' +
-        '• OKX API暂时不可用\n' +
-        '• 本地API服务未运行\n' +
-        '• 请检查服务器日志查看详细错误\n\n' +
-        '🔗 OKX：https://www.okx.com\n\n' +
-        '⚠️ 请检查控制台日志获取详细错误信息'
-      )
-    }
-    
-    const price = okxData.price
-    const instId = okxData.instId
-    const timestamp = okxData.timestamp
-    const updateTime = timestamp ? new Date(timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-    
-    // 获取USDT-CNY的24小时详细信息和订单簿（前几个价格）
-    let tickerData = null
-    let priceLimitData = null
-    let booksData = null
+    // 优先获取OTC实时价格TOP 10（场外交易报价）
+    let priceText = '━━━ 💰 OKX实时U价TOP 10 ━━━\n\n'
     
     try {
-      // 获取ticker（24小时数据）
-      const tickerUrl = 'https://www.okx.com/api/v5/market/ticker?instId=USDT-CNY'
-      const tickerResp = await fetch(tickerUrl, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(5000)
-      })
-      if (tickerResp.ok) {
-        const tickerJson = await tickerResp.json()
-        if (tickerJson.code === '0' && Array.isArray(tickerJson.data) && tickerJson.data.length > 0) {
-          tickerData = tickerJson.data[0]
-        }
-      }
+      const otcUrl = 'https://www.okx.com/v3/c2c/tradingOrders/book?quoteCurrency=cny&baseCurrency=usdt&side=sell&paymentMethod=all&userType=all'
+      console.log('[OKX OTC z0] 获取OTC订单:', otcUrl)
       
-      // 获取限价信息（最高买价、最低卖价）
-      const limitUrl = 'https://www.okx.com/api/v5/public/price-limit?instId=USDT-CNY'
-      const limitResp = await fetch(limitUrl, {
+      const otcResp = await fetch(otcUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(8000)
       })
-      if (limitResp.ok) {
-        const limitJson = await limitResp.json()
-        if (limitJson.code === '0' && Array.isArray(limitJson.data) && limitJson.data.length > 0) {
-          priceLimitData = limitJson.data[0]
-        }
-      }
       
-      // 获取订单簿（前几个价格）
-      const booksUrl = 'https://www.okx.com/api/v5/market/books?instId=USDT-CNY&sz=5'
-      const booksResp = await fetch(booksUrl, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(5000)
-      })
-      if (booksResp.ok) {
-        const booksJson = await booksResp.json()
-        if (booksJson.code === '0' && Array.isArray(booksJson.data) && booksJson.data.length > 0) {
-          booksData = booksJson.data[0]
+      if (otcResp.ok) {
+        const otcData = await otcResp.json()
+        console.log('[OKX OTC z0] OTC订单响应:', JSON.stringify(otcData).substring(0, 500))
+        
+        if (otcData.code === 0 && Array.isArray(otcData.data) && otcData.data.length > 0) {
+          // 按价格排序（从低到高）
+          const sorted = otcData.data
+            .filter((item) => item.price && parseFloat(item.price) > 0)
+            .sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+            .slice(0, 10)
+          
+          const emojiNumbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+          
+          sorted.forEach((item, idx) => {
+            const price = parseFloat(item.price || '0')
+            const nickName = item.nickName || '未知商家'
+            const availableAmount = parseFloat(item.availableAmount || '0')
+            const minAmount = parseFloat(item.minAmount || '0')
+            const emoji = emojiNumbers[idx] || `${idx + 1}.`
+            priceText += `${emoji}    ${price.toFixed(2)}    ${nickName}`
+            if (availableAmount > 0) {
+              priceText += ` (可用: ${availableAmount.toFixed(0)}U`
+              if (minAmount > 0) priceText += `, 最小: ${minAmount.toFixed(0)}U`
+              priceText += ')'
+            }
+            priceText += '\n'
+          })
+          
+          // 计算平均价格
+          if (sorted.length > 0) {
+            const avgPrice = sorted.reduce((sum, item) => sum + parseFloat(item.price || '0'), 0) / sorted.length
+            const minPrice = parseFloat(sorted[0].price || '0')
+            const maxPrice = parseFloat(sorted[sorted.length - 1].price || '0')
+            
+            priceText += `\n📊 统计：\n`
+            priceText += `• 最低价：${minPrice.toFixed(2)} CNY/USDT\n`
+            priceText += `• 最高价：${maxPrice.toFixed(2)} CNY/USDT\n`
+            priceText += `• 平均价：${avgPrice.toFixed(2)} CNY/USDT\n`
+            
+            // 常用金额映射（使用平均价）
+            priceText += `\n【常用金额映射】\n`
+            const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+            amounts.forEach(amount => {
+              const cny = (amount * avgPrice).toFixed(2)
+              priceText += `• ${amount} USDT ≈ ${cny} CNY\n`
+            })
+          }
+          
+          await ctx.reply(priceText, { parse_mode: 'Markdown' })
+          return
+        } else {
+          throw new Error(`OTC订单API错误: code=${otcData.code || '未知'}`)
         }
+      } else {
+        throw new Error(`OTC订单API HTTP ${otcResp.status}`)
       }
     } catch (e) {
-      console.error('[OKX OTC z0] 获取详细信息失败:', e.message)
-    }
-    
-    // 构建价格信息文本
-    let priceText = '━━━ 💰 USDT价格信息 ━━━\n\n'
-    priceText += `📊 产品：*${instId}*\n`
-    priceText += `💵 当前价格：*${price.toFixed(2)}* CNY/USDT\n\n`
-    
-    // 添加限价信息（OTC前几个价格）
-    if (priceLimitData) {
-      const buyLmt = parseFloat(priceLimitData.buyLmt || '0')
-      const sellLmt = parseFloat(priceLimitData.sellLmt || '0')
-      const enabled = priceLimitData.enabled !== false
+      console.error('[OKX OTC z0] 获取OTC订单失败:', e)
       
-      if (enabled && buyLmt > 0 && sellLmt > 0) {
-        priceText += '【📋 OTC限价】\n'
-        priceText += `💰 最高买价：${buyLmt.toFixed(2)} CNY\n`
-        priceText += `💵 最低卖价：${sellLmt.toFixed(2)} CNY\n`
-        const spread = sellLmt - buyLmt
-        const spreadPercent = ((spread / buyLmt) * 100).toFixed(2)
-        priceText += `📊 价差：${spread.toFixed(2)} CNY (${spreadPercent}%)\n\n`
-      }
-    }
-    
-    // 添加订单簿前几个价格（USDT OTC前几个价格）
-    if (booksData && booksData.bids && booksData.asks) {
-      priceText += '【📋 OTC订单簿价格（前5档）】\n'
-      
-      if (Array.isArray(booksData.asks) && booksData.asks.length > 0) {
-        priceText += '卖出价（卖单）：\n'
-        booksData.asks.slice(0, 5).forEach((ask, idx) => {
-          const askPrice = parseFloat(ask[0] || '0')
-          const askSize = parseFloat(ask[1] || '0')
-          if (askPrice > 0) {
-            priceText += `${idx + 1}. ${askPrice.toFixed(2)} CNY (量: ${askSize.toFixed(2)} USDT)\n`
-          }
+      // 备用方案1：使用ticker接口获取USDT-CNY详细信息
+      try {
+        const tickerUrl = 'https://www.okx.com/api/v5/market/ticker?instId=USDT-CNY'
+        console.log('[OKX OTC z0] 尝试获取ticker:', tickerUrl)
+        
+        const tickerResp = await fetch(tickerUrl, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8000)
         })
-      }
-      
-      if (Array.isArray(booksData.bids) && booksData.bids.length > 0) {
-        priceText += '\n买入价（买单）：\n'
-        booksData.bids.slice(0, 5).forEach((bid, idx) => {
-          const bidPrice = parseFloat(bid[0] || '0')
-          const bidSize = parseFloat(bid[1] || '0')
-          if (bidPrice > 0) {
-            priceText += `${idx + 1}. ${bidPrice.toFixed(2)} CNY (量: ${bidSize.toFixed(2)} USDT)\n`
+        
+        if (tickerResp.ok) {
+          const tickerData = await tickerResp.json()
+          if (tickerData.code === '0' && Array.isArray(tickerData.data) && tickerData.data.length > 0) {
+            const ticker = tickerData.data[0]
+            const bidPx = parseFloat(ticker.bidPx || '0')
+            const askPx = parseFloat(ticker.askPx || '0')
+            const last = parseFloat(ticker.last || '0')
+            const high24h = parseFloat(ticker.high24h || '0')
+            const low24h = parseFloat(ticker.low24h || '0')
+            const open24h = parseFloat(ticker.open24h || '0')
+            const vol24h = parseFloat(ticker.vol24h || '0')
+            const volCcy24h = parseFloat(ticker.volCcy24h || '0')
+            
+            let tickerText = '━━━ 💰 USDT价格信息 ━━━\n\n'
+            tickerText += `💵 买一价：*${bidPx.toFixed(2)}* CNY/USDT\n`
+            tickerText += `💵 卖一价：*${askPx.toFixed(2)}* CNY/USDT\n`
+            tickerText += `💵 最新价：*${last.toFixed(2)}* CNY/USDT\n`
+            
+            if (high24h > 0) tickerText += `📈 24h最高：${high24h.toFixed(2)} CNY\n`
+            if (low24h > 0) tickerText += `📉 24h最低：${low24h.toFixed(2)} CNY\n`
+            if (open24h > 0) {
+              tickerText += `📊 24h开盘：${open24h.toFixed(2)} CNY\n`
+              const change = last - open24h
+              const changePercent = ((change / open24h) * 100).toFixed(2)
+              tickerText += `📊 24h涨跌：${change >= 0 ? '+' : ''}${change.toFixed(2)} CNY (${changePercent >= 0 ? '+' : ''}${changePercent}%)\n`
+            }
+            if (vol24h > 0) tickerText += `💹 24h成交量：${vol24h.toFixed(2)} USDT\n`
+            if (volCcy24h > 0) tickerText += `💰 24h成交额：${volCcy24h.toFixed(2)} CNY\n`
+            
+            // 常用金额映射
+            const avgPrice = last > 0 ? last : bidPx
+            tickerText += `\n【常用金额映射】\n`
+            const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+            amounts.forEach(amount => {
+              const cny = (amount * avgPrice).toFixed(2)
+              tickerText += `• ${amount} USDT ≈ ${cny} CNY\n`
+            })
+            
+            await ctx.reply(tickerText, { parse_mode: 'Markdown' })
+            return
           }
-        })
+        }
+      } catch (e2) {
+        console.error('[OKX OTC z0] 获取ticker也失败:', e2)
       }
-      priceText += '\n'
-    }
-    
-    // 添加24小时详细信息
-    if (tickerData) {
-      priceText += '【📊 24小时统计】\n'
-      const high24h = parseFloat(tickerData.high24h || '0')
-      const low24h = parseFloat(tickerData.low24h || '0')
-      const open24h = parseFloat(tickerData.open24h || '0')
-      const last = parseFloat(tickerData.last || price)
-      const vol24h = parseFloat(tickerData.vol24h || '0')
-      const volCcy24h = parseFloat(tickerData.volCcy24h || '0')
       
-      if (high24h > 0) priceText += `📈 最高价：${high24h.toFixed(2)} CNY\n`
-      if (low24h > 0) priceText += `📉 最低价：${low24h.toFixed(2)} CNY\n`
-      if (open24h > 0) {
-        priceText += `📊 开盘价：${open24h.toFixed(2)} CNY\n`
-        const change = last - open24h
-        const changePercent = open24h > 0 ? ((change / open24h) * 100).toFixed(2) : '0.00'
-        const changeSign = change >= 0 ? '+' : ''
-        priceText += `📊 涨跌：${changeSign}${change.toFixed(2)} CNY (${changeSign}${changePercent}%)\n`
+      // 备用方案2：使用指数价格
+      const okxData = await fetchOKXOTCPrice()
+      if (okxData) {
+        const price = okxData.price
+        let fallbackText = '━━━ 💰 USDT价格信息 ━━━\n\n'
+        fallbackText += `💵 当前价格：*${price.toFixed(2)}* CNY/USDT\n\n`
+        
+        // 常用金额映射
+        fallbackText += '【常用金额映射】\n'
+        const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+        amounts.forEach(amount => {
+          const cny = (amount * price).toFixed(2)
+          fallbackText += `• ${amount} USDT ≈ ${cny} CNY\n`
+        })
+        
+        await ctx.reply(fallbackText, { parse_mode: 'Markdown' })
+        return
       }
-      if (vol24h > 0) priceText += `💹 成交量：${vol24h.toFixed(2)} USDT\n`
-      if (volCcy24h > 0) priceText += `💰 成交额：${volCcy24h.toFixed(2)} CNY\n`
-      priceText += '\n'
+      
+      // 所有方法都失败
+      return ctx.reply('❌ 无法获取OKX价格信息，请稍后重试。\n\n请检查服务器日志查看详细错误。')
     }
-    
-    priceText += `📅 更新时间：${updateTime}\n\n`
-    
-    // 常用金额映射
-    priceText += '【📋 常用金额映射】\n'
-    const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
-    amounts.forEach(amount => {
-      const cny = (amount * price).toFixed(2)
-      priceText += `• ${amount} USDT ≈ ${cny} CNY\n`
-    })
-    
-    await ctx.reply(priceText, { parse_mode: 'Markdown' })
   } catch (e) {
     console.error('[OKX OTC价格查询失败]', e)
     await ctx.reply('❌ 查询OKX OTC价格失败，请稍后重试。\n\n如果问题持续，请联系管理员。')
   }
 })
 
-// 🔥 详细OKX价格查询（z0标识）
-bot.hears(/^(详细OKX|OKX详情|OKX价格详情)$/i, async (ctx) => {
+// 🔥 详细USDT价格查询（获取更多USDT信息）
+bot.hears(/^(详细OKX|OKX详情|OKX价格详情|USDT详情|详细USDT)$/i, async (ctx) => {
   try {
-    await ctx.reply('🔄 正在获取OKX详细价格信息...')
+    await ctx.reply('🔄 正在获取USDT详细价格信息...')
     
-    // 获取多个产品的标记价格
-    const instIds = ['BTC-USDT', 'ETH-USDT', 'USDT-USDC']
-    const results = []
+    let detailText = '━━━ 📊 USDT详细价格信息 ━━━\n\n'
     
-    for (const instId of instIds) {
-      try {
-        const backendUrl = process.env.BACKEND_URL || ''
-        const apiUrl = backendUrl 
-          ? `${backendUrl}/api/okx/mark-price?instType=SPOT&instId=${instId}`
-          : `https://www.okx.com/api/v5/public/mark-price?instType=SPOT&instId=${instId}`
-        
-        const resp = await fetch(apiUrl)
-        if (resp.ok) {
-          const data = await resp.json()
-          if (data.code === '0' && Array.isArray(data.data) && data.data.length > 0) {
-            results.push(data.data[0])
+    // 获取USDT-CNY的ticker详细信息
+    try {
+      const tickerUrl = 'https://www.okx.com/api/v5/market/ticker?instId=USDT-CNY'
+      const tickerResp = await fetch(tickerUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(8000)
+      })
+      
+      if (tickerResp.ok) {
+        const tickerData = await tickerResp.json()
+        if (tickerData.code === '0' && Array.isArray(tickerData.data) && tickerData.data.length > 0) {
+          const ticker = tickerData.data[0]
+          const bidPx = parseFloat(ticker.bidPx || '0')
+          const askPx = parseFloat(ticker.askPx || '0')
+          const last = parseFloat(ticker.last || '0')
+          const high24h = parseFloat(ticker.high24h || '0')
+          const low24h = parseFloat(ticker.low24h || '0')
+          const open24h = parseFloat(ticker.open24h || '0')
+          const vol24h = parseFloat(ticker.vol24h || '0')
+          const volCcy24h = parseFloat(ticker.volCcy24h || '0')
+          const sodUtc0 = parseFloat(ticker.sodUtc0 || '0')
+          const sodUtc8 = parseFloat(ticker.sodUtc8 || '0')
+          const ts = parseInt(ticker.ts || '0')
+          
+          detailText += `【USDT-CNY 实时行情】\n`
+          detailText += `💵 买一价：*${bidPx.toFixed(2)}* CNY/USDT\n`
+          detailText += `💵 卖一价：*${askPx.toFixed(2)}* CNY/USDT\n`
+          detailText += `💵 最新价：*${last.toFixed(2)}* CNY/USDT\n\n`
+          
+          detailText += `【24小时统计】\n`
+          if (high24h > 0) detailText += `📈 24h最高：${high24h.toFixed(2)} CNY\n`
+          if (low24h > 0) detailText += `📉 24h最低：${low24h.toFixed(2)} CNY\n`
+          if (open24h > 0) {
+            detailText += `📊 24h开盘：${open24h.toFixed(2)} CNY\n`
+            const change = last - open24h
+            const changePercent = ((change / open24h) * 100).toFixed(2)
+            detailText += `📊 24h涨跌：${change >= 0 ? '+' : ''}${change.toFixed(2)} CNY (${changePercent >= 0 ? '+' : ''}${changePercent}%)\n`
           }
-        }
-      } catch (e) {
-        if (process.env.DEBUG_BOT === 'true') {
-          console.error(`[OKX详情] 获取${instId}失败`, e)
+          if (vol24h > 0) detailText += `💹 24h成交量：${vol24h.toFixed(2)} USDT\n`
+          if (volCcy24h > 0) detailText += `💰 24h成交额：${volCcy24h.toFixed(2)} CNY\n\n`
+          
+          if (sodUtc0 > 0) detailText += `🌍 UTC0开盘：${sodUtc0.toFixed(2)} CNY\n`
+          if (sodUtc8 > 0) detailText += `🌏 UTC8开盘：${sodUtc8.toFixed(2)} CNY\n`
+          if (ts > 0) {
+            const updateTime = new Date(ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+            detailText += `📅 更新时间：${updateTime}\n`
+          }
+          
+          // 常用金额映射
+          const avgPrice = last > 0 ? last : bidPx
+          if (avgPrice > 0) {
+            detailText += `\n【常用金额映射】\n`
+            const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+            amounts.forEach(amount => {
+              const cny = (amount * avgPrice).toFixed(2)
+              detailText += `• ${amount} USDT ≈ ${cny} CNY\n`
+            })
+          }
+          
+          await ctx.reply(detailText, { parse_mode: 'Markdown' })
+          return
         }
       }
+    } catch (e) {
+      console.error('[OKX详情] 获取ticker失败', e)
     }
     
-    if (results.length === 0) {
-      return ctx.reply('❌ 无法获取OKX详细价格信息，请稍后重试。')
+    // 备用：使用指数价格
+    const okxData = await fetchOKXOTCPrice()
+    if (okxData) {
+      detailText += `【USDT-CNY】\n`
+      detailText += `💵 当前价格：*${okxData.price.toFixed(2)}* CNY/USDT\n\n`
+      
+      detailText += `【常用金额映射】\n`
+      const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+      amounts.forEach(amount => {
+        const cny = (amount * okxData.price).toFixed(2)
+        detailText += `• ${amount} USDT ≈ ${cny} CNY\n`
+      })
+      
+      await ctx.reply(detailText, { parse_mode: 'Markdown' })
+      return
     }
     
-    let detailText = '━━━ 📊 USDT相关价格信息 ━━━\n\n'
-    
-    results.forEach((item, idx) => {
-      const price = parseFloat(item.markPx || '0')
-      const time = item.ts ? new Date(parseInt(item.ts)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
-      detailText += `【${item.instId}】\n`
-      detailText += `💰 标记价格：*${price.toFixed(2)}*\n`
-      detailText += `📅 更新时间：${time}\n`
-      if (idx < results.length - 1) detailText += '\n'
-    })
-    
-    await ctx.reply(detailText, { parse_mode: 'Markdown' })
+    return ctx.reply('❌ 无法获取USDT详细价格信息，请稍后重试。')
   } catch (e) {
     console.error('[OKX详细价格查询失败]', e)
     await ctx.reply('❌ 查询详细价格失败，请稍后重试')
