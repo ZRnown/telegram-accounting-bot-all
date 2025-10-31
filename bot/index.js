@@ -9,9 +9,10 @@ import dotenv from 'dotenv'
 
 import { Telegraf, Markup } from 'telegraf'
 import { HttpsProxyAgent } from 'https-proxy-agent'
-import { getChat, parseAmountAndRate, summarize, safeCalculate } from './state.js'
+import { getChat, parseAmountAndRate, summarize, safeCalculate, cleanupInactiveChats } from './state.js'
 import { prisma } from '../lib/db.ts'
 import { ensureDefaultFeatures } from './constants.ts'
+import { LRUCache } from './lru-cache.js'
 
 const BOT_TOKEN = process.env.BOT_TOKEN
 if (!BOT_TOKEN) {
@@ -38,6 +39,333 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
   telegram: agent ? { agent } : undefined,
 })
 
+// 🔥 地址验证功能 - 检测钱包地址
+async function handleAddressVerification(ctx) {
+  try {
+    const chatId = String(ctx.chat.id)
+    const text = ctx.message?.text || ''
+    
+    // 检测钱包地址格式（支持多种主流地址）
+    // TRC20: T开头，34位
+    // ERC20: 0x开头，42位
+    // BTC: 1/3/bc1开头
+    const addressPatterns = [
+      /\b(T[A-Za-z1-9]{33})\b/g,  // TRC20
+      /\b(0x[a-fA-F0-9]{40})\b/g, // ERC20
+      /\b([13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/g, // BTC Legacy
+      /\b(bc1[a-z0-9]{39,59})\b/g, // BTC SegWit
+    ]
+    
+    let detectedAddress = null
+    for (const pattern of addressPatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        detectedAddress = match[0]
+        break
+      }
+    }
+    
+    if (!detectedAddress) return false // 没有检测到地址
+    
+    // 检查是否启用了地址验证功能
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { addressVerificationEnabled: true }
+    })
+    
+    if (!setting?.addressVerificationEnabled) return false // 功能未启用
+    
+    const address = detectedAddress
+    const senderId = String(ctx.from.id)
+    const senderName = ctx.from.username ? `@${ctx.from.username}` : 
+                       (ctx.from.first_name || ctx.from.last_name) ? 
+                       `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() :
+                       senderId
+    
+    // 查询该地址的验证记录
+    const existingRecord = await prisma.addressVerification.findUnique({
+      where: { chatId_address: { chatId, address } }
+    })
+    
+    if (!existingRecord) {
+      // 第一次出现该地址
+      await prisma.addressVerification.create({
+        data: {
+          chatId,
+          address,
+          verifyCount: 1,
+          firstSenderId: senderId,
+          firstSenderName: senderName,
+          lastSenderId: senderId,
+          lastSenderName: senderName
+        }
+      })
+      
+      const replyText = `🔐 *此地址已加入安全验证*\n\n` +
+        `📍 验证地址：\`${address}\`\n` +
+        `🔢 验证次数：*1*\n` +
+        `👤 发送人：${senderName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification][first-time]', { chatId, address, senderId, senderName })
+      return true
+    }
+    
+    // 地址已存在 - 检查是否是同一个发送人
+    const isSameSender = existingRecord.lastSenderId === senderId
+    const newVerifyCount = existingRecord.verifyCount + 1
+    
+    await prisma.addressVerification.update({
+      where: { chatId_address: { chatId, address } },
+      data: {
+        verifyCount: newVerifyCount,
+        lastSenderId: senderId,
+        lastSenderName: senderName,
+        updatedAt: new Date()
+      }
+    })
+    
+    if (!isSameSender && newVerifyCount === 2) {
+      // 换了发送人，且是第2次（第一次被新人发送）
+      const replyText = `⚠️ *温馨提示*\n\n` +
+        `此地址和原地址发送人不一致，请小心交易！\n\n` +
+        `📍 地址：\`${address}\`\n` +
+        `👤 发送人ID：\`${senderId}\`\n` +
+        `👤 名称：${senderName}\n\n` +
+        `🔢 验证次数：*${newVerifyCount}*\n` +
+        `📤 上次发送人：${existingRecord.lastSenderName || existingRecord.lastSenderId}\n` +
+        `📤 本次发送人：${senderName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification][warning]', { chatId, address, oldSender: existingRecord.lastSenderId, newSender: senderId })
+      return true
+    }
+    
+    if (newVerifyCount >= 3 || isSameSender) {
+      // 正常验证（第3次及以后，或同一发送人）
+      const replyText = `✅ *地址验证通过*\n\n` +
+        `📍 验证地址：\`${address}\`\n` +
+        `🔢 验证次数：*${newVerifyCount}*\n` +
+        `📤 上次发送人：${existingRecord.lastSenderName || existingRecord.lastSenderId}\n` +
+        `📤 本次发送人：${senderName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification][verified]', { chatId, address, verifyCount: newVerifyCount })
+      return true
+    }
+    
+    return true // 🔥 修正：应该返回 true
+  } catch (error) {
+    console.error('[address-verification][error]', error)
+    return false
+  }
+}
+
+// 🔥 新的地址验证逻辑：每个群只确认一个地址
+async function handleAddressVerificationNew(ctx) {
+  try {
+    const chatId = String(ctx.chat.id)
+    const text = ctx.message?.text || ''
+    
+    // 检测钱包地址格式
+    const addressPatterns = [
+      /\b(T[A-Za-z1-9]{33})\b/g,  // TRC20
+      /\b(0x[a-fA-F0-9]{40})\b/g, // ERC20
+      /\b([13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/g, // BTC Legacy
+      /\b(bc1[a-z0-9]{39,59})\b/g, // BTC SegWit
+    ]
+    
+    let detectedAddress = null
+    for (const pattern of addressPatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        detectedAddress = match[0]
+        break
+      }
+    }
+    
+    if (!detectedAddress) return false
+    
+    // 检查是否启用了地址验证功能
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { addressVerificationEnabled: true }
+    })
+    
+    if (!setting?.addressVerificationEnabled) return false
+    
+    const address = detectedAddress
+    const senderId = String(ctx.from.id)
+    const senderName = ctx.from.username ? `@${ctx.from.username}` : 
+                       (ctx.from.first_name || ctx.from.last_name) ? 
+                       `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() :
+                       senderId
+    
+    // 查询该群的地址验证记录（每个群只有一条记录）
+    let record = await prisma.addressVerification.findUnique({
+      where: { chatId }
+    })
+    
+    if (!record) {
+      // 第一次发送地址
+      // 🔥 获取完整Telegram名称（first_name + last_name）
+      const fullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '') || senderName
+      
+      await prisma.addressVerification.create({
+        data: {
+          chatId,
+          confirmedAddress: address,
+          confirmedCount: 1,
+          lastSenderId: senderId,
+          lastSenderName: fullName
+        }
+      })
+      
+      const replyText = `🔐 *此地址已加入安全验证*\n\n` +
+        `📍 验证地址：\`${address}\`\n` +
+        `🔢 验证次数：*1*\n` +
+        `👤 发送人：${fullName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification-new][first-time]', { chatId, address, senderId })
+      return true
+    }
+    
+    // 已有记录
+    const confirmedAddr = record.confirmedAddress
+    const pendingAddr = record.pendingAddress
+    
+    if (address === confirmedAddr) {
+      // 发送的是已确认的地址
+      const newCount = record.confirmedCount + 1
+      await prisma.addressVerification.update({
+        where: { chatId },
+        data: {
+          confirmedCount: newCount,
+          lastSenderId: senderId,
+          lastSenderName: senderName,
+          updatedAt: new Date()
+        }
+      })
+      
+      const replyText = `✅ *地址验证通过*\n\n` +
+        `📍 验证地址：\`${address}\`\n` +
+        `🔢 验证次数：*${newCount}*\n` +
+        `📤 上次发送人：${record.lastSenderName || record.lastSenderId}\n` +
+        `📤 本次发送人：${senderName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification-new][confirmed-address]', { chatId, address, count: newCount })
+      return true
+    }
+    
+    if (address === pendingAddr) {
+      // 发送的是待确认的地址（第2次发送新地址）
+      const newCount = record.pendingCount + 1
+      
+      // 🔥 第2次发送待确认地址，将其升级为确认地址
+      await prisma.addressVerification.update({
+        where: { chatId },
+        data: {
+          confirmedAddress: address,
+          confirmedCount: newCount,
+          pendingAddress: null,
+          pendingCount: 0,
+          lastSenderId: senderId,
+          lastSenderName: senderName,
+          updatedAt: new Date()
+        }
+      })
+      
+      const replyText = `✅ *地址验证通过*\n\n` +
+        `📍 验证地址：\`${address}\`\n` +
+        `🔢 验证次数：*${newCount}*\n` +
+        `📤 上次发送人：${record.lastSenderName || record.lastSenderId}\n` +
+        `📤 本次发送人：${senderName}`
+      
+      await ctx.reply(replyText, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: ctx.message.message_id
+      })
+      
+      console.log('[address-verification-new][pending-confirmed]', { chatId, address, newCount })
+      return true
+    }
+    
+    // 🔥 发送的是新地址（不同于确认地址和待确认地址）
+    // 发出警告，并将新地址设为待确认地址
+    
+    // 获取之前的发送人信息（从记录中）
+    const previousSenderName = record.lastSenderName || record.lastSenderId || '未知'
+    
+    // 获取当前发送人的完整信息（Telegram名称，不是用户名）
+    const currentSenderFullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '') || senderName
+    
+    await prisma.addressVerification.update({
+      where: { chatId },
+      data: {
+        pendingAddress: address,
+        pendingCount: 1,
+        lastSenderId: senderId,
+        lastSenderName: currentSenderFullName,
+        updatedAt: new Date()
+      }
+    })
+    
+    // 🔥 新的详细警告格式
+    // 获取之前的发送人的完整名称（Telegram名称）
+    const previousSenderFullName = record.lastSenderName || previousSenderName || '未知'
+    
+    const replyText = `⚠️⚠️⚠️*温馨提示*⚠️⚠️⚠️\n\n` +
+      `❗️此地址和原地址不一样请小心交易❗️\n\n` +
+      `🆔还想隐藏: \`${senderId}\`\n` +
+      `🚹修改前名称：${previousSenderFullName}\n` +
+      `🚺修改后名称：${currentSenderFullName}\n\n` +
+      `📍新地址：\`${address}\`\n` +
+      `📍原地址：\`${confirmedAddr || '无'}\`\n\n` +
+      `🔢验证次数：0\n` +
+      `📤上次发送人：${previousSenderFullName}\n` +
+      `📤本次发送人：${currentSenderFullName}`
+    
+    await ctx.reply(replyText, {
+      parse_mode: 'Markdown',
+      reply_to_message_id: ctx.message.message_id
+    })
+    
+    console.log('[address-verification-new][warning-new-address]', { 
+      chatId, 
+      oldAddress: confirmedAddr, 
+      newAddress: address,
+      senderId 
+    })
+    return true
+    
+  } catch (error) {
+    console.error('[address-verification-new][error]', error)
+    return false
+  }
+}
+
 // 兜底：收到任何消息时，确保 chat 记录已 upsert 并绑定到当前机器人
 bot.on('message', async (ctx, next) => {
   try {
@@ -49,6 +377,15 @@ bot.on('message', async (ctx, next) => {
     const from = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.id
     const text = ctx.message?.text || ctx.message?.caption || '[非文本消息]'
     console.log('[message][recv]', { chatId, title, from, text })
+    
+    // 🔥 地址验证功能 - 优先处理（使用新版本逻辑）
+    if (ctx.message?.text && chatId.startsWith('-')) {
+      const handled = await handleAddressVerificationNew(ctx)
+      if (handled) {
+        // 地址验证已处理，不继续执行后续逻辑
+        return
+      }
+    }
     
     // 🔥 检查群组是否存在，如果不存在或未绑定，尝试补充白名单检测
     const existingChat = await prisma.chat.findUnique({ 
@@ -243,15 +580,52 @@ async function updateSettings(chatId, data) {
   await prisma.setting.update({ where: { chatId }, data })
 }
 
-function startOfDay(d = new Date()) {
+/**
+ * 获取群组的日切时间设置
+ * @param {string} chatId - 群组ID
+ * @returns {Promise<number>} 日切小时（0-23）
+ */
+async function getDailyCutoffHour(chatId) {
+  try {
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { dailyCutoffHour: true }
+    })
+    return setting?.dailyCutoffHour ?? 0
+  } catch (e) {
+    console.error('[getDailyCutoffHour][error]', e)
+    return 0  // 默认0点
+  }
+}
+
+/**
+ * 日切时间函数 - 支持自定义小时
+ * @param {Date} d - 基准日期
+ * @param {number} cutoffHour - 日切小时（0-23），默认0点
+ * @returns {Date} 当天日切时间点
+ */
+function startOfDay(d = new Date(), cutoffHour = 0) {
   const x = new Date(d)
-  x.setHours(0, 0, 0, 0)
+  x.setHours(cutoffHour, 0, 0, 0)
+  
+  // 如果当前时间在日切点之前，需要退到前一天的日切点
+  if (d.getHours() < cutoffHour) {
+    x.setDate(x.getDate() - 1)
+  }
+  
   return x
 }
-function endOfDay(d = new Date()) {
+
+function endOfDay(d = new Date(), cutoffHour = 0) {
   const x = new Date(d)
   x.setDate(x.getDate() + 1)
-  x.setHours(0, 0, 0, 0)
+  x.setHours(cutoffHour, 0, 0, 0)
+  
+  // 如果当前时间在日切点之前，endOfDay 也要相应调整
+  if (d.getHours() < cutoffHour) {
+    x.setDate(x.getDate() - 1)
+  }
+  
   return x
 }
 
@@ -266,14 +640,24 @@ async function getHistoricalNotDispatched(chatId, settings) {
       return { notDispatched: 0, notDispatchedUSDT: 0 }
     }
 
-    const today = startOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const today = startOfDay(new Date(), cutoffHour)
     // 🔥 查找今天之前所有账单（包括OPEN和CLOSED状态）
+    // 优化：只选择必要的字段，减少内存占用
     const historicalBills = await prisma.bill.findMany({
       where: { 
         chatId, 
         openedAt: { lt: today }  // 使用 openedAt 而不是 closedAt
       },
-      include: { items: true },
+      include: { 
+        items: {
+          select: {
+            type: true,
+            amount: true,
+            rate: true
+          }
+        }
+      },
       orderBy: { openedAt: 'asc' }
     })
 
@@ -323,8 +707,9 @@ async function getHistoricalNotDispatched(chatId, settings) {
 }
 
 async function deleteLastIncome(chatId) {
-  const gte = startOfDay()
-  const lt = endOfDay()
+  const cutoffHour = await getDailyCutoffHour(chatId)
+  const gte = startOfDay(new Date(), cutoffHour)
+  const lt = endOfDay(new Date(), cutoffHour)
   
   // 🔥 从 BillItem 表查询（新的存储方式）
   const bill = await prisma.bill.findFirst({
@@ -346,8 +731,9 @@ async function deleteLastIncome(chatId) {
 }
 
 async function deleteLastDispatch(chatId) {
-  const gte = startOfDay()
-  const lt = endOfDay()
+  const cutoffHour = await getDailyCutoffHour(chatId)
+  const gte = startOfDay(new Date(), cutoffHour)
+  const lt = endOfDay(new Date(), cutoffHour)
   
   // 🔥 从 BillItem 表查询（新的存储方式）
   const bill = await prisma.bill.findFirst({
@@ -418,9 +804,9 @@ function formatDuration(ms) {
   return parts.join('')
 }
 
-// Feature flag cache per chat (每个群组独立的功能开关缓存)
-const featureCache = new Map() // key: chatId, value: { expires: number, set: Set<string> }
-const FEATURE_TTL_MS = 0
+// 🔥 优化：使用 LRU 缓存替代无限增长的 Map
+const featureCache = new LRUCache(500) // 最多缓存 500 个群组的功能开关
+const FEATURE_TTL_MS = 60 * 60 * 1000 // 1小时过期，释放内存
 
 async function isFeatureEnabled(ctx, feature) {
   try {
@@ -429,11 +815,12 @@ async function isFeatureEnabled(ctx, feature) {
     
     const now = Date.now()
     const cached = featureCache.get(chatId)
-    if (FEATURE_TTL_MS > 0 && cached && cached.expires > now) {
+    if (cached && cached.expires > now) {
       return cached.set.has(feature)
     }
     
     // 🔥 从群组级别的功能开关读取（ChatFeatureFlag）
+    // 优化：只选择必要的字段，减少内存占用
     const flags = await prisma.chatFeatureFlag.findMany({ 
       where: { chatId }, 
       select: { feature: true, enabled: true } 
@@ -629,12 +1016,26 @@ async function formatSummary(ctx, chat, options = {}) {
   }
 
   // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
+  // 优化：只选择必要的字段，减少内存占用
   try {
-    const gte = startOfDay()
-    const lt = endOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
     const bill = await prisma.bill.findFirst({ 
       where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-      include: { items: true },
+      include: { 
+        items: {
+          select: {
+            type: true,
+            amount: true,
+            rate: true,
+            usdt: true,
+            replier: true,
+            operator: true,
+            createdAt: true
+          }
+        }
+      },
       orderBy: { openedAt: 'asc' }
     })
     
@@ -743,7 +1144,7 @@ async function formatSummary(ctx, chat, options = {}) {
   // 在累计模式下显示详细的历史和今日数据分解
   let historicalInfo = ''
   if (accountingMode === 'CARRY_OVER' && (previousNotDispatched !== 0 || previousNotDispatchedUSDT !== 0)) {
-    historicalInfo = `\n📊 数据分解：\n  今日入款：${formatMoney(s.totalIncome)}\n  历史未下发：${formatMoney(previousNotDispatched)} | ${formatMoney(previousNotDispatchedUSDT)} (USDT)`
+    historicalInfo = `\n账单拆解：\n今日入款：${formatMoney(s.totalIncome)}\n历史未下发：${formatMoney(previousNotDispatched)} | ${formatMoney(previousNotDispatchedUSDT)}U`
   }
 
   return [
@@ -763,9 +1164,9 @@ async function formatSummary(ctx, chat, options = {}) {
           `未下发：${formatMoney(s.notDispatched)}`,
         ]
       : [
-          `应下发：${formatMoney(s.shouldDispatch)} | ${formatMoney(s.shouldDispatchUSDT)} (USDT)`,
-          `已下发：${formatMoney(s.dispatched)} | ${formatMoney(s.dispatchedUSDT)} (USDT)`,
-          `未下发：${formatMoney(s.notDispatched)} | ${formatMoney(s.notDispatchedUSDT)} (USDT)`,
+          `应下发：${formatMoney(s.shouldDispatch)} | ${formatMoney(s.shouldDispatchUSDT)}U`,
+          `已下发：${formatMoney(s.dispatched)} | ${formatMoney(s.dispatchedUSDT)}U`,
+          `未下发：${formatMoney(s.notDispatched)} | ${formatMoney(s.notDispatchedUSDT)}U`,
         ]
     ),
   ].join('\n')
@@ -980,17 +1381,22 @@ bot.on('my_chat_member', async (ctx) => {
         }
       }
       
-      // 记录邀请信息（仅新加入时）
-      await prisma.inviteRecord.create({
-        data: {
-          chatId,
-          chatTitle: title,
-          inviterId,
-          inviterUsername,
-          botId,
-          autoAllowed
-        }
-      }).catch(e => console.error('[invite-record][error]', e))
+      // 🔥 记录邀请信息（仅新加入时）
+      try {
+        await prisma.inviteRecord.create({
+          data: {
+            chatId,
+            chatTitle: title,
+            inviterId,
+            inviterUsername,
+            botId,
+            autoAllowed
+          }
+        })
+        console.log('[invite-record] ✅ 创建成功', { chatId, inviterId, inviterUsername, autoAllowed })
+      } catch (e) {
+        console.error('[invite-record] ❌ 创建失败', { chatId, error: e.message })
+      }
       
       // Upsert chat，如果邀请人在白名单，自动设置 allowed=true
       const res = await prisma.chat.upsert({
@@ -1020,12 +1426,43 @@ bot.on('my_chat_member', async (ctx) => {
       await prisma.setting.upsert({
         where: { chatId },
         update: {},
-        create: { chatId },
+        create: { 
+          chatId,
+          addressVerificationEnabled: false  // 🔥 新建群默认不开启地址验证
+        },
       })
       
-      // 🔥 如果是白名单用户，自动开启所有功能开关
+      // 🔥 如果是白名单用户，自动开启所有功能开关（但不包括地址验证）
       if (autoAllowed) {
-        await ensureDefaultFeatures(chatId, prisma)
+        // 🔥 使用 force=true 确保所有功能都被启用
+        const featuresCreated = await ensureDefaultFeatures(chatId, prisma, true)
+        console.log('[my_chat_member] 功能开关已启用', { chatId, featuresCreated })
+        
+        // 🔥 再次确保所有功能开关都是启用状态（双重保险）
+        await prisma.chatFeatureFlag.updateMany({
+          where: { chatId },
+          data: { enabled: true }
+        }).catch((e) => {
+          console.error('[my_chat_member] 强制启用功能开关失败', { chatId, error: e.message })
+        })
+        
+        // 🔥 验证所有功能都已启用
+        const verifyFlags = await prisma.chatFeatureFlag.findMany({
+          where: { chatId },
+          select: { feature: true, enabled: true }
+        })
+        console.log('[my_chat_member] 功能开关验证', { 
+          chatId, 
+          total: verifyFlags.length, 
+          enabled: verifyFlags.filter(f => f.enabled).length,
+          disabled: verifyFlags.filter(f => !f.enabled).map(f => f.feature)
+        })
+        
+        // 🔥 确保地址验证保持关闭（新建群默认关闭）
+        await prisma.setting.update({
+          where: { chatId },
+          data: { addressVerificationEnabled: false }
+        }).catch(() => {})
         
         // 发送欢迎消息
         try {
@@ -1292,16 +1729,31 @@ bot.hears(/^查询工时$/i, async (ctx) => {
 
 // 纯数学表达式计算（不记账，只返回结果）
 // 支持：288-38, 2277+7327, 929-7272, 292*32, 3232/3232
+// 排除：纯数字（123）、=数字（=3232）
 bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
   const text = ctx.message.text.trim()
+  
+  // 🔥 排除纯数字
+  if (/^\d+$/.test(text)) {
+    return // 静默忽略纯数字
+  }
+  
+  // 🔥 排除 =数字 格式
+  if (/^=\d+/.test(text)) {
+    return // 静默忽略 =数字
+  }
+  
+  // 🔥 必须包含至少一个运算符（+、-、*、/）
+  if (!/[\+\-\*/]/.test(text)) {
+    return // 静默忽略不包含运算符的
+  }
   
   // 计算表达式
   const result = safeCalculate(text)
   
+  // 🔥 无效表达式静默失败，不提醒
   if (result === null) {
-    return ctx.reply('❌ 无效的数学表达式', {
-      reply_to_message_id: ctx.message.message_id
-    })
+    return // 静默忽略无效表达式
   }
   
   // 使用 reply 回复用户的消息：表达式=结果
@@ -1375,8 +1827,9 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   
   // 将入款写入当天 OPEN 账单的 BillItem
   try {
-    const gte = startOfDay()
-    const lt = endOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
     let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
     if (!bill) {
       bill = await prisma.bill.create({ data: { chatId, status: 'OPEN', openedAt: new Date(), savedAt: new Date() } })
@@ -1444,8 +1897,9 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   
   // 将下发写入当天 OPEN 账单的 BillItem
   try {
-    const gte = startOfDay()
-    const lt = endOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
     let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
     if (!bill) {
       bill = await prisma.bill.create({ data: { chatId, status: 'OPEN', openedAt: new Date(), savedAt: new Date() } })
@@ -1480,8 +1934,9 @@ bot.hears(/^保存账单$/i, async (ctx) => {
   const chatId = await ensureDbChat(ctx)
   // 关闭当天 OPEN 账单
   try {
-    const gte = startOfDay()
-    const lt = endOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
     const openBill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
     if (openBill) {
       await prisma.bill.update({ where: { id: openBill.id }, data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() } })
@@ -1508,10 +1963,24 @@ bot.hears(/^删除账单$/i, async (ctx) => {
   
   const chatId = await ensureDbChat(ctx)
   
+  // 获取当前记账模式（在 try 块外部，用于回复消息）
+  let isCarryOver = false
+  try {
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { accountingMode: true }
+    })
+    isCarryOver = settings?.accountingMode === 'CARRY_OVER'
+  } catch (e) {
+    console.error('获取记账模式失败', e)
+  }
+  
   // 🔥 不仅清空内存，还要删除数据库中当天的记录
   try {
-    const gte = startOfDay()
-    const lt = endOfDay()
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
+    
     // 找到当天的 OPEN 状态账单
     const bill = await prisma.bill.findFirst({
       where: { chatId, status: 'OPEN', openedAt: { gte, lt } }
@@ -1522,12 +1991,33 @@ bot.hears(/^删除账单$/i, async (ctx) => {
       // 删除账单本身
       await prisma.bill.delete({ where: { id: bill.id } })
     }
+    
+    // 🔥 累计模式下，删除所有历史账单（累计是单次账单的累计）
+    if (isCarryOver) {
+      // 删除今天之前的所有账单（包括CLOSED状态）
+      const historicalBills = await prisma.bill.findMany({
+        where: { 
+          chatId, 
+          openedAt: { lt: gte }  // 今天之前的所有账单
+        },
+        select: { id: true }
+      })
+      
+      if (historicalBills.length > 0) {
+        const billIds = historicalBills.map(b => b.id)
+        // 删除所有历史账单的明细
+        await prisma.billItem.deleteMany({ where: { billId: { in: billIds } } })
+        // 删除所有历史账单
+        await prisma.bill.deleteMany({ where: { id: { in: billIds } } })
+        console.log('[删除账单][累计模式] 已删除历史账单', { chatId, count: historicalBills.length })
+      }
+    }
   } catch (e) {
     console.error('删除数据库账单失败', e)
   }
   
   chat.current = { incomes: [], dispatches: [] }
-  await ctx.reply('当前账单已清空（包括内存和数据库）。')
+  await ctx.reply('当前账单已清空（包括内存和数据库）。' + (isCarryOver ? '\n累计模式：历史未下发数据已清零。' : ''))
 })
 
 // 显示账单 或 +0
@@ -1885,6 +2375,131 @@ bot.hears(/^设置标题\s+(.+)/i, async (ctx) => {
   await ctx.reply(`标题已设置为：${chat.headerText}`, buildInlineKb(ctx))
 })
 
+// 🔥 开启所有功能（管理员/白名单用户）
+bot.hears(/^开启所有功能$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    // 检查是否是白名单用户
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  // 🔥 开启所有功能开关
+  const featuresCreated = await ensureDefaultFeatures(chatId, prisma, true)
+  
+  // 🔥 确保所有功能都是启用状态
+  await prisma.chatFeatureFlag.updateMany({
+    where: { chatId },
+    data: { enabled: true }
+  })
+  
+  await ctx.reply('✅ 已开启所有功能开关！', buildInlineKb(ctx))
+  console.log('[开启所有功能]', { chatId, featuresCreated })
+})
+
+// 🔥 关闭所有功能（管理员/白名单用户）
+bot.hears(/^关闭所有功能$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    // 检查是否是白名单用户
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  // 🔥 关闭所有功能开关
+  await prisma.chatFeatureFlag.updateMany({
+    where: { chatId },
+    data: { enabled: false }
+  })
+  
+  await ctx.reply('⭕ 已关闭所有功能开关！', buildInlineKb(ctx))
+  console.log('[关闭所有功能]', { chatId })
+})
+
+// 🔥 开启地址验证（管理员/白名单用户）
+bot.hears(/^开启地址验证$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    // 检查是否是白名单用户
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  // 更新地址验证开关
+  await prisma.setting.upsert({
+    where: { chatId },
+    update: { addressVerificationEnabled: true },
+    create: { chatId, addressVerificationEnabled: true }
+  })
+  
+  await ctx.reply('✅ 已开启地址验证功能！', buildInlineKb(ctx))
+  console.log('[开启地址验证]', { chatId })
+})
+
+// 🔥 关闭地址验证（管理员/白名单用户）
+bot.hears(/^关闭地址验证$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    // 检查是否是白名单用户
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  // 更新地址验证开关
+  await prisma.setting.upsert({
+    where: { chatId },
+    update: { addressVerificationEnabled: false },
+    create: { chatId, addressVerificationEnabled: false }
+  })
+  
+  await ctx.reply('⭕ 已关闭地址验证功能！', buildInlineKb(ctx))
+  console.log('[关闭地址验证]', { chatId })
+})
+
 // 使用说明（内联菜单）
 bot.action('help', async (ctx) => {
   try { await ctx.answerCbQuery() } catch {}
@@ -1947,6 +2562,13 @@ bot.action('help', async (ctx) => {
     '• 撤销入款 / 撤销下发 - 撤销操作',
     '• 佣金模式 - 佣金统计（高级）',
     '• 上课/下课 - 禁言管理（需管理员）',
+    '',
+    '【⚙️ 功能开关】（管理员/白名单用户）',
+    '• 开启所有功能 - 启用所有功能开关',
+    '• 关闭所有功能 - 关闭所有功能开关',
+    '• 开启地址验证 - 启用钱包地址验证功能',
+    '• 关闭地址验证 - 关闭钱包地址验证功能',
+    '💡 适用于机器人只发送通告的群，与其他机器人互不打扰',
     '',
     '【⚙️ 群组独立设置】',
     '• 每个群组独立的功能开关',
@@ -2046,9 +2668,55 @@ bot.launch().then(async () => {
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
   
-  // 设置定时任务：每小时执行一次（3600000毫秒 = 1小时）
+  // 🔥 优化：定时任务 - 每小时更新汇率
   setInterval(updateAllRealtimeRates, 3600000)
   console.log('[定时任务] 实时汇率自动更新已启动，每小时更新一次')
+  
+  // 🔥 新增：内存优化定时任务
+  // 1. 每小时清理不活跃的聊天
+  setInterval(() => {
+    try {
+      cleanupInactiveChats()
+    } catch (e) {
+      console.error('[定时任务] 清理不活跃聊天失败:', e)
+    }
+  }, 3600000) // 1小时
+  
+  // 2. 每6小时清理过期的功能开关缓存
+  setInterval(() => {
+    try {
+      const now = Date.now()
+      let cleaned = 0
+      for (const [chatId, cache] of featureCache.cache.entries()) {
+        if (cache.expires && cache.expires < now) {
+          featureCache.delete(chatId)
+          cleaned++
+        }
+      }
+      if (cleaned > 0) {
+        console.log(`[内存清理] 清理了 ${cleaned} 个过期的功能开关缓存`)
+      }
+    } catch (e) {
+      console.error('[定时任务] 清理功能开关缓存失败:', e)
+    }
+  }, 6 * 3600000) // 6小时
+  
+  // 3. 每12小时打印内存使用情况
+  const logMemoryUsage = () => {
+    const used = process.memoryUsage()
+    console.log('[内存监控]', {
+      rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+      heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+      external: `${Math.round(used.external / 1024 / 1024)}MB`,
+      featureCacheSize: featureCache.size
+    })
+  }
+  logMemoryUsage() // 启动时打印一次
+  setInterval(logMemoryUsage, 12 * 3600000) // 12小时
+  
+  console.log('[内存优化] 定期清理任务已启动')
+  
   const commands = [
     { command: 'help', description: '使用说明（命令列表）' },
     { command: 'show', description: '显示账单' },
@@ -2063,6 +2731,24 @@ bot.launch().then(async () => {
     await bot.telegram.setMyCommands(commands)
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
+    
+    // 🔥 更新机器人描述
+    try {
+      await bot.telegram.setMyDescription(
+        '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证、多群组独立设置。\n\n' +
+        '主要功能：\n' +
+        '• 基础记账：+金额、下发金额、显示账单\n' +
+        '• 数学计算：支持+100-50、+100*2等表达式\n' +
+        '• 地址验证：检测钱包地址变更并提醒\n' +
+        '• 功能开关：开启所有功能/关闭所有功能\n' +
+        '• 多群组独立配置：每个群组独立设置\n\n' +
+        '发送 /help 查看完整使用说明。'
+      )
+      console.log('已更新机器人描述')
+    } catch (e) {
+      console.error('设置机器人描述失败（可能需要通过BotFather手动设置）：', e)
+    }
+    
     console.log('已设置 Telegram 菜单命令：', commands.map(c => c.command).join(', '))
   } catch (e) {
     console.error('设置 Telegram 菜单命令失败：', e)

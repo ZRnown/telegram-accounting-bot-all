@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -40,6 +41,35 @@ export function DashboardHeader({
   isAdmin,
 }: DashboardHeaderProps) {
   const router = useRouter()
+  const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
+
+  // 🔥 从统计API获取实际的日期范围（考虑日切时间）
+  useEffect(() => {
+    if (!chatId) return
+    
+    const fetchDateRange = async () => {
+      try {
+        const params = new URLSearchParams()
+        params.set('date', currentDate.toISOString().slice(0, 10))
+        params.set('chatId', chatId)
+        
+        const res = await fetch(`/api/stats/today?${params.toString()}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.dateRangeStart && data.dateRangeEnd) {
+            setDateRange({
+              start: new Date(data.dateRangeStart),
+              end: new Date(data.dateRangeEnd)
+            })
+          }
+        }
+      } catch (e) {
+        console.error('获取日期范围失败', e)
+      }
+    }
+    
+    fetchDateRange()
+  }, [currentDate, chatId])
 
   const formatDateTime = (date: Date) => {
     return date.toLocaleString("zh-CN", {
@@ -53,12 +83,19 @@ export function DashboardHeader({
     })
   }
 
-  const startDate = new Date(currentDate)
-  startDate.setHours(0, 0, 0, 0)
+  // 🔥 使用从API获取的日期范围，或使用默认值
+  const startDate = dateRange?.start || (() => {
+    const d = new Date(currentDate)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })()
 
-  const endDate = new Date(currentDate)
-  endDate.setDate(endDate.getDate() + 1)
-  endDate.setHours(0, 0, 0, 0)
+  const endDate = dateRange?.end || (() => {
+    const d = new Date(currentDate)
+    d.setDate(d.getDate() + 1)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })()
 
   const handleExport = () => {
     exportToExcel(currentDate, chatId)

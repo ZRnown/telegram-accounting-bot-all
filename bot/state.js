@@ -1,11 +1,23 @@
 // In-memory state store per chat
-// This can be replaced with a real DB later (e.g., Prisma + SQLite/Postgres)
+// 优化：添加 LRU 缓存和大小限制，防止内存泄漏
 
-const bots = new Map()
+import { LRUCache, limitMapSize, limitArraySize } from './lru-cache.js'
+
+// 配置项：内存优化
+const MAX_BOTS = 10 // 最多支持的机器人数量
+const MAX_CHATS_PER_BOT = 1000 // 每个机器人最多缓存的聊天数量
+const MAX_USER_ID_CACHE = 500 // 每个聊天最多缓存的用户ID映射
+const MAX_COMMISSIONS = 100 // 每个聊天最多缓存的佣金记录
+const MAX_HISTORY = 30 // 最多保留的历史账单数量
+const MAX_INCOMES = 1000 // 当前账单最多保留的入款记录
+const MAX_DISPATCHES = 1000 // 当前账单最多保留的下发记录
+
+// 使用 LRU 缓存存储 bot
+const bots = new LRUCache(MAX_BOTS)
 
 function ensureBot(botId) {
   if (!bots.has(botId)) {
-    bots.set(botId, new Map())
+    bots.set(botId, new LRUCache(MAX_CHATS_PER_BOT))
   }
   return bots.get(botId)
 }
@@ -14,7 +26,7 @@ function createInitialChatState() {
   return {
     operators: new Set(),
     operatorIds: new Set(), // Set<number>
-    userIdByUsername: new Map(), // Map<@username, userId>
+    userIdByUsername: new Map(), // Map<@username, userId> - 会定期清理
     everyoneAllowed: false,
     headerText: '',
     fixedRate: null, // number | null
@@ -23,17 +35,18 @@ function createInitialChatState() {
     displayMode: 1, // 1 | 2 | 3
     rmbMode: false,
     commissionMode: false,
-    commissions: new Map(), // username -> number
+    commissions: new Map(), // username -> number - 会定期清理
     muteMode: false,
     workStartedAt: null, // Date | null
     workTotalMs: 0, // number
+    lastActivityAt: Date.now(), // 最后活动时间（用于清理不活跃的聊天）
     // current working bill (not yet saved)
     current: {
-      incomes: [], // [{amount: number, rate: number, createdAt: Date, replier?: string, operator?: string}]
-      dispatches: [], // [{amount: number, usdt: number, createdAt: Date, replier?: string, operator?: string}]
+      incomes: [], // 会定期限制大小
+      dispatches: [], // 会定期限制大小
     },
     // saved bills history (array of snapshots)
-    history: [],
+    history: [], // 会定期限制大小
   }
 }
 
@@ -42,7 +55,46 @@ function getChat(botId, chatId) {
   if (!botChats.has(chatId)) {
     botChats.set(chatId, createInitialChatState())
   }
-  return botChats.get(chatId)
+  const chat = botChats.get(chatId)
+  
+  // 更新最后活动时间
+  chat.lastActivityAt = Date.now()
+  
+  // 定期清理大型数据结构，防止内存泄漏
+  limitMapSize(chat.userIdByUsername, MAX_USER_ID_CACHE)
+  limitMapSize(chat.commissions, MAX_COMMISSIONS)
+  chat.history = limitArraySize(chat.history, MAX_HISTORY)
+  chat.current.incomes = limitArraySize(chat.current.incomes, MAX_INCOMES)
+  chat.current.dispatches = limitArraySize(chat.current.dispatches, MAX_DISPATCHES)
+  
+  return chat
+}
+
+/**
+ * 清理不活跃的聊天（超过24小时未活动）
+ */
+function cleanupInactiveChats() {
+  const now = Date.now()
+  const INACTIVE_THRESHOLD = 24 * 60 * 60 * 1000 // 24小时
+  
+  let cleaned = 0
+  for (const [botId, botChats] of bots.cache.entries()) {
+    for (const [chatId, chat] of botChats.cache.entries()) {
+      if (now - chat.lastActivityAt > INACTIVE_THRESHOLD) {
+        // 清理大型数据结构
+        chat.userIdByUsername.clear()
+        chat.commissions.clear()
+        chat.current.incomes = []
+        chat.current.dispatches = []
+        chat.history = []
+        cleaned++
+      }
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`[memory-cleanup] 清理了 ${cleaned} 个不活跃的聊天`)
+  }
 }
 
 /**
@@ -171,4 +223,4 @@ function summarize(chat, options = {}) {
   }
 }
 
-export { getChat, parseAmountAndRate, calcUSDT, summarize, safeCalculate }
+export { getChat, parseAmountAndRate, calcUSDT, summarize, safeCalculate, cleanupInactiveChats }

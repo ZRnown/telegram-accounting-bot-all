@@ -68,6 +68,8 @@ model Setting {
   everyoneAllowed           Boolean        @default(false)
   accountingMode            AccountingMode @default(DAILY_RESET)
   featureWarningMode        String         @default("always") // "always", "once", "daily", "silent"
+  addressVerificationEnabled Boolean       @default(false) // 地址验证功能开关
+  dailyCutoffHour           Int            @default(0) // 日切时间（小时，0-23），默认0点
   chat                      Chat           @relation(fields: [chatId], references: [id])
 }
 
@@ -174,6 +176,21 @@ model FeatureWarningLog {
   warnedAt  DateTime @default(now())
   
   @@unique([chatId, feature])
+  @@index([chatId])
+}
+
+model AddressVerification {
+  id                  String   @id @default(cuid())
+  chatId              String   @unique // 每个群只有一条记录
+  confirmedAddress    String?  // 当前确认的地址（发送过>=2次）
+  confirmedCount      Int      @default(0) // 确认地址的发送次数
+  pendingAddress      String?  // 待确认的地址（新地址，发送过1次）
+  pendingCount        Int      @default(0) // 待确认地址的发送次数
+  lastSenderId        String?  // 最后发送人ID
+  lastSenderName      String?  // 最后发送人名称
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
   @@index([chatId])
 }
 

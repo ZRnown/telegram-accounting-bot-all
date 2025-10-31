@@ -13,6 +13,8 @@ interface ChatSettings {
   settings: {
     accountingMode: AccountingMode
     featureWarningMode?: string
+    addressVerificationEnabled?: boolean
+    dailyCutoffHour?: number
   }
 }
 
@@ -35,6 +37,8 @@ export default function ChatSettingsPage() {
   // 设置表单状态
   const [accountingMode, setAccountingMode] = useState<AccountingMode>('DAILY_RESET')
   const [featureWarningMode, setFeatureWarningMode] = useState<string>('always')
+  const [addressVerificationEnabled, setAddressVerificationEnabled] = useState<boolean>(false)
+  const [dailyCutoffHour, setDailyCutoffHour] = useState<number>(0)
   
   // 操作人管理状态
   const [newOperator, setNewOperator] = useState('')
@@ -59,6 +63,8 @@ export default function ChatSettingsPage() {
         // 初始化表单
         setAccountingMode(data.settings.accountingMode)
         setFeatureWarningMode(data.settings.featureWarningMode || 'always')
+        setAddressVerificationEnabled(data.settings.addressVerificationEnabled || false)
+        setDailyCutoffHour(data.settings.dailyCutoffHour ?? 0)
       } else {
         alert('加载设置失败')
       }
@@ -90,6 +96,8 @@ export default function ChatSettingsPage() {
       const payload = {
         accountingMode,
         featureWarningMode,
+        addressVerificationEnabled,
+        dailyCutoffHour,
       }
 
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`, {
@@ -277,6 +285,109 @@ export default function ChatSettingsPage() {
 
             <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded text-sm">
               💡 提示：如果群内有多个机器人分工协作（如本机器人负责禁言公告，其他机器人负责记账），建议设置为"静默模式"避免频繁提示
+            </div>
+          </div>
+
+          {/* 地址验证设置 */}
+          <div className="bg-white border rounded-lg p-6">
+            <h2 className="text-lg font-semibold mb-1">🔐 地址验证功能</h2>
+            <p className="text-sm text-gray-600 mb-4">自动识别和验证群内发送的钱包地址，防止地址被篡改</p>
+            
+            <label className="flex items-center space-x-3 p-4 border rounded cursor-pointer hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={addressVerificationEnabled}
+                onChange={(e) => setAddressVerificationEnabled(e.target.checked)}
+                className="w-5 h-5"
+              />
+              <div className="flex-1">
+                <div className="font-medium">
+                  {addressVerificationEnabled ? '✅ 已启用' : '⭕ 未启用'}
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {addressVerificationEnabled 
+                    ? '自动监控群内发送的钱包地址，验证发送人信息' 
+                    : '点击启用地址验证功能'}
+                </div>
+              </div>
+            </label>
+
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded text-sm space-y-2">
+              <div className="font-medium text-blue-900">💡 功能说明：</div>
+              <div className="text-blue-700">
+                • 支持识别 TRC20、ERC20、BTC 等主流钱包地址
+              </div>
+              <div className="text-blue-700">
+                • 第一次发送地址时，记录发送人信息
+              </div>
+              <div className="text-blue-700">
+                • 同一地址换人发送时，会发出警告提示
+              </div>
+              <div className="text-blue-700">
+                • 同一地址第3次发送后，恢复正常验证
+              </div>
+            </div>
+
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm">
+              ⚠️ 警告示例：当检测到同一地址换人发送时，机器人会回复：<br/>
+              <span className="font-mono text-xs mt-1 block text-amber-900">
+                "⚠️ 温馨提示：此地址和原地址发送人不一致，请小心交易！"
+              </span>
+            </div>
+          </div>
+
+          {/* 日切时间设置 */}
+          <div className="bg-white border rounded-lg p-6">
+            <h2 className="text-lg font-semibold mb-1">⏰ 日切时间设置</h2>
+            <p className="text-sm text-gray-600 mb-4">设置每天的日终结算时间点（凌晨之前的交易算前一天）</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  日切时间（小时）
+                </label>
+                <select
+                  value={dailyCutoffHour}
+                  onChange={(e) => setDailyCutoffHour(Number(e.target.value))}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value={0}>00:00（凌晨零点 - 默认）</option>
+                  <option value={1}>01:00（凌晨一点）</option>
+                  <option value={2}>02:00（凌晨两点）</option>
+                  <option value={3}>03:00（凌晨三点）</option>
+                  <option value={4}>04:00（凌晨四点）</option>
+                  <option value={5}>05:00（凌晨五点）</option>
+                  <option value={6}>06:00（早上六点）</option>
+                  <option value={7}>07:00（早上七点）</option>
+                  <option value={8}>08:00（早上八点）</option>
+                  <option value={9}>09:00（早上九点）</option>
+                  <option value={10}>10:00（上午十点）</option>
+                  <option value={11}>11:00（上午十一点）</option>
+                  <option value={12}>12:00（中午十二点）</option>
+                </select>
+              </div>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded text-sm space-y-2">
+                <div className="font-medium text-blue-900">💡 使用说明：</div>
+                <div className="text-blue-700">
+                  • <strong>默认 00:00</strong>：凌晨0点日切，当天0:00-23:59的交易算当天
+                </div>
+                <div className="text-blue-700">
+                  • <strong>设置 06:00</strong>：早上6点日切，当天6:00-次日5:59的交易算当天
+                </div>
+                <div className="text-blue-700">
+                  • <strong>设置 08:00</strong>：早上8点日切，当天8:00-次日7:59的交易算当天
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm">
+                <div className="font-medium text-amber-900 mb-1">⚠️ 示例场景：</div>
+                <div className="text-amber-700">
+                  如果设置日切时间为 <strong>早上 6:00</strong>，那么：<br/>
+                  • 今天凌晨 02:00 的交易 → 算<strong>昨天</strong><br/>
+                  • 今天早上 08:00 的交易 → 算<strong>今天</strong>
+                </div>
+              </div>
             </div>
           </div>
 

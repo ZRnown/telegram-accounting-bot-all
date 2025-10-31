@@ -13,6 +13,15 @@ export async function GET(req: NextRequest) {
       prisma.bill.count({ where }),
       prisma.bill.findMany({
         where,
+        // 🔥 内存优化：只选择必要的字段
+        select: {
+          id: true,
+          chatId: true,
+          status: true,
+          openedAt: true,
+          closedAt: true,
+          savedAt: true,
+        },
         orderBy: { savedAt: 'desc' },
         skip: (page - 1) * size,
         take: size,

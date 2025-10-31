@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 
 export async function GET() {
   try {
+    // 🔥 内存优化：减少查询字段，移除 featureFlags（已废弃，改用 chatFeatureFlags）
+    // 减少 chats 字段查询深度
     const bots = await prisma.bot.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
@@ -12,8 +14,9 @@ export async function GET() {
         enabled: true,
         createdAt: true,
         updatedAt: true,
-        chats: { select: { id: true, status: true } },
-        featureFlags: { select: { feature: true, enabled: true } },
+        _count: {
+          select: { chats: true }
+        },
       },
     })
     return Response.json({ items: bots })

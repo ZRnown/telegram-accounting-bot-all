@@ -5,13 +5,23 @@ import { prisma } from '@/lib/db'
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const size = parseInt(searchParams.get('size') || '20')
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
+    const size = Math.min(100, Math.max(1, parseInt(searchParams.get('size') || '20')))
     
     const skip = (page - 1) * size
 
+    // 🔥 优化：只选择必要字段，并行查询
     const [records, total] = await Promise.all([
       prisma.inviteRecord.findMany({
+        select: {
+          id: true,
+          chatId: true,
+          chatTitle: true,
+          inviterId: true,
+          inviterUsername: true,
+          autoAllowed: true,
+          createdAt: true
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: size

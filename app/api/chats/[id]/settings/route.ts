@@ -17,6 +17,8 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         feePercent: setting?.feePercent ?? 0,
         accountingMode: setting?.accountingMode ?? 'DAILY_RESET',
         featureWarningMode: setting?.featureWarningMode ?? 'always',
+        addressVerificationEnabled: setting?.addressVerificationEnabled ?? false,
+        dailyCutoffHour: setting?.dailyCutoffHour ?? 0,
       },
     })
   } catch (e) {
@@ -36,6 +38,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       feePercent?: number | null
       accountingMode?: 'DAILY_RESET' | 'CARRY_OVER'
       featureWarningMode?: string
+      addressVerificationEnabled?: boolean
+      dailyCutoffHour?: number
     }
 
     // Update Chat.title if provided
@@ -59,6 +63,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.feePercent === 'number') patchData.feePercent = body.feePercent
     if (body.accountingMode === 'DAILY_RESET' || body.accountingMode === 'CARRY_OVER') patchData.accountingMode = body.accountingMode
     if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) patchData.featureWarningMode = body.featureWarningMode
+    if (typeof body.addressVerificationEnabled === 'boolean') patchData.addressVerificationEnabled = body.addressVerificationEnabled
+    if (typeof body.dailyCutoffHour === 'number' && body.dailyCutoffHour >= 0 && body.dailyCutoffHour <= 23) patchData.dailyCutoffHour = body.dailyCutoffHour
 
     if (Object.keys(patchData).length === 0) return new Response('Bad Request', { status: 400 })
 

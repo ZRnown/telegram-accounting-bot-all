@@ -1,15 +1,31 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 
-function startOfDay(d: Date) {
+/**
+ * 日切时间函数 - 支持自定义小时
+ */
+function startOfDay(d: Date, cutoffHour: number = 0) {
   const x = new Date(d)
-  x.setHours(0, 0, 0, 0)
+  x.setHours(cutoffHour, 0, 0, 0)
+  
+  // 如果当前时间在日切点之前，需要退到前一天的日切点
+  if (d.getHours() < cutoffHour) {
+    x.setDate(x.getDate() - 1)
+  }
+  
   return x
 }
-function endOfDay(d = new Date()) {
+
+function endOfDay(d: Date, cutoffHour: number = 0) {
   const x = new Date(d)
   x.setDate(x.getDate() + 1)
-  x.setHours(0, 0, 0, 0)
+  x.setHours(cutoffHour, 0, 0, 0)
+  
+  // 如果当前时间在日切点之前，endOfDay 也要相应调整
+  if (d.getHours() < cutoffHour) {
+    x.setDate(x.getDate() - 1)
+  }
+  
   return x
 }
 
@@ -39,8 +55,6 @@ export async function GET(req: NextRequest) {
     const chatIdParam = searchParams.get('chatId')
     const billIndexParam = searchParams.get('bill')
     const now = dateStr ? new Date(dateStr) : new Date()
-    const gte = startOfDay(now)
-    const lt = endOfDay(now)
 
     // pick chatId: prefer latest bill if not explicitly provided
     let chatId = chatIdParam || ''
@@ -66,17 +80,55 @@ export async function GET(req: NextRequest) {
         incomeByOperator: {},
         incomeByRate: {},
         dispatchByReplier: {},
+        dateRangeStart: new Date(),
+        dateRangeEnd: new Date(),
       })
     }
 
+    // 🔥 获取日切时间设置
     const [settings, bills] = await Promise.all([
-      prisma.setting.findUnique({ where: { chatId } }),
-      prisma.bill.findMany({ where: { chatId, openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } }),
+      prisma.setting.findUnique({
+        where: { chatId },
+        select: {
+          feePercent: true,
+          fixedRate: true,
+          realtimeRate: true,
+          accountingMode: true,
+          dailyCutoffHour: true,
+        }
+      }),
+      // 暂时使用默认日切时间获取bills，后面会重新查询
+      (async () => { return [] as any[] })()
     ])
 
-    const billIds = bills.map((b: any) => b.id)
+    // 🔥 使用日切时间计算日期范围
+    const cutoffHour = settings?.dailyCutoffHour ?? 0
+    const gte = startOfDay(now, cutoffHour)
+    const lt = endOfDay(now, cutoffHour)
+
+    // 🔥 重新查询账单（使用正确的日切时间）
+    const billsData = await prisma.bill.findMany({
+      where: { chatId, openedAt: { gte, lt } },
+      select: { id: true, openedAt: true, status: true },
+      orderBy: { openedAt: 'asc' }
+    })
+
+    const billIds = billsData.map((b: any) => b.id)
     const billItems = billIds.length
-      ? await prisma.billItem.findMany({ where: { billId: { in: billIds } }, orderBy: { createdAt: 'asc' } })
+      ? await prisma.billItem.findMany({
+          where: { billId: { in: billIds } },
+          select: {
+            billId: true,
+            type: true,
+            amount: true,
+            rate: true,
+            usdt: true,
+            replier: true,
+            operator: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' }
+        })
       : []
     const feePercent = settings?.feePercent ?? 0
     const fixedRate = settings?.fixedRate ?? null
@@ -96,13 +148,15 @@ export async function GET(req: NextRequest) {
         if (lastIncWithRate?.rate) rateB = Number(lastIncWithRate.rate)
       }
       const feeB = (tIncome * feePercent) / 100
-      const shouldB = Math.max(tIncome - feeB, 0)
+      // 🔥 修复：支持负数，不强制为0
+      const shouldB = tIncome - feeB
       const toUSDTB = (n: number) => (rateB ? Number((n / rateB).toFixed(2)) : 0)
       const incomeRecordsSaved = incs.map((i: any) => {
         const gross = Number(i.amount) || 0
-        const net = Math.max(gross - (gross * (feePercent || 0)) / 100, 0)
+        // 🔥 修复：支持负数，不强制为0
+        const net = gross - (gross * (feePercent || 0)) / 100
         const r = i.rate ? Number(i.rate) : rateB
-        const usdt = r ? Number((net / r).toFixed(2)) : 0
+        const usdt = r ? Number((Math.abs(net) / r).toFixed(2)) * (net < 0 ? -1 : 1) : 0
         return {
           time: formatTimeLocal(i.createdAt as Date),
           amount: `${net}${r ? ` / ${r}=${usdt}` : ''}`,
@@ -126,8 +180,9 @@ export async function GET(req: NextRequest) {
         shouldDispatchUSDT: toUSDTB(shouldB),
         dispatched: tDisp,
         dispatchedUSDT: toUSDTB(tDisp),
-        notDispatched: Math.max(shouldB - tDisp, 0),
-        notDispatchedUSDT: toUSDTB(Math.max(shouldB - tDisp, 0)),
+        // 🔥 修复：支持负数，不强制为0
+        notDispatched: shouldB - tDisp,
+        notDispatchedUSDT: toUSDTB(shouldB - tDisp),
       })
       billsRecords.push({ incomeRecords: incomeRecordsSaved, dispatchRecords: dispatchRecordsSaved })
     }
@@ -181,10 +236,18 @@ export async function GET(req: NextRequest) {
       try {
         const yGte = startOfDay(addDays(gte, -1))
         const yLt = startOfDay(gte)
-        const yBills = await prisma.bill.findMany({ where: { chatId, openedAt: { gte: yGte, lt: yLt } }, orderBy: { openedAt: 'asc' } })
+        // 🔥 内存优化：只选择必要的字段
+        const yBills = await prisma.bill.findMany({
+          where: { chatId, openedAt: { gte: yGte, lt: yLt } },
+          select: { id: true },
+          orderBy: { openedAt: 'asc' }
+        })
         const yBillIds = yBills.map((b: any) => b.id)
         const yItems = yBillIds.length
-          ? await prisma.billItem.findMany({ where: { billId: { in: yBillIds } } })
+          ? await prisma.billItem.findMany({
+              where: { billId: { in: yBillIds } },
+              select: { type: true, amount: true }
+            })
           : []
         const yIncs = yItems.filter((x: any) => x.type === 'INCOME')
         const yDisps = yItems.filter((x: any) => x.type === 'DISPATCH')
@@ -217,6 +280,10 @@ export async function GET(req: NextRequest) {
       incomeByOperator,
       incomeByRate,
       dispatchByReplier,
+      // 🔥 返回实际的日期范围（考虑日切时间）
+      dateRangeStart: gte,
+      dateRangeEnd: lt,
+      dailyCutoffHour: cutoffHour,
     })
   } catch (e) {
     console.error(e)

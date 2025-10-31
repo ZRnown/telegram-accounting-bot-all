@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useEffect, useState } from "react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface StatisticsCardsProps {
   currentDate: Date
@@ -11,6 +12,24 @@ interface StatisticsCardsProps {
 export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
+  const [settings, setSettings] = useState<any>(null)
+
+  // 🔥 加载群组设置（判断是否累计模式）
+  useEffect(() => {
+    if (!chatId) return
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
+        if (res.ok) {
+          const json = await res.json()
+          setSettings(json.settings)
+        }
+      } catch (e) {
+        console.error('加载设置失败', e)
+      }
+    }
+    load()
+  }, [chatId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -40,12 +59,16 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     }
     load()
     return () => controller.abort()
-  }, [currentDate, pick])
+  }, [currentDate, pick, chatId])
 
   // 重置选择（已在加载数据时设定为最新一笔）
   useEffect(() => { /* no-op: pick set on load */ }, [currentDate])
 
   if (!data) return null
+  
+  // 🔥 判断是否累计模式
+  const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+  const hasCarryOver = data.carryOver && data.carryOver > 0
 
   const view = (() => {
     if (!data) return null as any
@@ -60,9 +83,26 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">今日账单统计</CardTitle>
+        <CardTitle className="text-lg flex items-center gap-2">
+          今日账单统计
+          {/* 🔥 累计模式提醒 */}
+          {isCumulativeMode && (
+            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">
+              累计模式
+            </span>
+          )}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* 🔥 累计模式提醒 */}
+        {isCumulativeMode && hasCarryOver && (
+          <Alert className="bg-amber-50 border-amber-200">
+            <AlertDescription className="text-sm text-amber-800">
+              📊 当前为累计模式，账单包含历史未下发金额。查看下方"账单拆解"了解详情。
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">当日第</span>
@@ -124,6 +164,29 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
             <div className="text-sm text-orange-600">{view.notDispatchedUSDT.toFixed(2)} USDT</div>
           </div>
         </div>
+        
+        {/* 🔥 累计模式账单拆解 */}
+        {isCumulativeMode && hasCarryOver && (
+          <div className="pt-2 border-t border-slate-200">
+            <div className="text-sm font-medium text-slate-700 mb-2">📊 账单拆解（累计模式）</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                <div className="text-xs text-slate-600 mb-1">今日入款</div>
+                <div className="font-semibold text-slate-900">{view.totalIncome.toLocaleString()}</div>
+                <div className="text-xs text-green-600">当天新增的入款金额</div>
+              </div>
+              
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <div className="text-xs text-slate-600 mb-1">历史未下发</div>
+                <div className="font-semibold text-slate-900">{(data.carryOver || 0).toLocaleString()}</div>
+                <div className="text-xs text-amber-600">昨天及之前累计的未下发</div>
+              </div>
+            </div>
+            <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
+              💡 提示：应下发 = 今日入款 + 历史未下发
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
