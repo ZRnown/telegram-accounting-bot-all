@@ -932,9 +932,25 @@ async function fetchRealtimeRateUSDTtoCNY() {
   return tertiary ? Number(tertiary.toFixed(2)) : null // 🔥 保留2位小数
 }
 
-function buildInlineKb(ctx) {
-  const rows = [[Markup.button.callback('使用说明', 'help')]]
+async function buildInlineKb(ctx) {
+  const rows = []
   const chatId = String(ctx?.chat?.id || '')
+  
+  // 🔥 根据设置决定是否显示"使用说明"按钮
+  try {
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { hideHelpButton: true }
+    })
+    
+    if (!setting?.hideHelpButton) {
+      rows.push([Markup.button.callback('使用说明', 'help')])
+    }
+  } catch (e) {
+    // 如果查询失败，默认显示
+    rows.push([Markup.button.callback('使用说明', 'help')])
+  }
+  
   if (isPublicUrl(BACKEND_URL)) {
     try {
       const u = new URL(BACKEND_URL)
@@ -1182,7 +1198,7 @@ bot.start(async (ctx) => {
     await ctx.reply(
       `开始记账，使用 +金额 / -金额 记录入款，使用 "下发金额" 记录下发。输入 "显示账单" 查看汇总。\n\n` +
       `👤 您的ID：\`${userId}\` 用户名：${username}`,
-      { ...buildInlineKb(ctx), parse_mode: 'Markdown' }
+      { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' }
     )
   }
 })
@@ -1197,7 +1213,7 @@ bot.hears(/^开始记账$/i, async (ctx) => {
   await ctx.reply(
     `开始记账，使用 +金额 / -金额 记录入款，使用 "下发金额" 记录下发。输入 "显示账单" 查看汇总。\n\n` +
     `👤 您的ID：\`${userId}\` 用户名：${username}`,
-    { ...buildInlineKb(ctx), parse_mode: 'Markdown' }
+    { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' }
   )
 })
 
@@ -1829,12 +1845,16 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
     usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
   }
   
+  // 🔥 获取操作人用户名（带@），用于保存到数据库
+  const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+  const replierUsername = getUsername(ctx) // 不带@，用于显示
+  
   chat.current.incomes.push({
     amount: amountRMB,
     rate: parsed.rate || undefined,
     createdAt: new Date(),
-    replier: getUsername(ctx),
-    operator: getUsername(ctx),
+    replier: replierUsername,
+    operator: operatorUsername || replierUsername, // 🔥 优先使用带@的用户名
   })
   
   // 将入款写入当天 OPEN 账单的 BillItem
@@ -1851,18 +1871,22 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
       type: 'INCOME',
       amount: Number(amountRMB),
       rate: rate ?? undefined,
-      usdt: usdt,
-      replier: getUsername(ctx) || undefined,
-      operator: getUsername(ctx) || undefined,
+      usdt: usdt ?? undefined,
+      replier: replierUsername || undefined,
+      operator: operatorUsername || replierUsername || undefined, // 🔥 优先保存带@的用户名，用于操作人分类统计
       createdAt: new Date(),
     } })
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[记账][入款已保存]', { chatId, billId: bill.id, amount: amountRMB, usdt })
+    }
   } catch (e) {
     console.error('写入 BillItem(INCOME) 失败', e)
+    // 🔥 即使保存失败，也继续执行（避免影响用户体验）
   }
   
   // 发送完整账单（不发送确认消息）
   const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-  await ctx.reply(summary, { ...buildInlineKb(ctx), parse_mode: 'Markdown' })
+  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
 })
 
 // 下发xxxx 或 下发100u（USDT）或 下发-xxxx （支持负数）
@@ -1899,12 +1923,16 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
     amountRMB = rate ? Number((usdtValue * rate).toFixed(2)) : 0
   }
   
+  // 🔥 获取操作人用户名（带@），用于保存到数据库
+  const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+  const replierUsername = getUsername(ctx) // 不带@，用于显示
+  
   chat.current.dispatches.push({ 
     amount: amountRMB, 
     usdt: usdtValue, 
     createdAt: new Date(), 
-    replier: getUsername(ctx), 
-    operator: getUsername(ctx) 
+    replier: replierUsername,
+    operator: operatorUsername || replierUsername, // 🔥 优先使用带@的用户名
   })
   
   // 将下发写入当天 OPEN 账单的 BillItem
@@ -1922,15 +1950,19 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
       amount: Number(amountRMB),
       rate: rate ?? undefined,
       usdt: Number(usdtValue),
-      replier: getUsername(ctx) || undefined,
-      operator: getUsername(ctx) || undefined,
+      replier: replierUsername || undefined,
+      operator: operatorUsername || replierUsername || undefined, // 🔥 优先保存带@的用户名，用于操作人分类统计
       createdAt: new Date(),
     } })
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[记账][下发已保存]', { chatId, billId: bill.id, amount: amountRMB, usdt: usdtValue })
+    }
   } catch (e) {
     console.error('写入 BillItem(DISPATCH) 失败', e)
+    // 🔥 即使保存失败，也继续执行（避免影响用户体验）
   }
   const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
-  await ctx.reply(summary, { ...buildInlineKb(ctx), parse_mode: 'Markdown' })
+  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
 })
 
 // 保存账单：把 current 推入 history，并清空 current
@@ -2037,7 +2069,7 @@ bot.hears(/^(显示账单|\+0)$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-  await ctx.reply(summary, { ...buildInlineKb(ctx), parse_mode: 'Markdown' })
+  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
 })
 
 // 显示历史账单（简要）
@@ -2129,7 +2161,191 @@ bot.hears(/^(显示实时汇率|z0|Z0)$/i, async (ctx) => {
   await ctx.reply(`当前汇率：${rate ?? '未设置'}`)
 })
 
-// 设置操作人 @xxx / 删除操作人 @xxx / 设置所有人 / 显示操作人
+// 🔥 添加操作员方式一：添加操作员 @AAA @BBB（支持多个用户名）
+bot.hears(/^添加操作员\s+/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const text = ctx.message.text || ''
+  // 提取所有@用户名
+  const mentions = text.match(/@([A-Za-z0-9_]{5,})/g) || []
+  
+  if (mentions.length === 0) {
+    return ctx.reply('❌ 未检测到 @用户名，请使用：添加操作员 @用户名1 @用户名2')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  const added = []
+  
+  for (const mention of mentions) {
+    chat.operators.add(mention)
+    try {
+      await prisma.operator.upsert({
+        where: { chatId_username: { chatId, username: mention } },
+        update: {},
+        create: { chatId, username: mention },
+      })
+      added.push(mention)
+    } catch (e) {
+      console.error('保存操作人失败', e)
+    }
+  }
+  
+  await ctx.reply(`✅ 已添加操作人：${added.join(' ')}`)
+})
+
+// 🔥 添加操作员方式二：回复指定人消息：添加操作员（对方无用户名的情况）
+bot.on('text', async (ctx, next) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return next()
+  
+  const text = ctx.message.text?.trim()
+  if (!text || !/^添加操作员$/i.test(text)) return next()
+  
+  // 必须回复消息
+  const replyTo = ctx.message.reply_to_message
+  if (!replyTo || !replyTo.from) return next()
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
+  const targetUser = replyTo.from.username 
+    ? `@${replyTo.from.username}` 
+    : `@user_${replyTo.from.id}` // 无用户名时使用临时标识
+  
+  const chatId = await ensureDbChat(ctx)
+  chat.operators.add(targetUser)
+  
+  try {
+    await prisma.operator.upsert({
+      where: { chatId_username: { chatId, username: targetUser } },
+      update: {},
+      create: { chatId, username: targetUser },
+    })
+    await ctx.reply(`✅ 已添加操作人：${targetUser}`)
+  } catch (e) {
+    console.error('保存操作人失败', e)
+    await ctx.reply('❌ 添加操作人失败')
+  }
+})
+
+// 🔥 添加操作员方式三：添加操作员 @所有人（群内所有人都可以记账）
+bot.hears(/^添加操作员\s+@所有人$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  chat.everyoneAllowed = true
+  await updateSettings(chatId, { everyoneAllowed: true })
+  await ctx.reply('✅ 已开启：所有人可操作（群内所有人都可以记账）')
+})
+
+// 🔥 删除操作员方式一：删除操作员 @AAA @BBB（支持多个用户名）
+bot.hears(/^删除操作员\s+/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const text = ctx.message.text || ''
+  // 提取所有@用户名
+  const mentions = text.match(/@([A-Za-z0-9_]{5,})/g) || []
+  
+  if (mentions.length === 0) {
+    return ctx.reply('❌ 未检测到 @用户名，请使用：删除操作员 @用户名1 @用户名2')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  const deleted = []
+  
+  for (const mention of mentions) {
+    chat.operators.delete(mention)
+    try {
+      await prisma.operator.delete({ where: { chatId_username: { chatId, username: mention } } })
+      deleted.push(mention)
+    } catch (e) {
+      // ignore if not exist
+    }
+  }
+  
+  if (deleted.length > 0) {
+    await ctx.reply(`✅ 已删除操作人：${deleted.join(' ')}`)
+  } else {
+    await ctx.reply('❌ 未找到要删除的操作人')
+  }
+})
+
+// 🔥 删除操作员方式二：回复指定人消息：删除操作员（对方无用户名的情况）
+bot.on('text', async (ctx, next) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return next()
+  
+  const text = ctx.message.text?.trim()
+  if (!text || !/^删除操作员$/i.test(text)) return next()
+  
+  // 必须回复消息
+  const replyTo = ctx.message.reply_to_message
+  if (!replyTo || !replyTo.from) return next()
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
+  const targetUser = replyTo.from.username 
+    ? `@${replyTo.from.username}` 
+    : `@user_${replyTo.from.id}` // 无用户名时使用临时标识
+  
+  const chatId = await ensureDbChat(ctx)
+  chat.operators.delete(targetUser)
+  
+  try {
+    await prisma.operator.delete({ where: { chatId_username: { chatId, username: targetUser } } })
+    await ctx.reply(`✅ 已删除操作人：${targetUser}`)
+  } catch (e) {
+    // ignore if not exist
+    await ctx.reply('❌ 未找到该操作人')
+  }
+})
+
+// 🔥 保留旧的设置操作人命令（兼容性）
 bot.hears(/^设置操作人\s+@/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
@@ -2147,21 +2363,6 @@ bot.hears(/^设置操作人\s+@/i, async (ctx) => {
     console.error('保存操作人失败', e)
   }
   await ctx.reply(`已设置操作人：${mention}`)
-})
-
-bot.hears(/^删除操作人\s+@/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const mention = extractMention(ctx.message.text)
-  if (!mention) return ctx.reply('未检测到 @用户名')
-  chat.operators.delete(mention)
-  const chatId = await ensureDbChat(ctx)
-  try {
-    await prisma.operator.delete({ where: { chatId_username: { chatId, username: mention } } })
-  } catch (e) {
-    // ignore if not exist
-  }
-  await ctx.reply(`已删除操作人：${mention}`)
 })
 
 bot.hears(/^设置所有人$/i, async (ctx) => {
@@ -2201,8 +2402,8 @@ bot.hears(/^显示模式[123456]$/i, async (ctx) => {
   await ctx.reply(`显示模式已切换为 ${mode}（${modeDesc[mode] || '未知模式'}）`)
 })
 
-// 撤销 / 取消：可指定 入款/下发，不指定默认撤销最近一条入款，否则尝试撤销下发
-bot.hears(/^(撤销|取消)(?:\s*(入款|下发))?$/i, async (ctx) => {
+// 🔥 撤销入款：撤销最近一条入款记录
+bot.hears(/^撤销入款$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
@@ -2212,35 +2413,20 @@ bot.hears(/^(撤销|取消)(?:\s*(入款|下发))?$/i, async (ctx) => {
   }
   
   const chatId = await ensureDbChat(ctx)
-  const m = ctx.message.text.match(/^(撤销|取消)(?:\s*(入款|下发))?$/i)
-  const type = m && m[2] ? m[2] : null
-  let deleted = null
-  if (!type || type === '入款') {
-    deleted = await deleteLastIncome(chatId)
-    if (!deleted && !type) {
-      deleted = await deleteLastDispatch(chatId)
-    }
-  } else if (type === '下发') {
-    deleted = await deleteLastDispatch(chatId)
-  }
-  // 更新内存 current（仅今天的数据可能在 current）
+  const deleted = await deleteLastIncome(chatId)
+  
   if (deleted) {
-    const isIncome = 'rate' in deleted
-    if (isIncome) {
-      const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-      if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
-    } else {
-      const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-      if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
-    }
-    await ctx.reply(`已撤销最近一条${('rate' in deleted) ? '入款' : '下发'}记录：${deleted.amount}`)
+    // 更新内存 current
+    const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+    if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
+    await ctx.reply(`✅ 已撤销最近一条入款记录：${deleted.amount}`)
   } else {
-    await ctx.reply('未找到可撤销的记录')
+    await ctx.reply('❌ 未找到可撤销的入款记录')
   }
 })
 
-// 撤销记账（需回复记账消息）：尝试根据回复的内容自动判断类型，若失败则撤销最近一条
-bot.hears(/^撤销记账$/i, async (ctx) => {
+// 🔥 撤销下发：撤销最近一条下发记录
+bot.hears(/^撤销下发$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
@@ -2250,28 +2436,96 @@ bot.hears(/^撤销记账$/i, async (ctx) => {
   }
   
   const chatId = await ensureDbChat(ctx)
-  const reply = ctx.message.reply_to_message?.text || ''
-  let deleted = null
-  if (/已下发/.test(reply) || /\(USDT\)/i.test(reply)) {
-    deleted = await deleteLastDispatch(chatId)
-  } else if (/\/.\d+=/.test(reply) || /已入款/.test(reply)) {
-    deleted = await deleteLastIncome(chatId)
-  }
-  if (!deleted) {
-    deleted = await deleteLastIncome(chatId)
-  }
+  const deleted = await deleteLastDispatch(chatId)
+  
   if (deleted) {
-    const isIncome = 'rate' in deleted
-    if (isIncome) {
-      const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-      if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
-    } else {
-      const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-      if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
-    }
-    await ctx.reply(`已撤销${('rate' in deleted) ? '入款' : '下发'}：${deleted.amount}`)
+    // 更新内存 current
+    const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+    if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
+    await ctx.reply(`✅ 已撤销最近一条下发记录：${deleted.amount}`)
   } else {
-    await ctx.reply('未找到可撤销的记录，请确认已记录账单，或在指令后加 入款/下发 指定类型。')
+    await ctx.reply('❌ 未找到可撤销的下发记录')
+  }
+})
+
+// 🔥 指定删除：回复指定记录消息，输入"删除"（需要在其他text监听器之前）
+bot.use(async (ctx, next) => {
+  // 只处理文本消息
+  if (!ctx.message?.text) return next()
+  
+  const text = ctx.message.text?.trim()
+  if (!text || !/^删除$/i.test(text)) return next()
+  
+  const chat = ensureChat(ctx)
+  if (!chat) return next()
+  
+  // 必须回复消息（且不是回复操作员相关消息）
+  const replyTo = ctx.message.reply_to_message
+  if (!replyTo) return next()
+  
+  // 如果回复的是操作员相关消息，不处理（让删除操作员命令处理）
+  const replyText = replyTo.text || ''
+  if (/操作人|操作员/.test(replyText)) return next()
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    return ctx.reply('⚠️ 您没有删除权限。只有管理员或已添加的操作人可以操作。')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  // 🔥 尝试从回复的消息中提取记录信息
+  // 格式可能是：时间 金额 / 汇率=USDTU 用户名 或 时间 金额 (USDT)U
+  const cutoffHour = await getDailyCutoffHour(chatId)
+  const gte = startOfDay(new Date(), cutoffHour)
+  const lt = endOfDay(new Date(), cutoffHour)
+  
+  const bill = await prisma.bill.findFirst({
+    where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+    include: { items: { orderBy: { createdAt: 'desc' } } }
+  })
+  
+  if (!bill || !bill.items.length) {
+    return ctx.reply('❌ 未找到对应的记录')
+  }
+  
+  // 🔥 尝试匹配最近几条记录（最多匹配10条）
+  let matchedItem = null
+  for (const item of bill.items.slice(0, 10)) {
+    const itemAmount = Math.abs(Number(item.amount) || 0)
+    // 检查回复文本中是否包含该金额（允许小数点误差）
+    if (replyText.includes(String(Math.round(itemAmount))) || 
+        replyText.includes(String(itemAmount.toFixed(2)))) {
+      matchedItem = item
+      break
+    }
+  }
+  
+  if (!matchedItem) {
+    // 如果没匹配到，删除最近一条记录
+    matchedItem = bill.items[0]
+  }
+  
+  // 删除记录
+  try {
+    await prisma.billItem.delete({ where: { id: matchedItem.id } })
+    
+    // 更新内存
+    const isIncome = matchedItem.type === 'INCOME'
+    if (isIncome) {
+      const deletedAmount = Number(matchedItem.amount)
+      const idx = chat.current.incomes.findIndex(r => Math.abs(r.amount - deletedAmount) < 1e-9)
+      if (idx >= 0) chat.current.incomes.splice(idx, 1)
+    } else {
+      const deletedAmount = Number(matchedItem.amount)
+      const idx = chat.current.dispatches.findIndex(r => Math.abs(r.amount - deletedAmount) < 1e-9)
+      if (idx >= 0) chat.current.dispatches.splice(idx, 1)
+    }
+    
+    await ctx.reply(`✅ 已删除${isIncome ? '入款' : '下发'}记录：${matchedItem.amount}`)
+  } catch (e) {
+    console.error('删除记录失败', e)
+    await ctx.reply('❌ 删除记录失败')
   }
 })
 
@@ -2384,7 +2638,7 @@ bot.hears(/^设置标题\s+(.+)/i, async (ctx) => {
   chat.headerText = m[1].trim()
   const chatId = await ensureDbChat(ctx)
   await updateSettings(chatId, { headerText: chat.headerText })
-  await ctx.reply(`标题已设置为：${chat.headerText}`, buildInlineKb(ctx))
+  await ctx.reply(`标题已设置为：${chat.headerText}`, await buildInlineKb(ctx))
 })
 
 // 🔥 开启所有功能（管理员/白名单用户）
@@ -2419,7 +2673,7 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   featureCache.delete(chatId)
   
-  await ctx.reply('✅ 已开启所有功能开关！', buildInlineKb(ctx))
+  await ctx.reply('✅ 已开启所有功能开关！', await buildInlineKb(ctx))
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[开启所有功能]', { chatId, featuresCreated })
   }
@@ -2454,7 +2708,7 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   featureCache.delete(chatId)
   
-  await ctx.reply('⭕ 已关闭所有功能开关！', buildInlineKb(ctx))
+  await ctx.reply('⭕ 已关闭所有功能开关！', await buildInlineKb(ctx))
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[关闭所有功能]', { chatId })
   }
@@ -2487,7 +2741,7 @@ bot.hears(/^开启地址验证$/i, async (ctx) => {
     create: { chatId, addressVerificationEnabled: true }
   })
   
-  await ctx.reply('✅ 已开启地址验证功能！', buildInlineKb(ctx))
+  await ctx.reply('✅ 已开启地址验证功能！', await buildInlineKb(ctx))
   console.log('[开启地址验证]', { chatId })
 })
 
@@ -2518,7 +2772,7 @@ bot.hears(/^关闭地址验证$/i, async (ctx) => {
     create: { chatId, addressVerificationEnabled: false }
   })
   
-  await ctx.reply('⭕ 已关闭地址验证功能！', buildInlineKb(ctx))
+  await ctx.reply('⭕ 已关闭地址验证功能！', await buildInlineKb(ctx))
   console.log('[关闭地址验证]', { chatId })
 })
 
@@ -2572,16 +2826,20 @@ bot.action('help', async (ctx) => {
     '• 双显模式 - RMB | USDT',
     '',
     '【👥 权限管理】',
-    '• 设置操作人 @用户名 - 添加权限',
-    '• 删除操作人 @用户名 - 移除权限',
-    '• 设置所有人 - 所有人可操作',
+    '添加操作员方式一：添加操作员 @AAA @BBB',
+    '添加操作员方式二：回复指定人消息：添加操作员（对方无用户名）',
+    '添加操作员方式三：添加操作员 @所有人（群内所有人都可以记账）',
+    '删除操作员方式一：删除操作员 @AAA @BBB',
+    '删除操作员方式二：回复指定人消息：删除操作员（对方无用户名）',
     '• 显示操作人 - 查看列表',
     '💡 需禁用Privacy Mode或设为管理员',
     '💡 管理员和操作人可记账！',
     '',
     '【🔧 其他功能】',
     '• 设置标题 xxx - 自定义账单标题',
-    '• 撤销入款 / 撤销下发 - 撤销操作',
+    '• 撤销入款 - 撤销最近一条入款记录',
+    '• 撤销下发 - 撤销最近一条下发记录',
+    '• 删除 - 回复指定记录消息，输入"删除"可删除该记录',
     '• 佣金模式 - 佣金统计（高级）',
     '• 上课/下课 - 禁言管理（需管理员）',
     '',
@@ -2613,7 +2871,7 @@ bot.action('help', async (ctx) => {
     '• 设置汇率 7.2 - 设置你的汇率',
     '• 设置操作人 @xxx - 添加员工权限',
   ].join('\n')
-  await ctx.reply(help, buildInlineKb(ctx))
+  await ctx.reply(help, await buildInlineKb(ctx))
 })
 
 // 本地开发：发送文本链接

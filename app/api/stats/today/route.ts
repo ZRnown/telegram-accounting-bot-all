@@ -221,11 +221,14 @@ export async function GET(req: NextRequest) {
       if (i.operator) incomeByOperator[i.operator] = (incomeByOperator[i.operator] || 0) + amount
       if (rate) incomeByRate[rate.toString()] = (incomeByRate[rate.toString()] || 0) + amount
     })
-    const dispatchByReplier: Record<string, number> = {}
+    // 🔥 改为按操作人（operator）分类统计
+    const dispatchByOperator: Record<string, number> = {}
     const selDisps = selItems.filter((x: any) => x.type === 'DISPATCH')
     selDisps.forEach((d: any) => {
       const amount = Number(d.amount) || 0
-      if (d.replier) dispatchByReplier[d.replier] = (dispatchByReplier[d.replier] || 0) + amount
+      // 优先使用operator，如果没有则使用replier作为后备
+      const operator = d.operator || d.replier || '未知'
+      if (operator) dispatchByOperator[operator] = (dispatchByOperator[operator] || 0) + amount
     })
 
     const selected = selectedBillAgg
@@ -279,7 +282,7 @@ export async function GET(req: NextRequest) {
       incomeByReplier,
       incomeByOperator,
       incomeByRate,
-      dispatchByReplier,
+      dispatchByOperator, // 🔥 改为按操作人分类
       // 🔥 返回实际的日期范围（考虑日切时间）
       dateRangeStart: gte,
       dateRangeEnd: lt,

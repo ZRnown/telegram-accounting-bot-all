@@ -15,6 +15,7 @@ interface ChatSettings {
     featureWarningMode?: string
     addressVerificationEnabled?: boolean
     dailyCutoffHour?: number
+    hideHelpButton?: boolean
   }
 }
 
@@ -39,6 +40,7 @@ export default function ChatSettingsPage() {
   const [featureWarningMode, setFeatureWarningMode] = useState<string>('always')
   const [addressVerificationEnabled, setAddressVerificationEnabled] = useState<boolean>(false)
   const [dailyCutoffHour, setDailyCutoffHour] = useState<number>(0)
+  const [hideHelpButton, setHideHelpButton] = useState<boolean>(false)
   
   // 操作人管理状态
   const [newOperator, setNewOperator] = useState('')
@@ -65,6 +67,7 @@ export default function ChatSettingsPage() {
         setFeatureWarningMode(data.settings.featureWarningMode || 'always')
         setAddressVerificationEnabled(data.settings.addressVerificationEnabled || false)
         setDailyCutoffHour(data.settings.dailyCutoffHour ?? 0)
+        setHideHelpButton(data.settings.hideHelpButton ?? false)
       } else {
         alert('加载设置失败')
       }
@@ -98,6 +101,7 @@ export default function ChatSettingsPage() {
         featureWarningMode,
         addressVerificationEnabled,
         dailyCutoffHour,
+        hideHelpButton,
       }
 
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`, {
@@ -437,6 +441,35 @@ export default function ChatSettingsPage() {
               <span className="ml-2 font-medium">
                 {accountingMode === 'DAILY_RESET' ? '🔄 每日清零' : '📈 累计模式'}
               </span>
+            </div>
+          </div>
+
+          {/* 界面设置 */}
+          <div className="bg-white border rounded-lg p-6">
+            <h2 className="text-lg font-semibold mb-1">🎨 界面设置</h2>
+            <p className="text-sm text-gray-600 mb-4">控制机器人回复消息中的按钮显示</p>
+            
+            <label className="flex items-center space-x-3 p-4 border rounded cursor-pointer hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={hideHelpButton}
+                onChange={(e) => setHideHelpButton(e.target.checked)}
+                className="w-5 h-5"
+              />
+              <div className="flex-1">
+                <div className="font-medium">
+                  {hideHelpButton ? '✅ 已隐藏' : '⭕ 显示中'}
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {hideHelpButton 
+                    ? '账单消息中不显示"使用说明"按钮' 
+                    : '账单消息中显示"使用说明"按钮（默认）'}
+                </div>
+              </div>
+            </label>
+
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+              💡 提示：隐藏"使用说明"按钮可以简化界面，适合已经熟悉操作的用户群体
             </div>
           </div>
 

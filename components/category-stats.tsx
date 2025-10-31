@@ -84,12 +84,12 @@ export function CategoryStats({ currentDate, chatId }: CategoryStatsProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">下发回复人分类</CardTitle>
+          <CardTitle className="text-base">下发操作人分类</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {Object.entries(data.dispatchByReplier).length > 0 ? (
-              Object.entries(data.dispatchByReplier).map(([name, amount]) => (
+            {Object.entries(data.dispatchByOperator || {}).length > 0 ? (
+              Object.entries(data.dispatchByOperator).map(([name, amount]) => (
                 <div key={name} className="flex justify-between items-center p-2 bg-slate-50 rounded">
                   <span className="text-sm text-slate-600">{name}</span>
                   <span className="text-sm font-semibold text-slate-900">{(amount as number).toLocaleString()}</span>
