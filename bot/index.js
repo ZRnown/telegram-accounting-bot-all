@@ -936,7 +936,16 @@ async function buildInlineKb(ctx) {
   const rows = []
   const chatId = String(ctx?.chat?.id || '')
   
-  // 🔥 根据设置决定是否显示"使用说明"按钮
+  // 🔥 私聊时显示特殊菜单
+  if (ctx.chat?.type === 'private') {
+    rows.push([
+      Markup.button.callback('使用说明', 'help'),
+      Markup.button.callback('开始记账', 'start_accounting')
+    ])
+    return Markup.inlineKeyboard(rows)
+  }
+  
+  // 🔥 群聊时：根据设置决定是否显示"使用说明"按钮，"查看完整订单"始终显示
   try {
     const setting = await prisma.setting.findUnique({
       where: { chatId },
@@ -947,10 +956,11 @@ async function buildInlineKb(ctx) {
       rows.push([Markup.button.callback('使用说明', 'help')])
     }
   } catch (e) {
-    // 如果查询失败，默认显示
+    // 如果查询失败，默认显示"使用说明"
     rows.push([Markup.button.callback('使用说明', 'help')])
   }
   
+  // 🔥 "查看完整订单"按钮始终显示（不受 hideHelpButton 影响）
   if (isPublicUrl(BACKEND_URL)) {
     try {
       const u = new URL(BACKEND_URL)
@@ -1176,21 +1186,46 @@ bot.start(async (ctx) => {
   const fullName = `${firstName} ${lastName}`.trim()
   
   if (ctx.chat?.type === 'private') {
-    // 私聊：显示用户ID信息
-    await ctx.reply(
-      `👤 您的用户信息：\n\n` +
-      `🆔 用户ID：\`${userId}\`\n` +
-      `👤 用户名：${username}\n` +
-      `📛 昵称：${fullName || '无'}\n\n` +
-      `💡 将上面的用户ID提供给管理员，添加到白名单后，您邀请机器人进群将自动授权。\n\n` +
-      `⚠️ 使用提示：\n` +
-      `本机器人仅支持在群组中使用记账功能。\n` +
-      `如需使用，请：\n` +
-      `1. 将机器人添加到群组\n` +
-      `2. 联系管理员将您的ID添加到白名单\n` +
-      `3. 发送"开始记账"或"使用说明"查看命令`,
-      { parse_mode: 'Markdown' }
-    )
+    // 🔥 私聊：检查是否在白名单，显示不同的提示信息
+    const userIdStr = String(userId || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId: userIdStr }
+    })
+    
+    if (whitelistedUser) {
+      // 🔥 白名单用户：显示简要信息，提供内联菜单
+      await ctx.reply(
+        `👤 您的用户信息：\n\n` +
+        `🆔 用户ID：\`${userId}\`\n` +
+        `👤 用户名：${username}\n` +
+        `📛 昵称：${fullName || '无'}\n\n` +
+        `✅ 您已在白名单中，可以邀请机器人进群自动授权。\n\n` +
+        `💡 点击下方按钮开始使用：`,
+        { 
+          parse_mode: 'Markdown',
+          ...(await buildInlineKb(ctx))
+        }
+      )
+    } else {
+      // 🔥 非白名单用户：显示详细提示信息
+      await ctx.reply(
+        `👤 您的用户信息：\n\n` +
+        `🆔 用户ID：\`${userId}\`\n` +
+        `👤 用户名：${username}\n` +
+        `📛 昵称：${fullName || '无'}\n\n` +
+        `💡 将上面的用户ID提供给管理员，添加到白名单后，您邀请机器人进群将自动授权。\n\n` +
+        `⚠️ 使用提示：\n` +
+        `本机器人仅支持在群组中使用记账功能。\n` +
+        `如需使用，请：\n` +
+        `1. 将机器人添加到群组\n` +
+        `2. 联系管理员将您的ID添加到白名单\n` +
+        `3. 点击下方按钮查看使用说明`,
+        { 
+          parse_mode: 'Markdown',
+          ...(await buildInlineKb(ctx))
+        }
+      )
+    }
   } else {
     // 群聊：初始化记账
     const chat = ensureChat(ctx)
@@ -1259,12 +1294,15 @@ bot.use(async (ctx, next) => {
       if (uname && chat.operators.has(uname)) chat.operatorIds.add(ctx.from.id)
     }
   } catch {}
-  // 私聊统一提示不可用
+  // 🔥 私聊：允许使用部分命令，但大部分功能需要通过内联菜单
   if (ctx.chat.type === 'private') {
-    try {
-      await ctx.reply('该机器人仅支持在群组中使用。请将机器人添加到群组，并在后台绑定并允许后使用。')
-    } catch {}
-    return
+    // 允许的命令：/start, /myid, /我, /help, 使用说明
+    const allowedInPrivate = /^(?:\/start|\/myid|\/我|\/help|使用说明)$/i.test(text)
+    if (!allowedInPrivate && !text.includes('我的账单')) {
+      // 对于其他命令，不回复（避免频繁提示），让用户使用内联菜单
+      return
+    }
+    // 对于允许的命令，继续处理（不在这里 return）
   }
   const botId = await ensureCurrentBotId()
   const chatId = await ensureDbChat(ctx)
@@ -1559,7 +1597,8 @@ function matchFeatureByText(text) {
   if (/^(下发)\b/.test(t)) return 'accounting_basic'
   if (/^(显示账单|\+0)$/i.test(t)) return 'accounting_basic'
   if (/^显示历史账单$/i.test(t)) return 'accounting_basic'
-  if (/^(保存账单|删除账单)$/i.test(t)) return 'accounting_basic'
+  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return 'accounting_basic'
+  if (/^(我的账单|\/我)$/i.test(t)) return 'accounting_basic'
   // fee / rate
   if (/^设置费率\s+/i.test(t)) return 'fee_setting'
   if (/^设置汇率\s+/i.test(t)) return 'fixed_rate'
@@ -2064,6 +2103,48 @@ bot.hears(/^删除账单$/i, async (ctx) => {
   await ctx.reply('当前账单已清空（包括内存和数据库）。' + (isCarryOver ? '\n累计模式：历史未下发数据已清零。' : ''))
 })
 
+// 🔥 删除全部账单：清除全部账单（请谨慎使用）
+bot.hears(/^(删除全部账单|清除全部账单)$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查
+  if (!(await hasOperatorPermission(ctx))) {
+    return ctx.reply('⚠️ 您没有权限删除全部账单。只有管理员或已添加的操作人可以操作。')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  try {
+    // 🔥 删除该群组的所有账单和明细
+    const allBills = await prisma.bill.findMany({
+      where: { chatId },
+      select: { id: true }
+    })
+    
+    if (allBills.length === 0) {
+      return ctx.reply('❌ 没有找到任何账单记录')
+    }
+    
+    const billIds = allBills.map(b => b.id)
+    
+    // 删除所有账单的明细
+    await prisma.billItem.deleteMany({ where: { billId: { in: billIds } } })
+    
+    // 删除所有账单
+    await prisma.bill.deleteMany({ where: { id: { in: billIds } } })
+    
+    // 清空内存
+    chat.current = { incomes: [], dispatches: [] }
+    chat.history = []
+    
+    await ctx.reply(`⚠️ 已删除全部账单（共 ${allBills.length} 条账单记录）\n\n请谨慎使用此功能！`)
+  } catch (e) {
+    console.error('删除全部账单失败', e)
+    await ctx.reply('❌ 删除全部账单失败，请稍后重试')
+  }
+})
+
 // 显示账单 或 +0
 bot.hears(/^(显示账单|\+0)$/i, async (ctx) => {
   const chat = ensureChat(ctx)
@@ -2084,6 +2165,83 @@ bot.hears(/^显示历史账单$/i, async (ctx) => {
   })
   await ctx.reply(['最近历史账单（最多5条）：', ...lines].join('\n'))
 })
+
+// 🔥 我的账单：查看当前用户在群内的所有记账记录
+bot.hears(/^(我的账单|\/我)$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  const chatId = await ensureDbChat(ctx)
+  const userId = String(ctx.from?.id || '')
+  const username = ctx.from?.username ? `@${ctx.from.username}` : null
+  
+  // 🔥 查询当前用户在群内的所有记录
+  try {
+    const cutoffHour = await getDailyCutoffHour(chatId)
+    const gte = startOfDay(new Date(), cutoffHour)
+    const lt = endOfDay(new Date(), cutoffHour)
+    
+    const bill = await prisma.bill.findFirst({
+      where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+      include: { 
+        items: { 
+          where: {
+            OR: [
+              { operator: username || undefined },
+              { replier: username || undefined },
+              { operator: { contains: userId } },
+              { replier: { contains: userId } }
+            ]
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    })
+    
+    if (!bill || bill.items.length === 0) {
+      return ctx.reply('❌ 您在本群暂无记账记录')
+    }
+    
+    // 🔥 格式化显示
+    const lines = []
+    lines.push(`📋 您的账单记录（共 ${bill.items.length} 条）：\n`)
+    
+    let totalIncome = 0
+    let totalDispatch = 0
+    let totalUSDT = 0
+    
+    bill.items.forEach(item => {
+      const amount = Number(item.amount || 0)
+      const usdt = Number(item.usdt || 0)
+      const isIncome = item.type === 'INCOME'
+      
+      if (isIncome) {
+        totalIncome += amount
+        if (item.rate) {
+          lines.push(`💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`)
+        } else {
+          lines.push(`💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`)
+        }
+      } else {
+        totalDispatch += amount
+        totalUSDT += usdt
+        lines.push(`📤 下发 ${usdt.toFixed(1)}U (${amount})`)
+      }
+    })
+    
+    lines.push(`\n📊 汇总：`)
+    lines.push(`入款：${totalIncome.toFixed(2)}`)
+    if (totalDispatch > 0 || totalUSDT > 0) {
+      lines.push(`下发：${totalDispatch.toFixed(2)} (${totalUSDT.toFixed(1)}U)`)
+    }
+    
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+  } catch (e) {
+    console.error('查询我的账单失败', e)
+    await ctx.reply('❌ 查询账单失败，请稍后重试')
+  }
+})
+
 
 // 删除群组：按钮点击 -> 二次确认 -> 执行删除/取消
 
@@ -2448,29 +2606,110 @@ bot.hears(/^撤销下发$/i, async (ctx) => {
   }
 })
 
-// 🔥 指定删除：回复指定记录消息，输入"删除"（需要在其他text监听器之前）
+// 🔥 指定删除和指定账单：回复指定记录消息，输入"删除"或"账单"（需要在其他text监听器之前）
 bot.use(async (ctx, next) => {
   // 只处理文本消息
   if (!ctx.message?.text) return next()
   
   const text = ctx.message.text?.trim()
-  if (!text || !/^删除$/i.test(text)) return next()
+  const isDelete = /^删除$/i.test(text)
+  const isBill = /^账单$/i.test(text)
+  
+  if (!isDelete && !isBill) return next()
   
   const chat = ensureChat(ctx)
   if (!chat) return next()
   
-  // 必须回复消息（且不是回复操作员相关消息）
+  // 必须回复消息
   const replyTo = ctx.message.reply_to_message
   if (!replyTo) return next()
   
-  // 如果回复的是操作员相关消息，不处理（让删除操作员命令处理）
+  // 如果回复的是操作员相关消息，且是删除操作，不处理（让删除操作员命令处理）
   const replyText = replyTo.text || ''
-  if (/操作人|操作员/.test(replyText)) return next()
+  if (isDelete && /操作人|操作员/.test(replyText)) return next()
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    return ctx.reply('⚠️ 您没有删除权限。只有管理员或已添加的操作人可以操作。')
+  // 🔥 处理"账单"命令（查看指定用户账单）
+  if (isBill && replyTo.from) {
+    const chatId = await ensureDbChat(ctx)
+    const targetUserId = String(replyTo.from.id || '')
+    const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : null
+    
+    try {
+      const cutoffHour = await getDailyCutoffHour(chatId)
+      const gte = startOfDay(new Date(), cutoffHour)
+      const lt = endOfDay(new Date(), cutoffHour)
+      
+      const bill = await prisma.bill.findFirst({
+        where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+        include: { 
+          items: { 
+            where: {
+              OR: [
+                { operator: targetUsername || undefined },
+                { replier: targetUsername || undefined },
+                { operator: { contains: targetUserId } },
+                { replier: { contains: targetUserId } }
+              ]
+            },
+            orderBy: { createdAt: 'desc' }
+          }
+        }
+      })
+      
+      if (!bill || bill.items.length === 0) {
+        const targetName = targetUsername || replyTo.from.first_name || '该用户'
+        return ctx.reply(`❌ ${targetName} 在本群暂无记账记录`)
+      }
+      
+      // 🔥 格式化显示
+      const targetName = targetUsername || `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim() || '该用户'
+      const lines = []
+      lines.push(`📋 ${targetName} 的账单记录（共 ${bill.items.length} 条）：\n`)
+      
+      let totalIncome = 0
+      let totalDispatch = 0
+      let totalUSDT = 0
+      
+      bill.items.forEach(item => {
+        const amount = Number(item.amount || 0)
+        const usdt = Number(item.usdt || 0)
+        const isIncome = item.type === 'INCOME'
+        
+        if (isIncome) {
+          totalIncome += amount
+          if (item.rate) {
+            lines.push(`💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`)
+          } else {
+            lines.push(`💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`)
+          }
+        } else {
+          totalDispatch += amount
+          totalUSDT += usdt
+          lines.push(`📤 下发 ${usdt.toFixed(1)}U (${amount})`)
+        }
+      })
+      
+      lines.push(`\n📊 汇总：`)
+      lines.push(`入款：${totalIncome.toFixed(2)}`)
+      if (totalDispatch > 0 || totalUSDT > 0) {
+        lines.push(`下发：${totalDispatch.toFixed(2)} (${totalUSDT.toFixed(1)}U)`)
+      }
+      
+      await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+      return // 已处理，不再继续
+    } catch (e) {
+      console.error('查询指定账单失败', e)
+      await ctx.reply('❌ 查询账单失败，请稍后重试')
+      return
+    }
   }
+  
+  // 🔥 处理"删除"命令（删除指定记录）
+  if (isDelete) {
+    // 权限检查
+    if (!(await hasOperatorPermission(ctx))) {
+      return ctx.reply('⚠️ 您没有删除权限。只有管理员或已添加的操作人可以操作。')
+    }
   
   const chatId = await ensureDbChat(ctx)
   
@@ -2523,10 +2762,16 @@ bot.use(async (ctx, next) => {
     }
     
     await ctx.reply(`✅ 已删除${isIncome ? '入款' : '下发'}记录：${matchedItem.amount}`)
+    return // 已处理，不再继续
   } catch (e) {
     console.error('删除记录失败', e)
     await ctx.reply('❌ 删除记录失败')
+    return
   }
+  }
+  
+  // 如果没有匹配的命令，继续下一个中间件
+  return next()
 })
 
 bot.hears(/^人民币模式$/i, async (ctx) => {
@@ -2795,6 +3040,9 @@ bot.action('help', async (ctx) => {
     '• 显示历史账单 - 查看已保存账单',
     '• 保存账单 - 保存并清空当前',
     '• 删除账单 - 清空当前（不保存）',
+    '• 删除全部账单 - 清除全部账单（请谨慎使用）',
+    '• 我的账单 或 /我 - 查看自己的记账记录',
+    '• 指定账单 - 回复指定人消息，输入"账单"查看该人记录',
     '',
     '【🧮 数学计算】',
     '• +100-20 - 记账时支持数学表达式（结果+80）',
@@ -2885,6 +3133,98 @@ bot.action('open_dashboard', async (ctx) => {
     await ctx.reply(`查看完整订单：\n${u.toString()}`)
   } catch {
     await ctx.reply(`查看完整订单：\n${BACKEND_URL}`)
+  }
+})
+
+// 🔥 私聊时"开始记账"按钮回调
+bot.action('start_accounting', async (ctx) => {
+  try { await ctx.answerCbQuery() } catch {}
+  
+  // 只在私聊中处理
+  if (ctx.chat?.type !== 'private') {
+    return ctx.reply('此功能仅在私聊中使用')
+  }
+  
+  const userId = String(ctx.from?.id || '')
+  const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
+  const firstName = ctx.from?.first_name || ''
+  const lastName = ctx.from?.last_name || ''
+  const fullName = `${firstName} ${lastName}`.trim()
+  
+  // 🔥 检查是否在白名单
+  const whitelistedUser = await prisma.whitelistedUser.findUnique({
+    where: { userId }
+  })
+  
+  if (whitelistedUser) {
+    // 🔥 白名单用户：提供邀请机器人进群的链接
+    // 获取机器人的用户名（从 BOT_TOKEN 或从数据库）
+    let botUsername = process.env.BOT_USERNAME || ''
+    if (!botUsername) {
+      try {
+        const bot = await prisma.bot.findFirst({
+          where: { enabled: true },
+          select: { token: true }
+        })
+        if (bot?.token) {
+          // 尝试从 Telegram API 获取机器人信息
+          const resp = await fetch(`https://api.telegram.org/bot${bot.token}/getMe`)
+          const data = await resp.json()
+          if (data.ok && data.result?.username) {
+            botUsername = data.result.username
+          }
+        }
+      } catch (e) {
+        console.error('获取机器人用户名失败', e)
+      }
+    }
+    
+    if (botUsername) {
+      const inviteLink = `https://t.me/${botUsername.replace('@', '')}`
+      await ctx.reply(
+        `✅ 您已在白名单中！\n\n` +
+        `📋 邀请机器人进群：\n` +
+        `1. 点击下方链接添加机器人\n` +
+        `2. 选择要添加的群组\n` +
+        `3. 机器人将自动启用所有功能\n\n` +
+        `🔗 ${inviteLink}\n\n` +
+        `💡 提示：您可以将机器人添加到群组后，所有功能将自动启用。`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                Markup.button.url('➕ 添加机器人到群组', inviteLink)
+              ]
+            ]
+          }
+        }
+      )
+    } else {
+      await ctx.reply(
+        `✅ 您已在白名单中！\n\n` +
+        `💡 请将机器人添加到群组，所有功能将自动启用。\n\n` +
+        `添加方式：\n` +
+        `1. 在群组中点击"添加成员"\n` +
+        `2. 搜索机器人的用户名\n` +
+        `3. 添加机器人到群组`
+      )
+    }
+  } else {
+    // 🔥 非白名单用户：显示提示信息
+    await ctx.reply(
+      `👤 您的用户信息：\n\n` +
+      `🆔 用户ID：\`${userId}\`\n` +
+      `👤 用户名：${username}\n` +
+      `📛 昵称：${fullName || '无'}\n\n` +
+      `💡 将上面的用户ID提供给管理员，添加到白名单后，您邀请机器人进群将自动授权。\n\n` +
+      `⚠️ 使用提示：\n` +
+      `本机器人仅支持在群组中使用记账功能。\n` +
+      `如需使用，请：\n` +
+      `1. 将机器人添加到群组\n` +
+      `2. 联系管理员将您的ID添加到白名单\n` +
+      `3. 邀请机器人进群后将自动启用所有功能`,
+      { parse_mode: 'Markdown' }
+    )
   }
 })
 
