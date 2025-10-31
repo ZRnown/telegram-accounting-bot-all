@@ -122,12 +122,17 @@ async function handleAddressVerificationNew(ctx) {
     if (address === confirmedAddr) {
       // 发送的是已确认的地址
       const newCount = record.confirmedCount + 1
+      // 🔥 获取用户名（优先）或完整名称
+      const currentUsername = ctx.from.username ? `@${ctx.from.username}` : null
+      const currentFullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '') || senderId
+      const currentDisplay = currentUsername || currentFullName
+      
       await prisma.addressVerification.update({
         where: { chatId },
         data: {
           confirmedCount: newCount,
           lastSenderId: senderId,
-          lastSenderName: senderName,
+          lastSenderName: currentDisplay,
           updatedAt: new Date()
         }
       })
@@ -136,7 +141,7 @@ async function handleAddressVerificationNew(ctx) {
         `📍 验证地址：\`${address}\`\n` +
         `🔢 验证次数：*${newCount}*\n` +
         `📤 上次发送人：${record.lastSenderName || record.lastSenderId}\n` +
-        `📤 本次发送人：${senderName}`
+        `📤 本次发送人：${currentDisplay}`
       
       await ctx.reply(replyText, {
         parse_mode: 'Markdown',
@@ -153,6 +158,11 @@ async function handleAddressVerificationNew(ctx) {
       // 发送的是待确认的地址（第2次发送新地址）
       const newCount = record.pendingCount + 1
       
+      // 🔥 获取用户名（优先）或完整名称
+      const currentUsername = ctx.from.username ? `@${ctx.from.username}` : null
+      const currentFullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '') || senderId
+      const currentDisplay = currentUsername || currentFullName
+      
       // 🔥 第2次发送待确认地址，将其升级为确认地址
       await prisma.addressVerification.update({
         where: { chatId },
@@ -162,7 +172,7 @@ async function handleAddressVerificationNew(ctx) {
           pendingAddress: null,
           pendingCount: 0,
           lastSenderId: senderId,
-          lastSenderName: senderName,
+          lastSenderName: currentDisplay,
           updatedAt: new Date()
         }
       })
@@ -171,7 +181,7 @@ async function handleAddressVerificationNew(ctx) {
         `📍 验证地址：\`${address}\`\n` +
         `🔢 验证次数：*${newCount}*\n` +
         `📤 上次发送人：${record.lastSenderName || record.lastSenderId}\n` +
-        `📤 本次发送人：${senderName}`
+        `📤 本次发送人：${currentDisplay}`
       
       await ctx.reply(replyText, {
         parse_mode: 'Markdown',
@@ -187,26 +197,56 @@ async function handleAddressVerificationNew(ctx) {
     // 🔥 发送的是新地址（不同于确认地址和待确认地址）
     // 发出警告，并将新地址设为待确认地址
     
-    // 获取之前的发送人信息（从记录中）
-    const previousSenderName = record.lastSenderName || record.lastSenderId || '未知'
+    // 🔥 获取当前发送人的信息
+    const currentSenderUsername = ctx.from.username ? `@${ctx.from.username}` : null
+    const currentSenderFullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '').trim() || senderId
+    const currentSenderDisplay = currentSenderUsername || currentSenderFullName || senderId
     
-    // 获取当前发送人的完整信息（Telegram名称，不是用户名）
-    const currentSenderFullName = (ctx.from.first_name || '') + (ctx.from.last_name ? ' ' + ctx.from.last_name : '') || senderName
+    // 🔥 查询之前发送人的信息
+    // 如果之前记录的是用户名，直接使用；如果是ID或名称，尝试查找用户名
+    let previousSenderUsername = null
+    let previousSenderFullName = '未知'
     
+    // 从记录中获取之前的发送人名称
+    if (record.lastSenderName) {
+      // 如果之前保存的是用户名格式（@开头），则直接使用
+      if (record.lastSenderName.startsWith('@')) {
+        previousSenderUsername = record.lastSenderName
+        // 需要查询该用户的实际名称（从数据库或缓存）
+        previousSenderFullName = record.lastSenderName // 暂时使用用户名
+      } else {
+        // 如果之前保存的是Telegram名称，使用它
+        previousSenderFullName = record.lastSenderName
+      }
+    }
+    
+    // 🔥 如果之前的发送人ID存在且不同，尝试从聊天记录中查找用户名
+    if (record.lastSenderId && record.lastSenderId !== senderId && !previousSenderUsername) {
+      const chat = getChat(await ensureCurrentBotId(), chatId)
+      if (chat && chat.userIdByUsername) {
+        // 从缓存中查找该ID对应的用户名
+        for (const [uname, uid] of chat.userIdByUsername.entries()) {
+          if (String(uid) === record.lastSenderId) {
+            previousSenderUsername = uname
+            break
+          }
+        }
+      }
+    }
+    
+    const previousSenderDisplay = previousSenderUsername || previousSenderFullName || record.lastSenderId || '未知'
+    
+    // 🔥 保存当前发送人的用户名（如果有）或完整名称
     await prisma.addressVerification.update({
       where: { chatId },
       data: {
         pendingAddress: address,
         pendingCount: 1,
         lastSenderId: senderId,
-        lastSenderName: currentSenderFullName,
+        lastSenderName: currentSenderUsername || currentSenderFullName, // 优先保存用户名
         updatedAt: new Date()
       }
     })
-    
-    // 🔥 新的详细警告格式
-    // 获取之前的发送人的完整名称（Telegram名称）
-    const previousSenderFullName = record.lastSenderName || previousSenderName || '未知'
     
     const replyText = `⚠️⚠️⚠️*温馨提示*⚠️⚠️⚠️\n\n` +
       `❗️此地址和原地址不一样请小心交易❗️\n\n` +
@@ -216,8 +256,8 @@ async function handleAddressVerificationNew(ctx) {
       `📍新地址：\`${address}\`\n` +
       `📍原地址：\`${confirmedAddr || '无'}\`\n\n` +
       `🔢验证次数：0\n` +
-      `📤上次发送人：${previousSenderFullName}\n` +
-      `📤本次发送人：${currentSenderFullName}`
+      `📤上次发送人：${previousSenderDisplay}\n` +
+      `📤本次发送人：${currentSenderDisplay}`
     
     await ctx.reply(replyText, {
       parse_mode: 'Markdown',
@@ -1317,20 +1357,57 @@ bot.on('my_chat_member', async (ctx) => {
       }
       
       // 🔥 记录邀请信息（仅新加入时）
+      // 使用 upsert 确保即使重复也能记录（可能因为网络问题导致重复）
       try {
-        await prisma.inviteRecord.create({
-          data: {
+        // 先检查是否已存在记录（根据chatId和inviterId判断）
+        const existing = await prisma.inviteRecord.findFirst({
+          where: {
             chatId,
-            chatTitle: title,
-            inviterId,
-            inviterUsername,
-            botId,
-            autoAllowed
-          }
+            inviterId
+          },
+          orderBy: { createdAt: 'desc' }
         })
-        console.log('[invite-record] ✅ 创建成功', { chatId, inviterId, inviterUsername, autoAllowed })
+        
+        if (!existing) {
+          // 不存在记录，创建新记录
+          await prisma.inviteRecord.create({
+            data: {
+              chatId,
+              chatTitle: title,
+              inviterId,
+              inviterUsername,
+              botId,
+              autoAllowed
+            }
+          })
+          if (process.env.DEBUG_BOT === 'true') {
+            console.log('[invite-record] ✅ 创建成功', { chatId, inviterId, inviterUsername, autoAllowed })
+          }
+        } else {
+          // 已存在记录，更新信息（可能用户名有变化）
+          await prisma.inviteRecord.update({
+            where: { id: existing.id },
+            data: {
+              chatTitle: title,
+              inviterUsername,
+              botId,
+              autoAllowed
+            }
+          })
+          if (process.env.DEBUG_BOT === 'true') {
+            console.log('[invite-record] ✅ 更新成功', { chatId, inviterId, inviterUsername, autoAllowed })
+          }
+        }
       } catch (e) {
-        console.error('[invite-record] ❌ 创建失败', { chatId, error: e.message })
+        // 🔥 记录详细错误信息，帮助排查问题
+        console.error('[invite-record] ❌ 创建/更新失败', { 
+          chatId, 
+          inviterId,
+          inviterUsername,
+          error: e.message,
+          code: e.code,
+          stack: process.env.DEBUG_BOT === 'true' ? e.stack : undefined
+        })
       }
       
       // Upsert chat，如果邀请人在白名单，自动设置 allowed=true
@@ -2339,8 +2416,13 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
     data: { enabled: true }
   })
   
+  // 🔥 清除功能开关缓存，确保立即生效
+  featureCache.delete(chatId)
+  
   await ctx.reply('✅ 已开启所有功能开关！', buildInlineKb(ctx))
-  console.log('[开启所有功能]', { chatId, featuresCreated })
+  if (process.env.DEBUG_BOT === 'true') {
+    console.log('[开启所有功能]', { chatId, featuresCreated })
+  }
 })
 
 // 🔥 关闭所有功能（管理员/白名单用户）
@@ -2369,8 +2451,13 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
     data: { enabled: false }
   })
   
+  // 🔥 清除功能开关缓存，确保立即生效
+  featureCache.delete(chatId)
+  
   await ctx.reply('⭕ 已关闭所有功能开关！', buildInlineKb(ctx))
-  console.log('[关闭所有功能]', { chatId })
+  if (process.env.DEBUG_BOT === 'true') {
+    console.log('[关闭所有功能]', { chatId })
+  }
 })
 
 // 🔥 开启地址验证（管理员/白名单用户）
