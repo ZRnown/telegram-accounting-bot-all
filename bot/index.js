@@ -960,8 +960,11 @@ async function fetchOKXOTCPrice(timeout = 8000) {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), timeout)
       
-      const apiUrl = `${backendUrl}/api/okx/otc-price?instType=SPOT`
-      console.log('[OKX OTC z0] 尝试本地API:', apiUrl)
+      // 修复路径：确保BACKEND_URL如果包含/dashboard，要去掉，或者直接使用正确的路径
+      let apiBase = backendUrl.replace(/\/dashboard\/?$/, '') // 移除末尾的/dashboard
+      apiBase = apiBase.replace(/\/$/, '') // 移除末尾的斜杠
+      const apiUrl = `${apiBase}/api/okx/otc-price?instType=SPOT`
+      console.log('[OKX OTC z0] 尝试本地API:', apiUrl, '(原始BACKEND_URL:', backendUrl, ')')
       
       const resp = await fetch(apiUrl, {
         method: 'GET',
@@ -1001,14 +1004,14 @@ async function fetchOKXOTCPrice(timeout = 8000) {
     }
   }
   
-  // 方法2: 直接调用OKX API - 获取标记价格
+  // 方法2: 直接调用OKX API - 获取USDT-CNY指数价格（最重要，因为这是OTC价格）
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)
     
-    // 使用BTC-USDT标记价格，然后需要转换为CNY（通过USDT汇率）
-    const apiUrl = 'https://www.okx.com/api/v5/public/mark-price?instType=SPOT&instId=BTC-USDT'
-    console.log('[OKX OTC z0] 尝试直接调用OKX API:', apiUrl)
+    // 直接获取USDT-CNY指数价格（这是正确的OTC价格）
+    const apiUrl = 'https://www.okx.com/api/v5/market/index-tickers?instId=USDT-CNY'
+    console.log('[OKX OTC z0] 尝试获取USDT-CNY指数价格:', apiUrl)
     
     const resp = await fetch(apiUrl, {
       method: 'GET',
@@ -1023,52 +1026,51 @@ async function fetchOKXOTCPrice(timeout = 8000) {
     
     if (!resp.ok) {
       const errorText = await resp.text().catch(() => '')
-      throw new Error(`OKX API HTTP ${resp.status}: ${errorText}`)
+      throw new Error(`OKX指数价格API HTTP ${resp.status}: ${errorText}`)
     }
     
     const data = await resp.json()
-    console.log('[OKX OTC z0] OKX API响应:', JSON.stringify(data).substring(0, 500))
+    console.log('[OKX OTC z0] 指数价格API响应:', JSON.stringify(data).substring(0, 500))
     
     if (data.code !== '0') {
-      throw new Error(`OKX API错误: code=${data.code}, msg=${data.msg || '未知错误'}`)
+      throw new Error(`OKX指数价格API错误: code=${data.code}, msg=${data.msg || '未知错误'}`)
     }
     
     if (!Array.isArray(data.data) || data.data.length === 0) {
-      throw new Error('OKX API返回数据为空')
+      throw new Error('OKX指数价格API返回数据为空')
     }
     
-    const markPrice = parseFloat(data.data[0].markPx || '0')
-    if (markPrice <= 0) {
-      throw new Error(`标记价格无效: ${markPrice}`)
+    const idxPx = parseFloat(data.data[0].idxPx || '0')
+    if (idxPx <= 0) {
+      throw new Error(`指数价格无效: ${idxPx}`)
     }
     
-    console.log('[OKX OTC z0] OKX API成功:', { markPrice, instId: data.data[0].instId })
+    console.log('[OKX OTC z0] 指数价格API成功:', { price: idxPx, instId: data.data[0].instId })
     
-    // 注意：这里返回的是BTC-USDT价格，需要结合USDT-CNY汇率计算
-    // 但根据需求，如果只是获取标记价格作为参考，可以直接使用
     return {
-      price: markPrice,
-      instId: data.data[0].instId,
+      price: idxPx,
+      instId: data.data[0].instId || 'USDT-CNY',
       timestamp: parseInt(data.data[0].ts || '0'),
       source: 'z0',
     }
   } catch (e) {
     lastError = e
-    console.error('[OKX OTC z0] OKX API失败:', {
+    console.error('[OKX OTC z0] 指数价格API失败:', {
       error: e.message,
       stack: e.stack,
       name: e.name
     })
   }
   
-  // 方法3: 尝试获取指数价格（如果需要USDT到CNY）
+  // 方法3: 备用方法 - 尝试获取BTC-USDT-SWAP标记价格（永续合约支持mark-price）
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)
     
-    // 尝试获取指数价格
-    const apiUrl = 'https://www.okx.com/api/v5/market/index-tickers?instId=USDT-CNY'
-    console.log('[OKX OTC z0] 尝试获取指数价格:', apiUrl)
+    // 注意：mark-price接口不支持SPOT，只支持SWAP/FUTURES/OPTION/MARGIN
+    // 所以使用SWAP类型的标记价格作为备用参考
+    const apiUrl = 'https://www.okx.com/api/v5/public/mark-price?instType=SWAP&instId=BTC-USDT-SWAP'
+    console.log('[OKX OTC z0] 尝试获取SWAP标记价格（备用）:', apiUrl)
     
     const resp = await fetch(apiUrl, {
       method: 'GET',
@@ -1083,15 +1085,16 @@ async function fetchOKXOTCPrice(timeout = 8000) {
     
     if (resp.ok) {
       const data = await resp.json()
-      console.log('[OKX OTC z0] 指数价格响应:', JSON.stringify(data).substring(0, 500))
+      console.log('[OKX OTC z0] SWAP标记价格响应:', JSON.stringify(data).substring(0, 500))
       
       if (data.code === '0' && Array.isArray(data.data) && data.data.length > 0) {
-        const idxPx = parseFloat(data.data[0].idxPx || '0')
-        if (idxPx > 0) {
-          console.log('[OKX OTC z0] 指数价格成功:', { price: idxPx })
+        const markPrice = parseFloat(data.data[0].markPx || '0')
+        if (markPrice > 0) {
+          console.log('[OKX OTC z0] SWAP标记价格成功（仅作参考）:', { markPrice, instId: data.data[0].instId })
+          // 注意：这是BTC-USDT价格，不是USDT-CNY，仅作为备用参考
           return {
-            price: idxPx,
-            instId: data.data[0].instId || 'USDT-CNY',
+            price: markPrice,
+            instId: data.data[0].instId,
             timestamp: parseInt(data.data[0].ts || '0'),
             source: 'z0',
           }
@@ -1099,7 +1102,7 @@ async function fetchOKXOTCPrice(timeout = 8000) {
       }
     }
   } catch (e) {
-    console.error('[OKX OTC z0] 指数价格失败:', {
+    console.error('[OKX OTC z0] SWAP标记价格失败:', {
       error: e.message,
       stack: e.stack
     })
