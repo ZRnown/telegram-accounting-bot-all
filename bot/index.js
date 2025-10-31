@@ -39,141 +39,7 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
   telegram: agent ? { agent } : undefined,
 })
 
-// 🔥 地址验证功能 - 检测钱包地址
-async function handleAddressVerification(ctx) {
-  try {
-    const chatId = String(ctx.chat.id)
-    const text = ctx.message?.text || ''
-    
-    // 检测钱包地址格式（支持多种主流地址）
-    // TRC20: T开头，34位
-    // ERC20: 0x开头，42位
-    // BTC: 1/3/bc1开头
-    const addressPatterns = [
-      /\b(T[A-Za-z1-9]{33})\b/g,  // TRC20
-      /\b(0x[a-fA-F0-9]{40})\b/g, // ERC20
-      /\b([13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/g, // BTC Legacy
-      /\b(bc1[a-z0-9]{39,59})\b/g, // BTC SegWit
-    ]
-    
-    let detectedAddress = null
-    for (const pattern of addressPatterns) {
-      const match = text.match(pattern)
-      if (match) {
-        detectedAddress = match[0]
-        break
-      }
-    }
-    
-    if (!detectedAddress) return false // 没有检测到地址
-    
-    // 检查是否启用了地址验证功能
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { addressVerificationEnabled: true }
-    })
-    
-    if (!setting?.addressVerificationEnabled) return false // 功能未启用
-    
-    const address = detectedAddress
-    const senderId = String(ctx.from.id)
-    const senderName = ctx.from.username ? `@${ctx.from.username}` : 
-                       (ctx.from.first_name || ctx.from.last_name) ? 
-                       `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() :
-                       senderId
-    
-    // 查询该地址的验证记录
-    const existingRecord = await prisma.addressVerification.findUnique({
-      where: { chatId_address: { chatId, address } }
-    })
-    
-    if (!existingRecord) {
-      // 第一次出现该地址
-      await prisma.addressVerification.create({
-        data: {
-          chatId,
-          address,
-          verifyCount: 1,
-          firstSenderId: senderId,
-          firstSenderName: senderName,
-          lastSenderId: senderId,
-          lastSenderName: senderName
-        }
-      })
-      
-      const replyText = `🔐 *此地址已加入安全验证*\n\n` +
-        `📍 验证地址：\`${address}\`\n` +
-        `🔢 验证次数：*1*\n` +
-        `👤 发送人：${senderName}`
-      
-      await ctx.reply(replyText, {
-        parse_mode: 'Markdown',
-        reply_to_message_id: ctx.message.message_id
-      })
-      
-      console.log('[address-verification][first-time]', { chatId, address, senderId, senderName })
-      return true
-    }
-    
-    // 地址已存在 - 检查是否是同一个发送人
-    const isSameSender = existingRecord.lastSenderId === senderId
-    const newVerifyCount = existingRecord.verifyCount + 1
-    
-    await prisma.addressVerification.update({
-      where: { chatId_address: { chatId, address } },
-      data: {
-        verifyCount: newVerifyCount,
-        lastSenderId: senderId,
-        lastSenderName: senderName,
-        updatedAt: new Date()
-      }
-    })
-    
-    if (!isSameSender && newVerifyCount === 2) {
-      // 换了发送人，且是第2次（第一次被新人发送）
-      const replyText = `⚠️ *温馨提示*\n\n` +
-        `此地址和原地址发送人不一致，请小心交易！\n\n` +
-        `📍 地址：\`${address}\`\n` +
-        `👤 发送人ID：\`${senderId}\`\n` +
-        `👤 名称：${senderName}\n\n` +
-        `🔢 验证次数：*${newVerifyCount}*\n` +
-        `📤 上次发送人：${existingRecord.lastSenderName || existingRecord.lastSenderId}\n` +
-        `📤 本次发送人：${senderName}`
-      
-      await ctx.reply(replyText, {
-        parse_mode: 'Markdown',
-        reply_to_message_id: ctx.message.message_id
-      })
-      
-      console.log('[address-verification][warning]', { chatId, address, oldSender: existingRecord.lastSenderId, newSender: senderId })
-      return true
-    }
-    
-    if (newVerifyCount >= 3 || isSameSender) {
-      // 正常验证（第3次及以后，或同一发送人）
-      const replyText = `✅ *地址验证通过*\n\n` +
-        `📍 验证地址：\`${address}\`\n` +
-        `🔢 验证次数：*${newVerifyCount}*\n` +
-        `📤 上次发送人：${existingRecord.lastSenderName || existingRecord.lastSenderId}\n` +
-        `📤 本次发送人：${senderName}`
-      
-      await ctx.reply(replyText, {
-        parse_mode: 'Markdown',
-        reply_to_message_id: ctx.message.message_id
-      })
-      
-      console.log('[address-verification][verified]', { chatId, address, verifyCount: newVerifyCount })
-      return true
-    }
-    
-    return true // 🔥 修正：应该返回 true
-  } catch (error) {
-    console.error('[address-verification][error]', error)
-    return false
-  }
-}
-
-// 🔥 新的地址验证逻辑：每个群只确认一个地址
+// 🔥 地址验证功能：每个群只确认一个地址
 async function handleAddressVerificationNew(ctx) {
   try {
     const chatId = String(ctx.chat.id)
@@ -243,7 +109,9 @@ async function handleAddressVerificationNew(ctx) {
         reply_to_message_id: ctx.message.message_id
       })
       
-      console.log('[address-verification-new][first-time]', { chatId, address, senderId })
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[address-verification-new][first-time]', { chatId, address, senderId })
+      }
       return true
     }
     
@@ -275,7 +143,9 @@ async function handleAddressVerificationNew(ctx) {
         reply_to_message_id: ctx.message.message_id
       })
       
-      console.log('[address-verification-new][confirmed-address]', { chatId, address, count: newCount })
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[address-verification-new][confirmed-address]', { chatId, address, count: newCount })
+      }
       return true
     }
     
@@ -308,7 +178,9 @@ async function handleAddressVerificationNew(ctx) {
         reply_to_message_id: ctx.message.message_id
       })
       
-      console.log('[address-verification-new][pending-confirmed]', { chatId, address, newCount })
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[address-verification-new][pending-confirmed]', { chatId, address, newCount })
+      }
       return true
     }
     
@@ -352,12 +224,14 @@ async function handleAddressVerificationNew(ctx) {
       reply_to_message_id: ctx.message.message_id
     })
     
-    console.log('[address-verification-new][warning-new-address]', { 
-      chatId, 
-      oldAddress: confirmedAddr, 
-      newAddress: address,
-      senderId 
-    })
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[address-verification-new][warning-new-address]', { 
+        chatId, 
+        oldAddress: confirmedAddr, 
+        newAddress: address,
+        senderId 
+      })
+    }
     return true
     
   } catch (error) {
@@ -376,7 +250,10 @@ bot.on('message', async (ctx, next) => {
     const title = chat.title || ''
     const from = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.id
     const text = ctx.message?.text || ctx.message?.caption || '[非文本消息]'
-    console.log('[message][recv]', { chatId, title, from, text })
+    // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[message][recv]', { chatId, title, from, text })
+    }
     
     // 🔥 地址验证功能 - 优先处理（使用新版本逻辑）
     if (ctx.message?.text && chatId.startsWith('-')) {
@@ -478,7 +355,10 @@ bot.on('message', async (ctx, next) => {
       }).catch(() => {})
     }
     
-    console.log('[message][upsert-ok]', { chatId })
+    // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[message][upsert-ok]', { chatId })
+    }
   } catch {}
   finally {
     try { await next() } catch {}
@@ -486,22 +366,49 @@ bot.on('message', async (ctx, next) => {
 })
 
 // Resolve current Bot record by token to support multi-bot state separation
+// 🔥 优化：使用更可靠的缓存，避免重复查询
 let CURRENT_BOT_ID = null
+let BOT_ID_INITIALIZING = false // 防止并发初始化
 async function ensureCurrentBotId() {
+  // 🔥 如果已有缓存，直接返回
   if (CURRENT_BOT_ID) return CURRENT_BOT_ID
-  // Try find bot by token; if missing, create a minimal record
-  let row = await prisma.bot.findFirst({ where: { token: process.env.BOT_TOKEN } }).catch(() => null)
-  if (!row) {
-    // try to get bot username for friendly name
-    let name = 'EnvBot'
-    try {
-      const me = await bot.telegram.getMe()
-      name = me?.username ? `@${me.username}` : (me?.first_name || 'EnvBot')
-    } catch {}
-    row = await prisma.bot.create({ data: { name, token: process.env.BOT_TOKEN, enabled: true } })
+  
+  // 🔥 如果正在初始化，等待完成
+  if (BOT_ID_INITIALIZING) {
+    let waitCount = 0
+    while (BOT_ID_INITIALIZING && waitCount < 50) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      waitCount++
+      if (CURRENT_BOT_ID) return CURRENT_BOT_ID
+    }
   }
-  CURRENT_BOT_ID = row.id
-  return CURRENT_BOT_ID
+  
+  // 🔥 开始初始化
+  BOT_ID_INITIALIZING = true
+  try {
+    // Try find bot by token; if missing, create a minimal record
+    let row = await prisma.bot.findFirst({ 
+      where: { token: process.env.BOT_TOKEN },
+      select: { id: true } // 🔥 只选择需要的字段
+    }).catch(() => null)
+    
+    if (!row) {
+      // try to get bot username for friendly name
+      let name = 'EnvBot'
+      try {
+        const me = await bot.telegram.getMe()
+        name = me?.username ? `@${me.username}` : (me?.first_name || 'EnvBot')
+      } catch {}
+      row = await prisma.bot.create({ 
+        data: { name, token: process.env.BOT_TOKEN, enabled: true },
+        select: { id: true } // 🔥 只选择需要的字段
+      })
+    }
+    CURRENT_BOT_ID = row.id
+    return CURRENT_BOT_ID
+  } finally {
+    BOT_ID_INITIALIZING = false
+  }
 }
 
 function getUsername(ctx) {
@@ -558,16 +465,25 @@ async function ensureDbChat(ctx) {
         if (rate) {
           chat.realtimeRate = rate
           await updateSettings(chatId, { realtimeRate: rate })
-          console.log(`[ensureDbChat][auto-set-realtime-rate] chatId=${chatId}, rate=${rate}`)
+          if (process.env.DEBUG_BOT === 'true') {
+            console.log(`[ensureDbChat][auto-set-realtime-rate] chatId=${chatId}, rate=${rate}`)
+          }
         }
       }
     }
     // 🔥 从数据库同步操作人列表到内存（修复操作人权限不生效的问题）
+    // 🔥 优化：使用缓存，避免每次都查询数据库
     if (chat) {
-      const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
-      chat.operators.clear()
-      for (const op of operators) {
-        chat.operators.add(op.username)
+      const lastSyncTime = chat._operatorsLastSync || 0
+      const now = Date.now()
+      // 🔥 操作人列表缓存5分钟，避免频繁查询
+      if (now - lastSyncTime > 5 * 60 * 1000 || chat.operators.size === 0) {
+        const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
+        chat.operators.clear()
+        for (const op of operators) {
+          chat.operators.add(op.username)
+        }
+        chat._operatorsLastSync = now
       }
     }
   } catch (e) {
@@ -1009,65 +925,82 @@ async function formatSummary(ctx, chat, options = {}) {
       const historical = await getHistoricalNotDispatched(chatId, settings)
       previousNotDispatched = historical.notDispatched
       previousNotDispatchedUSDT = historical.notDispatchedUSDT
-      console.log('[formatSummary][累计模式] 历史未下发', { chatId, previousNotDispatched, previousNotDispatchedUSDT })
+      // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[formatSummary][累计模式] 历史未下发', { chatId, previousNotDispatched, previousNotDispatchedUSDT })
+      }
     }
   } catch (e) {
     console.error('获取历史未下发失败', e)
   }
 
   // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
-  // 优化：只选择必要的字段，减少内存占用
-  try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
-    const bill = await prisma.bill.findFirst({ 
-      where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-      include: { 
-        items: {
-          select: {
-            type: true,
-            amount: true,
-            rate: true,
-            usdt: true,
-            replier: true,
-            operator: true,
-            createdAt: true
+  // 🔥 优化：只在内存记录为空或明显不一致时才同步，避免频繁查询
+  const lastSyncTime = chat._billLastSync || 0
+  const now = Date.now()
+  const needsSync = !chat._billLastSync || 
+                    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
+                    (now - lastSyncTime > 30 * 60 * 1000) // 30分钟同步一次
+  
+  if (needsSync) {
+    try {
+      const cutoffHour = await getDailyCutoffHour(chatId)
+      const gte = startOfDay(new Date(), cutoffHour)
+      const lt = endOfDay(new Date(), cutoffHour)
+      const bill = await prisma.bill.findFirst({ 
+        where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+        include: { 
+          items: {
+            select: {
+              type: true,
+              amount: true,
+              rate: true,
+              usdt: true,
+              replier: true,
+              operator: true,
+              createdAt: true
+            }
           }
+        },
+        orderBy: { openedAt: 'asc' }
+      })
+      
+      if (bill?.items) {
+        // 同步收入记录
+        const dbIncomes = bill.items.filter(i => i.type === 'INCOME').map(i => ({
+          amount: Number(i.amount),
+          rate: i.rate ? Number(i.rate) : undefined,
+          createdAt: new Date(i.createdAt),
+          replier: i.replier || '',
+          operator: i.operator || '',
+        }))
+        
+        // 同步下发记录
+        const dbDispatches = bill.items.filter(i => i.type === 'DISPATCH').map(i => ({
+          amount: Number(i.amount),
+          usdt: Number(i.usdt),
+          createdAt: new Date(i.createdAt),
+          replier: i.replier || '',
+          operator: i.operator || '',
+        }))
+        
+        // 更新内存状态（如果数据库有更多记录，则使用数据库的）
+        if (dbIncomes.length >= chat.current.incomes.length) {
+          chat.current.incomes = dbIncomes
         }
-      },
-      orderBy: { openedAt: 'asc' }
-    })
-    
-    if (bill?.items) {
-      // 同步收入记录
-      const dbIncomes = bill.items.filter(i => i.type === 'INCOME').map(i => ({
-        amount: Number(i.amount),
-        rate: i.rate ? Number(i.rate) : undefined,
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
-      
-      // 同步下发记录
-      const dbDispatches = bill.items.filter(i => i.type === 'DISPATCH').map(i => ({
-        amount: Number(i.amount),
-        usdt: Number(i.usdt),
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
-      
-      // 更新内存状态（如果数据库有更多记录，则使用数据库的）
-      if (dbIncomes.length > chat.current.incomes.length) {
-        chat.current.incomes = dbIncomes
+        if (dbDispatches.length >= chat.current.dispatches.length) {
+          chat.current.dispatches = dbDispatches
+        }
+        chat._billLastSync = now
+      } else {
+        // 数据库中没有账单，但标记已同步
+        chat._billLastSync = now
       }
-      if (dbDispatches.length > chat.current.dispatches.length) {
-        chat.current.dispatches = dbDispatches
+    } catch (e) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.error('从数据库同步记录失败', e)
       }
     }
-  } catch (e) {
-    console.error('从数据库同步记录失败', e)
   }
 
   const s = summarize(chat, { previousNotDispatched, previousNotDispatchedUSDT })
@@ -1283,18 +1216,20 @@ bot.use(async (ctx, next) => {
   const bypass = /^(?:\/start|\/myid|显示账单|\+0|使用说明)$/i.test(text)
   const currentToken = (process.env.BOT_TOKEN || '').trim()
   const boundToken = (dbChat?.bot?.token || '').trim()
-  // TEMP DEBUG: mask tokens and print binding info
-  try {
-    const mask = (s) => (s ? `${s.slice(0,4)}...${s.slice(-4)}` : '')
-    console.log('[bind-check]', {
-      chatId,
-      botId,
-      dbBotId: dbChat?.botId || null,
-      allowed: !!dbChat?.allowed,
-      currentToken4: mask(currentToken),
-      boundToken4: mask(boundToken),
-    })
-  } catch {}
+  // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
+  if (process.env.DEBUG_BOT === 'true') {
+    try {
+      const mask = (s) => (s ? `${s.slice(0,4)}...${s.slice(-4)}` : '')
+      console.log('[bind-check]', {
+        chatId,
+        botId,
+        dbBotId: dbChat?.botId || null,
+        allowed: !!dbChat?.allowed,
+        currentToken4: mask(currentToken),
+        boundToken4: mask(boundToken),
+      })
+    } catch {}
+  }
   const notBound = !dbChat?.botId || (boundToken ? boundToken !== currentToken : (dbChat?.botId !== botId))
   // 仅对文本消息给出提醒，且加频率限制，避免 429
   if (notBound) {
@@ -2611,7 +2546,8 @@ bot.action('open_dashboard', async (ctx) => {
 // 🔥 每小时自动更新实时汇率的定时任务
 async function updateAllRealtimeRates() {
   try {
-    console.log('[定时任务] 开始更新所有启用实时汇率的群组...')
+    // 🔥 优化：提前获取 botId，避免在循环中重复查询
+    const botId = await ensureCurrentBotId()
     
     // 获取所有启用实时汇率的设置
     const settings = await prisma.setting.findMany({
@@ -2620,39 +2556,36 @@ async function updateAllRealtimeRates() {
     })
     
     if (settings.length === 0) {
-      console.log('[定时任务] 没有需要更新的群组')
-      return
+      return // 🔥 移除不必要的日志输出
     }
     
     // 获取最新实时汇率
     const rate = await fetchRealtimeRateUSDTtoCNY()
     if (!rate) {
-      console.log('[定时任务] 获取实时汇率失败')
-      return
+      return // 🔥 移除不必要的日志输出
     }
     
-    console.log(`[定时任务] 获取到实时汇率: ${rate}，准备更新 ${settings.length} 个群组`)
+    // 🔥 批量更新所有群组的汇率（使用 updateMany 优化）
+    const chatIds = settings.map(s => s.chatId)
+    await prisma.setting.updateMany({
+      where: { 
+        chatId: { in: chatIds },
+        realtimeRate: { not: null }
+      },
+      data: { realtimeRate: rate }
+    })
     
-    // 批量更新所有群组的汇率
+    // 🔥 批量更新内存中的汇率
     for (const setting of settings) {
-      try {
-        await prisma.setting.update({
-          where: { chatId: setting.chatId },
-          data: { realtimeRate: rate }
-        })
-        
-        // 同时更新内存中的汇率
-        const botId = await ensureCurrentBotId()
-        const chat = getChat(botId, setting.chatId)
-        if (chat) {
-          chat.realtimeRate = rate
-        }
-      } catch (e) {
-        console.error(`[定时任务] 更新群组 ${setting.chatId} 失败:`, e)
+      const chat = getChat(botId, setting.chatId)
+      if (chat) {
+        chat.realtimeRate = rate
       }
     }
     
-    console.log(`[定时任务] 汇率更新完成，新汇率: ${rate}`)
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log(`[定时任务] 汇率更新完成，新汇率: ${rate}，更新了 ${settings.length} 个群组`)
+    }
   } catch (e) {
     console.error('[定时任务] 更新汇率失败:', e)
   }
@@ -2701,19 +2634,21 @@ bot.launch().then(async () => {
     }
   }, 6 * 3600000) // 6小时
   
-  // 3. 每12小时打印内存使用情况
-  const logMemoryUsage = () => {
-    const used = process.memoryUsage()
-    console.log('[内存监控]', {
-      rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
-      heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-      heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-      external: `${Math.round(used.external / 1024 / 1024)}MB`,
-      featureCacheSize: featureCache.size
-    })
+  // 3. 每12小时打印内存使用情况（仅在DEBUG模式下）
+  if (process.env.DEBUG_BOT === 'true') {
+    const logMemoryUsage = () => {
+      const used = process.memoryUsage()
+      console.log('[内存监控]', {
+        rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+        heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+        external: `${Math.round(used.external / 1024 / 1024)}MB`,
+        featureCacheSize: featureCache.size
+      })
+    }
+    logMemoryUsage() // 启动时打印一次
+    setInterval(logMemoryUsage, 12 * 3600000) // 12小时
   }
-  logMemoryUsage() // 启动时打印一次
-  setInterval(logMemoryUsage, 12 * 3600000) // 12小时
   
   console.log('[内存优化] 定期清理任务已启动')
   

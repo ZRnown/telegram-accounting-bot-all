@@ -47,17 +47,22 @@ declare global {
 // 🔥 创建 Prisma Client 实例
 let prismaInstance: PrismaClient
 
+// 🔥 统一日志配置：只在 DEBUG_PRISMA=true 时输出查询日志
+const prismaLogConfig = process.env.DEBUG_PRISMA === 'true' 
+  ? ['query', 'error', 'warn'] 
+  : ['error'] // 仅输出错误日志
+
 if (process.env.NODE_ENV === 'production') {
   // 生产环境：每次都创建新实例
   prismaInstance = new PrismaClient({
-    log: process.env.DEBUG_PRISMA === 'true' ? ['query', 'error', 'warn'] : ['error'],
+    log: prismaLogConfig,
   })
   console.log('[lib/db] ✅ Prisma Client 已初始化 (生产环境)')
 } else {
   // 开发环境：使用全局单例
   if (!global.prisma) {
     global.prisma = new PrismaClient({
-      log: ['query', 'error', 'warn'],
+      log: prismaLogConfig, // 🔥 默认不输出查询日志
     })
     console.log('[lib/db] ✅ Prisma Client 已初始化 (开发环境)')
   }
