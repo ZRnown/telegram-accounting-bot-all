@@ -1279,6 +1279,11 @@ function shouldWarnNow(chatId) {
 }
 
 bot.use(async (ctx, next) => {
+  // 🔥 如果是回调查询（callback_query），直接放行，让 action 处理
+  if (ctx.update.callback_query) {
+    return next()
+  }
+  
   if (!ctx.chat) return next()
   // 忽略频道类更新，机器人只服务群/超群
   if (ctx.chat.type === 'channel') {
@@ -1863,7 +1868,7 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   // If amount is zero, treat as a request to show the summary rather than recording
   if (!Number(parsed.amount)) {
     const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-    return ctx.reply(summary, { ...buildInlineKb(ctx), parse_mode: 'Markdown' })
+    return ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
   }
 
   const rate = parsed.rate ?? chat.fixedRate ?? chat.realtimeRate
@@ -2883,7 +2888,7 @@ bot.hears(/^设置标题\s+(.+)/i, async (ctx) => {
   chat.headerText = m[1].trim()
   const chatId = await ensureDbChat(ctx)
   await updateSettings(chatId, { headerText: chat.headerText })
-  await ctx.reply(`标题已设置为：${chat.headerText}`, await buildInlineKb(ctx))
+  await ctx.reply(`标题已设置为：${chat.headerText}`, { ...(await buildInlineKb(ctx)) })
 })
 
 // 🔥 开启所有功能（管理员/白名单用户）
@@ -2918,7 +2923,7 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   featureCache.delete(chatId)
   
-  await ctx.reply('✅ 已开启所有功能开关！', await buildInlineKb(ctx))
+  await ctx.reply('✅ 已开启所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[开启所有功能]', { chatId, featuresCreated })
   }
@@ -2953,7 +2958,7 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   featureCache.delete(chatId)
   
-  await ctx.reply('⭕ 已关闭所有功能开关！', await buildInlineKb(ctx))
+  await ctx.reply('⭕ 已关闭所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[关闭所有功能]', { chatId })
   }
@@ -2986,7 +2991,7 @@ bot.hears(/^开启地址验证$/i, async (ctx) => {
     create: { chatId, addressVerificationEnabled: true }
   })
   
-  await ctx.reply('✅ 已开启地址验证功能！', await buildInlineKb(ctx))
+  await ctx.reply('✅ 已开启地址验证功能！', { ...(await buildInlineKb(ctx)) })
   console.log('[开启地址验证]', { chatId })
 })
 
@@ -3017,13 +3022,43 @@ bot.hears(/^关闭地址验证$/i, async (ctx) => {
     create: { chatId, addressVerificationEnabled: false }
   })
   
-  await ctx.reply('⭕ 已关闭地址验证功能！', await buildInlineKb(ctx))
+  await ctx.reply('⭕ 已关闭地址验证功能！', { ...(await buildInlineKb(ctx)) })
   console.log('[关闭地址验证]', { chatId })
 })
 
 // 使用说明（内联菜单）
 bot.action('help', async (ctx) => {
-  try { await ctx.answerCbQuery() } catch {}
+  try { 
+    await ctx.answerCbQuery() 
+  } catch (e) {
+    console.error('[help-action][answerCbQuery-error]', e)
+  }
+  
+  // 🔥 私聊时显示简化的使用说明
+  if (ctx.chat?.type === 'private') {
+    const helpText = [
+      '━━━ 📖 机器人使用说明 ━━━',
+      '',
+      '本机器人仅支持在群组中使用记账功能。',
+      '',
+      '【📋 使用步骤】',
+      '1. 将机器人添加到群组',
+      '2. 联系管理员将您的ID添加到白名单',
+      '3. 在群组中使用记账功能',
+      '',
+      '【💰 基础记账】',
+      '• +720 - 记录人民币收入',
+      '• +100u - 记录USDT收入',
+      '• 下发10 - 下发10U',
+      '• 显示账单 - 查看当前账单',
+      '',
+      '💡 更多功能请查看完整使用说明：',
+      'https://t.me/your_bot_username'
+    ].join('\n')
+    
+    return ctx.reply(helpText, { parse_mode: 'Markdown' })
+  }
+  
   const help = [
     '━━━ 📖 机器人使用说明 ━━━',
     '',
@@ -3119,7 +3154,7 @@ bot.action('help', async (ctx) => {
     '• 设置汇率 7.2 - 设置你的汇率',
     '• 设置操作人 @xxx - 添加员工权限',
   ].join('\n')
-  await ctx.reply(help, await buildInlineKb(ctx))
+  await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
 })
 
 // 本地开发：发送文本链接
