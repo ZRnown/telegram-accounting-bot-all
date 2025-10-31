@@ -335,8 +335,14 @@ bot.on('message', async (ctx, next) => {
               await prisma.whitelistedUser.update({
                 where: { userId },
                 data: { username }
-              }).catch(() => {})
-              console.log('[message][username-updated]', { userId, oldUsername: whitelistedUser.username, newUsername: username })
+              }).catch((e) => {
+                if (process.env.DEBUG_BOT === 'true') {
+                  console.error('[message][username-update-error]', e)
+                }
+              })
+              if (process.env.DEBUG_BOT === 'true') {
+                console.log('[message][username-updated]', { userId, oldUsername: whitelistedUser.username, newUsername: username })
+              }
             }
             
             // ⚠️ 不在这里创建邀请记录，避免与 my_chat_member 事件重复
@@ -392,7 +398,11 @@ bot.on('message', async (ctx, next) => {
       await prisma.chat.update({
         where: { id: chatId },
         data: { title }
-      }).catch(() => {})
+      }).catch((e) => {
+        if (process.env.DEBUG_BOT === 'true') {
+          console.error('[message][title-update-error]', { chatId, error: e.message })
+        }
+      })
     }
     
     // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
@@ -489,9 +499,28 @@ async function ensureDbChat(ctx) {
     create: { chatId },
   })
   // Sync in-memory chat state with DB settings so summaries use latest fee/rate
+  // 🔥 优化：合并查询，减少数据库访问次数
+  const chat = ensureChat(ctx)
   try {
-    const settings = await prisma.setting.findUnique({ where: { chatId } })
-    const chat = ensureChat(ctx)
+    // 🔥 并行查询设置和操作人列表（如果需要）
+    const [settings, needOperators] = await Promise.all([
+      prisma.setting.findUnique({ 
+        where: { chatId },
+        select: {
+          feePercent: true,
+          fixedRate: true,
+          realtimeRate: true,
+          headerText: true,
+          everyoneAllowed: true
+        }
+      }),
+      chat ? (async () => {
+        const lastSyncTime = chat._operatorsLastSync || 0
+        const now = Date.now()
+        return (now - lastSyncTime > 5 * 60 * 1000 || chat.operators.size === 0)
+      })() : Promise.resolve(false)
+    ])
+    
     if (settings && chat) {
       if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
       if (settings.fixedRate != null) chat.fixedRate = settings.fixedRate
@@ -511,20 +540,16 @@ async function ensureDbChat(ctx) {
         }
       }
     }
+    
     // 🔥 从数据库同步操作人列表到内存（修复操作人权限不生效的问题）
     // 🔥 优化：使用缓存，避免每次都查询数据库
-    if (chat) {
-      const lastSyncTime = chat._operatorsLastSync || 0
-      const now = Date.now()
-      // 🔥 操作人列表缓存5分钟，避免频繁查询
-      if (now - lastSyncTime > 5 * 60 * 1000 || chat.operators.size === 0) {
-        const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
-        chat.operators.clear()
-        for (const op of operators) {
-          chat.operators.add(op.username)
-        }
-        chat._operatorsLastSync = now
+    if (chat && needOperators) {
+      const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
+      chat.operators.clear()
+      for (const op of operators) {
+        chat.operators.add(op.username)
       }
+      chat._operatorsLastSync = Date.now()
     }
   } catch (e) {
     console.error('同步设置到内存失败', e)
@@ -534,24 +559,95 @@ async function ensureDbChat(ctx) {
 
 async function updateSettings(chatId, data) {
   await prisma.setting.update({ where: { chatId }, data })
+  // 🔥 如果更新了日切时间，清除缓存
+  if (data.dailyCutoffHour !== undefined) {
+    clearDailyCutoffCache(chatId)
+  }
 }
 
 /**
- * 获取群组的日切时间设置
+ * 获取群组的日切时间设置（带缓存优化）
  * @param {string} chatId - 群组ID
  * @returns {Promise<number>} 日切小时（0-23）
  */
+// 🔥 缓存日切时间设置，减少数据库查询
+const dailyCutoffCache = new Map() // Map<chatId, { value: number, timestamp: number }>
+const CUTOFF_CACHE_TTL = 5 * 60 * 1000 // 5分钟缓存
+
 async function getDailyCutoffHour(chatId) {
   try {
+    // 🔥 检查缓存
+    const cached = dailyCutoffCache.get(chatId)
+    if (cached && (Date.now() - cached.timestamp < CUTOFF_CACHE_TTL)) {
+      return cached.value
+    }
+    
+    // 🔥 查询数据库
     const setting = await prisma.setting.findUnique({
       where: { chatId },
       select: { dailyCutoffHour: true }
     })
-    return setting?.dailyCutoffHour ?? 0
+    const value = setting?.dailyCutoffHour ?? 0
+    
+    // 🔥 更新缓存
+    dailyCutoffCache.set(chatId, { value, timestamp: Date.now() })
+    
+    // 🔥 清理过期缓存（每100次调用清理一次）
+    if (dailyCutoffCache.size > 1000) {
+      const now = Date.now()
+      for (const [key, val] of dailyCutoffCache.entries()) {
+        if (now - val.timestamp >= CUTOFF_CACHE_TTL) {
+          dailyCutoffCache.delete(key)
+        }
+      }
+    }
+    
+    return value
   } catch (e) {
     console.error('[getDailyCutoffHour][error]', e)
     return 0  // 默认0点
   }
+}
+
+/**
+ * 🔥 清除日切时间缓存（当设置更新时调用）
+ */
+function clearDailyCutoffCache(chatId) {
+  dailyCutoffCache.delete(chatId)
+}
+
+/**
+ * 🔥 获取或创建当天的OPEN账单（优化重复代码）
+ * @param {string} chatId - 群组ID
+ * @returns {Promise<{bill: any, gte: Date, lt: Date}>}
+ */
+async function getOrCreateTodayBill(chatId) {
+  const cutoffHour = await getDailyCutoffHour(chatId)
+  const now = new Date()
+  const gte = startOfDay(now, cutoffHour)
+  const lt = endOfDay(now, cutoffHour)
+  
+  let bill = await prisma.bill.findFirst({ 
+    where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
+    orderBy: { openedAt: 'asc' } 
+  })
+  
+  if (!bill) {
+    // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
+    bill = await prisma.bill.create({ 
+      data: { 
+        chatId, 
+        status: 'OPEN', 
+        openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
+        savedAt: new Date() 
+      } 
+    })
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
+    }
+  }
+  
+  return { bill, gte, lt }
 }
 
 /**
@@ -663,48 +759,36 @@ async function getHistoricalNotDispatched(chatId, settings) {
 }
 
 async function deleteLastIncome(chatId) {
-  const cutoffHour = await getDailyCutoffHour(chatId)
-  const gte = startOfDay(new Date(), cutoffHour)
-  const lt = endOfDay(new Date(), cutoffHour)
+  const { bill } = await getOrCreateTodayBill(chatId)
   
   // 🔥 从 BillItem 表查询（新的存储方式）
-  const bill = await prisma.bill.findFirst({
-    where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-    include: { items: { where: { type: 'INCOME' }, orderBy: { createdAt: 'desc' }, take: 1 } }
+  if (!bill) return false
+  
+  // 查找账单中的最后一个入款记录
+  const lastItem = await prisma.billItem.findFirst({
+    where: { billId: bill.id, type: 'INCOME' },
+    orderBy: { createdAt: 'desc' }
   })
   
-  const lastItem = bill?.items?.[0]
-  if (!lastItem) {
-    // 兼容旧数据：尝试从 income 表查询
-    const last = await prisma.income.findFirst({ where: { chatId, createdAt: { gte, lt } }, orderBy: { createdAt: 'desc' } })
-    if (!last) return false
-    await prisma.income.delete({ where: { id: last.id } })
-    return last
-  }
+  if (!lastItem) return false
   
   await prisma.billItem.delete({ where: { id: lastItem.id } })
   return { amount: Number(lastItem.amount), rate: lastItem.rate ? Number(lastItem.rate) : undefined }
 }
 
 async function deleteLastDispatch(chatId) {
-  const cutoffHour = await getDailyCutoffHour(chatId)
-  const gte = startOfDay(new Date(), cutoffHour)
-  const lt = endOfDay(new Date(), cutoffHour)
+  const { bill } = await getOrCreateTodayBill(chatId)
   
   // 🔥 从 BillItem 表查询（新的存储方式）
-  const bill = await prisma.bill.findFirst({
-    where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-    include: { items: { where: { type: 'DISPATCH' }, orderBy: { createdAt: 'desc' }, take: 1 } }
+  if (!bill) return false
+  
+  // 查找账单中的最后一个下发记录
+  const lastItem = await prisma.billItem.findFirst({
+    where: { billId: bill.id, type: 'DISPATCH' },
+    orderBy: { createdAt: 'desc' }
   })
   
-  const lastItem = bill?.items?.[0]
-  if (!lastItem) {
-    // 兼容旧数据：尝试从 dispatch 表查询
-    const last = await prisma.dispatch.findFirst({ where: { chatId, createdAt: { gte, lt } }, orderBy: { createdAt: 'desc' } })
-    if (!last) return false
-    await prisma.dispatch.delete({ where: { id: last.id } })
-    return last
-  }
+  if (!lastItem) return false
   
   await prisma.billItem.delete({ where: { id: lastItem.id } })
   return { amount: Number(lastItem.amount), usdt: lastItem.usdt ? Number(lastItem.usdt) : 0 }
@@ -862,7 +946,13 @@ function isPublicUrl(u) {
   }
 }
 
-async function fetchBinanceP2PRateUSDTtoCNY() {
+/**
+ * 🔥 获取币安P2P详细价格信息（OTC价格）
+ * @param {string} tradeType - 'SELL' 或 'BUY'
+ * @param {number} rows - 获取的订单数量，默认20
+ * @returns {Promise<{avg: number, min: number, max: number, prices: number[], orders: any[]} | null>}
+ */
+async function fetchBinanceP2PDetailed(tradeType = 'SELL', rows = 20) {
   try {
     const resp = await fetch('https://p2p.binance.com/bapi/c2c/v2/public/c2c/adv/search', {
       method: 'POST',
@@ -871,31 +961,51 @@ async function fetchBinanceP2PRateUSDTtoCNY() {
       },
       body: JSON.stringify({
         page: 1,
-        rows: 10,
+        rows: rows,
         payTypes: [],
         asset: 'USDT',
-        tradeType: 'SELL',
+        tradeType: tradeType,
         fiat: 'CNY',
         publisherType: null,
       }),
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
-    const rows = Array.isArray(data?.data) ? data.data : []
-    const prices = rows
+    const orders = Array.isArray(data?.data) ? data.data : []
+    const prices = orders
       .map((item) => Number(item?.adv?.price))
       .filter((p) => Number.isFinite(p) && p > 0)
+    
     if (!prices.length) throw new Error('No valid price from Binance P2P')
-    const take = prices.slice(0, Math.min(prices.length, 5))
-    const avg = take.reduce((sum, p) => sum + p, 0) / take.length
-    return Number(avg.toFixed(4))
+    
+    // 计算统计数据
+    const sortedPrices = [...prices].sort((a, b) => a - b)
+    const avg = prices.reduce((sum, p) => sum + p, 0) / prices.length
+    const min = sortedPrices[0]
+    const max = sortedPrices[sortedPrices.length - 1]
+    
+    return {
+      avg: Number(avg.toFixed(4)),
+      min: Number(min.toFixed(4)),
+      max: Number(max.toFixed(4)),
+      prices: sortedPrices,
+      orders: orders.slice(0, 10), // 只返回前10个订单详情
+      count: prices.length
+    }
   } catch (e) {
-    // 🔥 只在 DEBUG 模式下输出错误日志，避免正常情况下的冗余日志
     if (process.env.DEBUG_BOT === 'true') {
-      console.error('Binance P2P 汇率获取失败', e)
+      console.error(`[Binance P2P ${tradeType}] 获取失败`, e)
     }
     return null
   }
+}
+
+/**
+ * 获取币安P2P平均价格（简化版本，兼容旧代码）
+ */
+async function fetchBinanceP2PRateUSDTtoCNY() {
+  const data = await fetchBinanceP2PDetailed('SELL', 10)
+  return data ? data.avg : null
 }
 
 async function fetchCoinGeckoRateUSDTtoCNY() {
@@ -985,15 +1095,65 @@ async function buildInlineKb(ctx) {
 async function formatSummary(ctx, chat, options = {}) {
   const chatId = String(ctx?.chat?.id || '')
   
-  // 获取设置和历史未下发金额
+  // 🔥 优化：合并数据库查询，减少查询次数
   let previousNotDispatched = 0
   let previousNotDispatchedUSDT = 0
   let accountingMode = 'DAILY_RESET'
   
+  // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
+  // 🔥 优化：只在内存记录为空或明显不一致时才同步，避免频繁查询
+  const lastSyncTime = chat._billLastSync || 0
+  const now = Date.now()
+  const needsSync = !chat._billLastSync || 
+                    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
+                    (now - lastSyncTime > 30 * 60 * 1000) // 30分钟同步一次
+  
   try {
-    const settings = await prisma.setting.findUnique({ where: { chatId } })
+    // 🔥 并行获取设置和账单数据（如果需要同步）
+    const [settings, billData] = await Promise.all([
+      prisma.setting.findUnique({ 
+        where: { chatId },
+        select: {
+          accountingMode: true,
+          feePercent: true,
+          fixedRate: true,
+          realtimeRate: true
+        }
+      }),
+      needsSync ? (async () => {
+        try {
+          const cutoffHour = await getDailyCutoffHour(chatId)
+          const gte = startOfDay(new Date(), cutoffHour)
+          const lt = endOfDay(new Date(), cutoffHour)
+          return await prisma.bill.findFirst({ 
+            where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+            include: { 
+              items: {
+                select: {
+                  type: true,
+                  amount: true,
+                  rate: true,
+                  usdt: true,
+                  replier: true,
+                  operator: true,
+                  createdAt: true
+                }
+              }
+            },
+            orderBy: { openedAt: 'asc' }
+          })
+        } catch (e) {
+          if (process.env.DEBUG_BOT === 'true') {
+            console.error('查询账单失败', e)
+          }
+          return null
+        }
+      })() : Promise.resolve(null)
+    ])
+    
     accountingMode = settings?.accountingMode || 'DAILY_RESET'
     
+    // 处理历史未下发金额
     if (accountingMode === 'CARRY_OVER') {
       const historical = await getHistoricalNotDispatched(chatId, settings)
       previousNotDispatched = historical.notDispatched
@@ -1003,77 +1163,41 @@ async function formatSummary(ctx, chat, options = {}) {
         console.log('[formatSummary][累计模式] 历史未下发', { chatId, previousNotDispatched, previousNotDispatchedUSDT })
       }
     }
-  } catch (e) {
-    console.error('获取历史未下发失败', e)
-  }
-
-  // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
-  // 🔥 优化：只在内存记录为空或明显不一致时才同步，避免频繁查询
-  const lastSyncTime = chat._billLastSync || 0
-  const now = Date.now()
-  const needsSync = !chat._billLastSync || 
-                    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
-                    (now - lastSyncTime > 30 * 60 * 1000) // 30分钟同步一次
-  
-  if (needsSync) {
-    try {
-      const cutoffHour = await getDailyCutoffHour(chatId)
-      const gte = startOfDay(new Date(), cutoffHour)
-      const lt = endOfDay(new Date(), cutoffHour)
-      const bill = await prisma.bill.findFirst({ 
-        where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-        include: { 
-          items: {
-            select: {
-              type: true,
-              amount: true,
-              rate: true,
-              usdt: true,
-              replier: true,
-              operator: true,
-              createdAt: true
-            }
-          }
-        },
-        orderBy: { openedAt: 'asc' }
-      })
+    
+    // 同步账单数据到内存
+    if (needsSync && billData?.items) {
+      // 同步收入记录
+      const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => ({
+        amount: Number(i.amount),
+        rate: i.rate ? Number(i.rate) : undefined,
+        createdAt: new Date(i.createdAt),
+        replier: i.replier || '',
+        operator: i.operator || '',
+      }))
       
-      if (bill?.items) {
-        // 同步收入记录
-        const dbIncomes = bill.items.filter(i => i.type === 'INCOME').map(i => ({
-          amount: Number(i.amount),
-          rate: i.rate ? Number(i.rate) : undefined,
-          createdAt: new Date(i.createdAt),
-          replier: i.replier || '',
-          operator: i.operator || '',
-        }))
-        
-        // 同步下发记录
-        const dbDispatches = bill.items.filter(i => i.type === 'DISPATCH').map(i => ({
-          amount: Number(i.amount),
-          usdt: Number(i.usdt),
-          createdAt: new Date(i.createdAt),
-          replier: i.replier || '',
-          operator: i.operator || '',
-        }))
-        
-        // 更新内存状态（如果数据库有更多记录，则使用数据库的）
-        if (dbIncomes.length >= chat.current.incomes.length) {
-          chat.current.incomes = dbIncomes
-        }
-        if (dbDispatches.length >= chat.current.dispatches.length) {
-          chat.current.dispatches = dbDispatches
-        }
-        chat._billLastSync = now
-      } else {
-        // 数据库中没有账单，但标记已同步
-        chat._billLastSync = now
+      // 同步下发记录
+      const dbDispatches = billData.items.filter(i => i.type === 'DISPATCH').map(i => ({
+        amount: Number(i.amount),
+        usdt: Number(i.usdt),
+        createdAt: new Date(i.createdAt),
+        replier: i.replier || '',
+        operator: i.operator || '',
+      }))
+      
+      // 更新内存状态（如果数据库有更多记录，则使用数据库的）
+      if (dbIncomes.length >= chat.current.incomes.length) {
+        chat.current.incomes = dbIncomes
       }
-    } catch (e) {
-      if (process.env.DEBUG_BOT === 'true') {
-        console.error('从数据库同步记录失败', e)
+      if (dbDispatches.length >= chat.current.dispatches.length) {
+        chat.current.dispatches = dbDispatches
       }
+      chat._billLastSync = now
+    } else if (needsSync) {
+      // 数据库中没有账单，但标记已同步
+      chat._billLastSync = now
     }
+  } catch (e) {
+    console.error('获取设置或同步数据失败', e)
   }
 
   const s = summarize(chat, { previousNotDispatched, previousNotDispatchedUSDT })
@@ -1748,6 +1872,147 @@ bot.hears(/^激活设置汇率\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
   await ctx.reply(`机器人已激活并设置固定汇率为 ${rate}`)
 })
 
+// 🔥 OTC价格查询功能
+bot.hears(/^(OTC价格|查询OTC|币安价格|币安OTC|otc价格|查询币安价格)$/i, async (ctx) => {
+  try {
+    await ctx.reply('🔄 正在获取OTC价格信息...')
+    
+    // 并行获取买价和卖价
+    const [buyData, sellData] = await Promise.all([
+      fetchBinanceP2PDetailed('BUY', 20),
+      fetchBinanceP2PDetailed('SELL', 20)
+    ])
+    
+    if (!buyData && !sellData) {
+      return ctx.reply('❌ 无法获取OTC价格信息，请稍后重试。\n\n💡 可能原因：\n• 网络连接问题\n• 币安API暂时不可用')
+    }
+    
+    // 构建价格信息文本
+    let priceText = '━━━ 💰 币安P2P OTC价格 ━━━\n\n'
+    priceText += `📅 更新时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n\n`
+    
+    // 卖价信息（用户卖出USDT获得CNY）
+    if (sellData) {
+      priceText += '【💰 卖出USDT价格（CNY）】\n'
+      priceText += `📊 平均价：*${sellData.avg}* CNY/USDT\n`
+      priceText += `📈 最高价：${sellData.max} CNY\n`
+      priceText += `📉 最低价：${sellData.min} CNY\n`
+      priceText += `📊 价格范围：${sellData.min} - ${sellData.max} CNY\n`
+      priceText += `📋 有效订单：${sellData.count} 单\n\n`
+    } else {
+      priceText += '【💰 卖出USDT价格】❌ 暂时无法获取\n\n'
+    }
+    
+    // 买价信息（用户买入USDT支付CNY）
+    if (buyData) {
+      priceText += '【💵 买入USDT价格（CNY）】\n'
+      priceText += `📊 平均价：*${buyData.avg}* CNY/USDT\n`
+      priceText += `📈 最高价：${buyData.max} CNY\n`
+      priceText += `📉 最低价：${buyData.min} CNY\n`
+      priceText += `📊 价格范围：${buyData.min} - ${buyData.max} CNY\n`
+      priceText += `📋 有效订单：${buyData.count} 单\n\n`
+    } else {
+      priceText += '【💵 买入USDT价格】❌ 暂时无法获取\n\n'
+    }
+    
+    // 价差分析
+    if (buyData && sellData) {
+      const spread = buyData.avg - sellData.avg
+      const spreadPercent = ((spread / sellData.avg) * 100).toFixed(2)
+      priceText += '【📊 价差分析】\n'
+      priceText += `💹 买卖价差：${spread.toFixed(4)} CNY (${spreadPercent}%)\n`
+      priceText += `💰 建议卖出价：${sellData.avg} CNY/USDT\n`
+      priceText += `💵 建议买入价：${buyData.avg} CNY/USDT\n\n`
+    }
+    
+    // 使用卖价（SELL）作为参考汇率计算常用金额映射
+    if (sellData) {
+      priceText += '【📋 常用金额映射（参考）】\n'
+      const amounts = [10, 50, 100, 500, 1000, 5000, 10000]
+      amounts.forEach(amount => {
+        const cny = (amount * sellData.avg).toFixed(2)
+        priceText += `• ${amount} USDT ≈ ${cny} CNY\n`
+      })
+      priceText += '\n'
+    }
+    
+    // 添加使用说明
+    priceText += '💡 说明：\n'
+    priceText += '• 价格数据来源于币安P2P平台\n'
+    priceText += '• 实际交易价格以平台显示为准\n'
+    priceText += '• 建议查看多个订单后再进行交易\n'
+    priceText += '• 注意交易安全和资金安全\n\n'
+    priceText += '🔗 币安P2P：https://p2p.binance.com'
+    
+    await ctx.reply(priceText, { parse_mode: 'Markdown' })
+  } catch (e) {
+    console.error('[OTC价格查询失败]', e)
+    await ctx.reply('❌ 查询OTC价格失败，请稍后重试。\n\n如果问题持续，请联系管理员。')
+  }
+})
+
+// 🔥 详细OTC价格查询（带订单列表）
+bot.hears(/^(详细OTC|OTC详情|币安详情)$/i, async (ctx) => {
+  try {
+    await ctx.reply('🔄 正在获取详细OTC价格信息...')
+    
+    const [buyData, sellData] = await Promise.all([
+      fetchBinanceP2PDetailed('BUY', 30),
+      fetchBinanceP2PDetailed('SELL', 30)
+    ])
+    
+    if (!buyData && !sellData) {
+      return ctx.reply('❌ 无法获取详细价格信息')
+    }
+    
+    let detailText = '━━━ 📊 币安P2P详细价格信息 ━━━\n\n'
+    
+    // 卖价详情
+    if (sellData) {
+      detailText += '【💰 卖出USDT订单（前5单）】\n'
+      const topSellOrders = sellData.orders.slice(0, 5)
+      topSellOrders.forEach((order, idx) => {
+        const price = Number(order?.adv?.price || 0)
+        const minAmount = order?.adv?.minSingleTransAmount || 0
+        const maxAmount = order?.adv?.maxSingleTransAmount || 0
+        const payMethods = order?.adv?.tradeMethods?.map(m => m?.tradeMethodName || '').filter(Boolean) || []
+        detailText += `${idx + 1}. 价格：*${price.toFixed(4)}* CNY\n`
+        detailText += `   限额：${minAmount} - ${maxAmount} USDT\n`
+        if (payMethods.length > 0) {
+          detailText += `   支付：${payMethods.join('、')}\n`
+        }
+        detailText += '\n'
+      })
+    }
+    
+    // 买价详情
+    if (buyData) {
+      detailText += '【💵 买入USDT订单（前5单）】\n'
+      const topBuyOrders = buyData.orders.slice(0, 5)
+      topBuyOrders.forEach((order, idx) => {
+        const price = Number(order?.adv?.price || 0)
+        const minAmount = order?.adv?.minSingleTransAmount || 0
+        const maxAmount = order?.adv?.maxSingleTransAmount || 0
+        const payMethods = order?.adv?.tradeMethods?.map(m => m?.tradeMethodName || '').filter(Boolean) || []
+        detailText += `${idx + 1}. 价格：*${price.toFixed(4)}* CNY\n`
+        detailText += `   限额：${minAmount} - ${maxAmount} USDT\n`
+        if (payMethods.length > 0) {
+          detailText += `   支付：${payMethods.join('、')}\n`
+        }
+        detailText += '\n'
+      })
+    }
+    
+    detailText += '💡 提示：更多订单信息请访问币安P2P平台查看\n'
+    detailText += '🔗 https://p2p.binance.com'
+    
+    await ctx.reply(detailText, { parse_mode: 'Markdown' })
+  } catch (e) {
+    console.error('[详细OTC价格查询失败]', e)
+    await ctx.reply('❌ 查询详细价格失败，请稍后重试')
+  }
+})
+
 // 允许本群（禁用群内白名单，统一提示后台审批）
 bot.hears(/^(允许本群|加入白名单)$/i, async (ctx) => {
   await ensureDbChat(ctx)
@@ -1923,27 +2188,7 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   
   // 将入款写入当天 OPEN 账单的 BillItem
   try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const now = new Date()
-    const gte = startOfDay(now, cutoffHour)
-    const lt = endOfDay(now, cutoffHour)
-    
-    // 🔥 确保 openedAt 在正确的日期范围内（使用当天的起始时间作为 openedAt）
-    let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
-    if (!bill) {
-      // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
-      bill = await prisma.bill.create({ 
-        data: { 
-          chatId, 
-          status: 'OPEN', 
-          openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
-          savedAt: new Date() 
-        } 
-      })
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
-      }
-    }
+    const { bill } = await getOrCreateTodayBill(chatId)
     const billItem = await prisma.billItem.create({ data: {
       billId: bill.id,
       type: 'INCOME',
@@ -2023,27 +2268,7 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   
   // 将下发写入当天 OPEN 账单的 BillItem
   try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const now = new Date()
-    const gte = startOfDay(now, cutoffHour)
-    const lt = endOfDay(now, cutoffHour)
-    
-    // 🔥 确保 openedAt 在正确的日期范围内（使用当天的起始时间作为 openedAt）
-    let bill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
-    if (!bill) {
-      // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
-      bill = await prisma.bill.create({ 
-        data: { 
-          chatId, 
-          status: 'OPEN', 
-          openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
-          savedAt: new Date() 
-        } 
-      })
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
-      }
-    }
+    const { bill } = await getOrCreateTodayBill(chatId)
     const billItem = await prisma.billItem.create({ data: {
       billId: bill.id,
       type: 'DISPATCH',
@@ -2086,12 +2311,9 @@ bot.hears(/^保存账单$/i, async (ctx) => {
   const chatId = await ensureDbChat(ctx)
   // 关闭当天 OPEN 账单
   try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
-    const openBill = await prisma.bill.findFirst({ where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, orderBy: { openedAt: 'asc' } })
-    if (openBill) {
-      await prisma.bill.update({ where: { id: openBill.id }, data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() } })
+    const { bill } = await getOrCreateTodayBill(chatId)
+    if (bill && bill.status === 'OPEN') {
+      await prisma.bill.update({ where: { id: bill.id }, data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() } })
     }
   } catch (e) {
     console.error('关闭 OPEN 账单失败', e)
@@ -2129,14 +2351,8 @@ bot.hears(/^删除账单$/i, async (ctx) => {
   
   // 🔥 不仅清空内存，还要删除数据库中当天的记录
   try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
+    const { bill, gte } = await getOrCreateTodayBill(chatId)
     
-    // 找到当天的 OPEN 状态账单
-    const bill = await prisma.bill.findFirst({
-      where: { chatId, status: 'OPEN', openedAt: { gte, lt } }
-    })
     if (bill) {
       // 删除该账单的所有明细
       await prisma.billItem.deleteMany({ where: { billId: bill.id } })
@@ -2161,7 +2377,9 @@ bot.hears(/^删除账单$/i, async (ctx) => {
         await prisma.billItem.deleteMany({ where: { billId: { in: billIds } } })
         // 删除所有历史账单
         await prisma.bill.deleteMany({ where: { id: { in: billIds } } })
-        console.log('[删除账单][累计模式] 已删除历史账单', { chatId, count: historicalBills.length })
+        if (process.env.DEBUG_BOT === 'true') {
+          console.log('[删除账单][累计模式] 已删除历史账单', { chatId, count: historicalBills.length })
+        }
       }
     }
   } catch (e) {
@@ -2246,40 +2464,39 @@ bot.hears(/^(我的账单|\/我)$/i, async (ctx) => {
   
   // 🔥 查询当前用户在群内的所有记录
   try {
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const gte = startOfDay(new Date(), cutoffHour)
-    const lt = endOfDay(new Date(), cutoffHour)
+    const { bill } = await getOrCreateTodayBill(chatId)
     
-    const bill = await prisma.bill.findFirst({
-      where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-      include: { 
-        items: { 
-          where: {
-            OR: [
-              { operator: username || undefined },
-              { replier: username || undefined },
-              { operator: { contains: userId } },
-              { replier: { contains: userId } }
-            ]
-          },
-          orderBy: { createdAt: 'desc' }
-        }
-      }
+    if (!bill) {
+      return ctx.reply('❌ 您在本群暂无记账记录')
+    }
+    
+    // 查询该用户在账单中的记录
+    const items = await prisma.billItem.findMany({
+      where: {
+        billId: bill.id,
+        OR: [
+          username ? { operator: username } : undefined,
+          username ? { replier: username.replace('@', '') } : undefined,
+          { operator: { contains: userId } },
+          { replier: { contains: userId } }
+        ].filter(Boolean)
+      },
+      orderBy: { createdAt: 'desc' }
     })
     
-    if (!bill || bill.items.length === 0) {
+    if (items.length === 0) {
       return ctx.reply('❌ 您在本群暂无记账记录')
     }
     
     // 🔥 格式化显示
     const lines = []
-    lines.push(`📋 您的账单记录（共 ${bill.items.length} 条）：\n`)
+    lines.push(`📋 您的账单记录（共 ${items.length} 条）：\n`)
     
     let totalIncome = 0
     let totalDispatch = 0
     let totalUSDT = 0
     
-    bill.items.forEach(item => {
+    items.forEach(item => {
       const amount = Number(item.amount || 0)
       const usdt = Number(item.usdt || 0)
       const isIncome = item.type === 'INCOME'
@@ -2704,28 +2921,28 @@ bot.use(async (ctx, next) => {
     const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : null
     
     try {
-      const cutoffHour = await getDailyCutoffHour(chatId)
-      const gte = startOfDay(new Date(), cutoffHour)
-      const lt = endOfDay(new Date(), cutoffHour)
+      const { bill } = await getOrCreateTodayBill(chatId)
       
-      const bill = await prisma.bill.findFirst({
-        where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-        include: { 
-          items: { 
-            where: {
-              OR: [
-                { operator: targetUsername || undefined },
-                { replier: targetUsername || undefined },
-                { operator: { contains: targetUserId } },
-                { replier: { contains: targetUserId } }
-              ]
-            },
-            orderBy: { createdAt: 'desc' }
-          }
-        }
+      if (!bill) {
+        const targetName = targetUsername || replyTo.from.first_name || '该用户'
+        return ctx.reply(`❌ ${targetName} 在本群暂无记账记录`)
+      }
+      
+      // 查询该用户在账单中的记录
+      const items = await prisma.billItem.findMany({
+        where: {
+          billId: bill.id,
+          OR: [
+            targetUsername ? { operator: targetUsername } : undefined,
+            targetUsername ? { replier: targetUsername.replace('@', '') } : undefined,
+            { operator: { contains: targetUserId } },
+            { replier: { contains: targetUserId } }
+          ].filter(Boolean)
+        },
+        orderBy: { createdAt: 'desc' }
       })
       
-      if (!bill || bill.items.length === 0) {
+      if (items.length === 0) {
         const targetName = targetUsername || replyTo.from.first_name || '该用户'
         return ctx.reply(`❌ ${targetName} 在本群暂无记账记录`)
       }
@@ -2733,13 +2950,13 @@ bot.use(async (ctx, next) => {
       // 🔥 格式化显示
       const targetName = targetUsername || `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim() || '该用户'
       const lines = []
-      lines.push(`📋 ${targetName} 的账单记录（共 ${bill.items.length} 条）：\n`)
+      lines.push(`📋 ${targetName} 的账单记录（共 ${items.length} 条）：\n`)
       
       let totalIncome = 0
       let totalDispatch = 0
       let totalUSDT = 0
       
-      bill.items.forEach(item => {
+      items.forEach(item => {
         const amount = Number(item.amount || 0)
         const usdt = Number(item.usdt || 0)
         const isIncome = item.type === 'INCOME'
@@ -2784,22 +3001,26 @@ bot.use(async (ctx, next) => {
   
   // 🔥 尝试从回复的消息中提取记录信息
   // 格式可能是：时间 金额 / 汇率=USDTU 用户名 或 时间 金额 (USDT)U
-  const cutoffHour = await getDailyCutoffHour(chatId)
-  const gte = startOfDay(new Date(), cutoffHour)
-  const lt = endOfDay(new Date(), cutoffHour)
+  const { bill } = await getOrCreateTodayBill(chatId)
   
-  const bill = await prisma.bill.findFirst({
-    where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-    include: { items: { orderBy: { createdAt: 'desc' } } }
+  if (!bill) {
+    return ctx.reply('❌ 未找到对应的记录')
+  }
+  
+  // 查询账单中的所有记录
+  const items = await prisma.billItem.findMany({
+    where: { billId: bill.id },
+    orderBy: { createdAt: 'desc' },
+    take: 10
   })
   
-  if (!bill || !bill.items.length) {
+  if (!items.length) {
     return ctx.reply('❌ 未找到对应的记录')
   }
   
   // 🔥 尝试匹配最近几条记录（最多匹配10条）
   let matchedItem = null
-  for (const item of bill.items.slice(0, 10)) {
+  for (const item of items) {
     const itemAmount = Math.abs(Number(item.amount) || 0)
     // 检查回复文本中是否包含该金额（允许小数点误差）
     if (replyText.includes(String(Math.round(itemAmount))) || 
@@ -3217,6 +3438,11 @@ bot.action('help', async (ctx) => {
     '• 显示模式4 - 推荐设置！',
     '• 设置汇率 7.2 - 设置你的汇率',
     '• 设置操作人 @xxx - 添加员工权限',
+    '',
+    '【💰 OTC价格查询】',
+    '• OTC价格 / 查询OTC - 查看币安P2P实时价格',
+    '• 详细OTC / OTC详情 - 查看详细订单信息',
+    '• 支持查看买卖价格、价差分析、常用金额映射',
   ].join('\n')
   await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
 })
@@ -3454,14 +3680,16 @@ bot.launch().then(async () => {
     // 🔥 更新机器人描述
     try {
       await bot.telegram.setMyDescription(
-        '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证、多群组独立设置。\n\n' +
+        '智能记账机器人 - 支持USDT/RMB记账、实时汇率、OTC价格查询、地址验证、多群组独立设置。\n\n' +
         '主要功能：\n' +
         '• 基础记账：+金额、下发金额、显示账单\n' +
         '• 数学计算：支持+100-50、+100*2等表达式\n' +
+        '• OTC价格：查询币安P2P实时买卖价格、价差分析\n' +
         '• 地址验证：检测钱包地址变更并提醒\n' +
         '• 功能开关：开启所有功能/关闭所有功能\n' +
         '• 多群组独立配置：每个群组独立设置\n\n' +
-        '发送 /help 查看完整使用说明。'
+        '发送 /help 查看完整使用说明。\n' +
+        '发送"OTC价格"查询实时价格。'
       )
       console.log('已更新机器人描述')
     } catch (e) {
