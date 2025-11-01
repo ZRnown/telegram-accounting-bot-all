@@ -865,10 +865,22 @@ async function isFeatureEnabled(ctx, feature) {
       where: { chatId }, 
       select: { feature: true, enabled: true } 
     })
+    
     const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
+    
+    // 🔥 简化权限系统：如果没有任何功能开关记录，默认允许基础记账（向后兼容）
+    if (flags.length === 0 && feature === 'accounting_basic') {
+      // 将 accounting_basic 添加到缓存中，标记为启用
+      set.add('accounting_basic')
+    }
+    
     featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
     return set.has(feature)
   } catch {
+    // 🔥 简化权限系统：出错时，基础记账功能默认允许（向后兼容）
+    if (feature === 'accounting_basic') {
+      return true
+    }
     return false
   }
 }
