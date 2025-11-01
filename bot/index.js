@@ -2570,7 +2570,7 @@ bot.hears(/^(z0|Z0)$/i, async (ctx) => {
       second: '2-digit'
     })
     
-    let priceText = '━━━ 💰 OKX实时U价 TOP 10 ━━━\n\n'
+    let priceText = '💰 OKX实时U价 TOP 10\n\n'
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -2639,7 +2639,7 @@ bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
       'wxpay': '微信'
     }[paymentMethod]
     
-    let priceText = `━━━ 💰 OKX实时U价 ${methodName} TOP 10 ━━━\n\n`
+    let priceText = `💰 OKX实时U价 ${methodName} TOP 10\n\n`
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -3384,7 +3384,7 @@ bot.action('help', async (ctx) => {
   // 🔥 私聊时显示简化的使用说明
   if (ctx.chat?.type === 'private') {
     const helpText = [
-      '━━━ 📖 机器人使用说明 ━━━',
+      '📖 机器人使用说明',
       '',
       '本机器人仅支持在群组中使用记账功能。',
       '',
@@ -3408,7 +3408,7 @@ bot.action('help', async (ctx) => {
   }
   
   const help = [
-    '━━━ 📖 机器人使用说明 ━━━',
+    '📖 机器人使用说明',
     '',
     '【💰 基础记账】',
     '• 开始记账 - 初始化群组记账',
