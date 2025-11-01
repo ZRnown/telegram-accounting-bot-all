@@ -1,80 +1,49 @@
 /**
- * OKX API 客户端
- * 支持调用OKX公共REST API接口
+ * OKX C2C API 客户端
+ * 仅支持获取C2C挂单数据
  */
 
-const OKX_BASE_URL = 'https://www.okx.com'
-
-export interface OKXApiResponse<T> {
-  code: string
-  msg: string
-  data: T[]
-}
-
-export interface OKXInstrument {
-  instType: string
-  instId: string
-  baseCcy?: string
-  quoteCcy?: string
-  settleCcy?: string
-  tickSz?: string
-  lotSz?: string
-  minSz?: string
-  lever?: string
-  state?: string
-  [key: string]: any
-}
-
-export interface OKXMarkPrice {
-  instType: string
-  instId: string
-  markPx: string
-  ts: string
-}
-
-export interface OKXPriceLimit {
-  instType: string
-  instId: string
-  buyLmt: string
-  sellLmt: string
-  ts: string
-  enabled: boolean
-}
-
-export interface OKXFundingRate {
-  instType: string
-  instId: string
-  fundingRate: string
-  fundingTime: string
-  nextFundingTime: string
-  ts: string
-  [key: string]: any
+/**
+ * OKX C2C 卖家信息
+ */
+export interface OKXC2CSeller {
+  nickName: string
+  price: number
+  paymentMethods: string[]
+  availableAmount: number
+  quoteMinAmountPerOrder: number
+  quoteMaxAmountPerOrder: number
 }
 
 /**
- * 调用OKX API
+ * 获取OKX C2C挂单数据
+ * @param paymentMethod - 支付方式 ('all', 'aliPay', 'wxPay', 'bank')
+ * @returns 返回处理过的卖家列表（按价格从低到高排序）
  */
-async function callOKXApi<T>(
-  endpoint: string,
-  params?: Record<string, string>
-): Promise<OKXApiResponse<T>> {
-  const url = new URL(`${OKX_BASE_URL}${endpoint}`)
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value) {
-        url.searchParams.append(key, value)
-      }
-    })
-  }
+export async function getOKXC2CSellers(
+  paymentMethod: 'all' | 'aliPay' | 'wxPay' | 'bank' = 'all'
+): Promise<OKXC2CSeller[]> {
+  const BASE_URL = 'https://www.okx.com/v3/c2c/tradingOrders/books'
+
+  // 构建请求参数
+  const params = new URLSearchParams({
+    side: 'sell',
+    baseCurrency: 'USDT',
+    quoteCurrency: 'CNY',
+    userType: 'all',
+    paymentMethod: paymentMethod,
+    t: Date.now().toString(), // 使用当前时间戳防止缓存
+  })
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await fetch(`${BASE_URL}?${params.toString()}`, {
       method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
       },
       signal: controller.signal,
     })
@@ -82,92 +51,36 @@ async function callOKXApi<T>(
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      throw new Error(`OKX API error: HTTP ${response.status}`)
+      throw new Error(`OKX C2C API HTTP ${response.status}`)
     }
 
-    const data: OKXApiResponse<T> = await response.json()
+    const data: any = await response.json()
 
-    if (data.code !== '0') {
-      throw new Error(`OKX API error: ${data.msg || data.code}`)
+    // 数据校验
+    if (data && data.code === '0' && Array.isArray(data.data?.sell)) {
+      // 提取、处理和排序数据
+      const sellers: OKXC2CSeller[] = data.data.sell.map((seller: any) => ({
+        nickName: seller.nickName || '未知商家',
+        price: parseFloat(seller.price || '0'),
+        paymentMethods: Array.isArray(seller.paymentMethods) ? seller.paymentMethods : [],
+        availableAmount: parseFloat(seller.availableAmount || '0'),
+        quoteMinAmountPerOrder: parseFloat(seller.quoteMinAmountPerOrder || '0'),
+        quoteMaxAmountPerOrder: parseFloat(seller.quoteMaxAmountPerOrder || '0'),
+      }))
+
+      // 按价格从低到高排序
+      sellers.sort((a, b) => a.price - b.price)
+      return sellers
+    } else {
+      console.error('[OKX C2C API] 返回数据格式不正确:', data.msg || '未知错误')
+      return []
     }
-
-    return data
   } catch (error: any) {
     clearTimeout(timeoutId)
     if (error.name === 'AbortError') {
-      throw new Error('OKX API request timeout')
+      throw new Error('OKX C2C API 请求超时')
     }
+    console.error('[OKX C2C API] 请求失败:', error)
     throw error
   }
 }
-
-/**
- * 获取交易产品基础信息
- */
-export async function getInstruments(params: {
-  instType: string
-  instFamily?: string
-  instId?: string
-}): Promise<OKXInstrument[]> {
-  const response = await callOKXApi<OKXInstrument>('/api/v5/public/instruments', params)
-  return response.data
-}
-
-/**
- * 获取标记价格
- */
-export async function getMarkPrice(params: {
-  instType: string
-  instFamily?: string
-  instId?: string
-}): Promise<OKXMarkPrice[]> {
-  const response = await callOKXApi<OKXMarkPrice>('/api/v5/public/mark-price', params)
-  return response.data
-}
-
-/**
- * 获取限价
- */
-export async function getPriceLimit(instId: string): Promise<OKXPriceLimit[]> {
-  const response = await callOKXApi<OKXPriceLimit>('/api/v5/public/price-limit', { instId })
-  return response.data
-}
-
-/**
- * 获取永续合约当前资金费率
- */
-export async function getFundingRate(instId: string): Promise<OKXFundingRate[]> {
-  const response = await callOKXApi<OKXFundingRate>('/api/v5/public/funding-rate', { instId })
-  return response.data
-}
-
-/**
- * 获取多个产品的标记价格
- */
-export async function getMultipleMarkPrices(
-  instIds: string[],
-  instType: 'SPOT' | 'SWAP' | 'FUTURES' = 'SPOT'
-): Promise<Record<string, OKXMarkPrice>> {
-  const results: Record<string, OKXMarkPrice> = {}
-
-  try {
-    // 并发获取所有产品的标记价格
-    const promises = instIds.map(async (instId) => {
-      try {
-        const prices = await getMarkPrice({ instType, instId })
-        if (prices.length > 0) {
-          results[instId] = prices[0]
-        }
-      } catch (error) {
-        console.error(`[OKX API] 获取 ${instId} 标记价格失败:`, error)
-      }
-    })
-
-    await Promise.all(promises)
-  } catch (error) {
-    console.error('[OKX API] 批量获取标记价格失败:', error)
-  }
-
-  return results
-}
-

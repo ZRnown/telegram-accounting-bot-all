@@ -13,6 +13,7 @@ import { getChat, parseAmountAndRate, summarize, safeCalculate, cleanupInactiveC
 import { prisma } from '../lib/db.ts'
 import { ensureDefaultFeatures } from './constants.ts'
 import { LRUCache } from './lru-cache.js'
+import { getOKXC2CSellers } from '../lib/okx-api.ts'
 
 const BOT_TOKEN = process.env.BOT_TOKEN
 if (!BOT_TOKEN) {
@@ -985,9 +986,14 @@ async function fetchRealtimeRateUSDTtoCNY() {
   return tertiary ? Number(tertiary.toFixed(2)) : null // 🔥 保留2位小数
 }
 
-async function buildInlineKb(ctx) {
+async function buildInlineKb(ctx, options = {}) {
   const rows = []
   const chatId = String(ctx?.chat?.id || '')
+  
+  // 🔥 如果指定了 hideHelpAndOrder，不显示使用说明和查看完整订单（用于 z0 命令）
+  if (options.hideHelpAndOrder) {
+    return Markup.inlineKeyboard(rows) // 返回空菜单
+  }
   
   // 🔥 私聊时显示特殊菜单
   if (ctx.chat?.type === 'private') {
@@ -1687,7 +1693,9 @@ function matchFeatureByText(text) {
   // fee / rate
   if (/^设置费率\s+/i.test(t)) return 'fee_setting'
   if (/^设置汇率\s+/i.test(t)) return 'fixed_rate'
-  if (/^(设置实时汇率|刷新实时汇率|显示实时汇率|z0|Z0)$/i.test(t)) return 'realtime_rate'
+  if (/^(设置实时汇率|刷新实时汇率|显示实时汇率)$/i.test(t)) return 'realtime_rate'
+  // z0 命令单独处理（OKX C2C价格）
+  if (/^(z0|Z0)$/i.test(t)) return 'okx_c2c'
   // display modes
   if (/^显示模式[123]$/i.test(t)) return 'display_modes'
   if (/^(人民币模式|双显模式)$/i.test(t)) return 'display_modes'
@@ -2040,15 +2048,15 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   let amountRMB, usdtValue
   
   if (isUSDT) {
-    // 输入的是USDT（下发10u），转换成人民币
-    usdtValue = Math.abs(inputValue)
-    amountRMB = rate ? Number((usdtValue * rate).toFixed(2)) : 0
+    // 输入的是USDT（下发500u），直接保存为USDT，人民币根据汇率计算
+    usdtValue = inputValue
+    amountRMB = rate ? Number((Math.abs(usdtValue) * rate).toFixed(2)) : 0
     // 保持符号
-    if (inputValue < 0) {
+    if (usdtValue < 0) {
       amountRMB = -amountRMB
     }
   } else {
-    // 输入的是人民币（下发10），转换成USDT
+    // 输入的是人民币（下发500），直接保存为人民币，USDT根据汇率计算
     amountRMB = inputValue
     usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
     // 保持符号
@@ -2401,11 +2409,130 @@ bot.hears(/^刷新实时汇率$/i, async (ctx) => {
   }
 })
 
-bot.hears(/^(显示实时汇率|z0|Z0)$/i, async (ctx) => {
+bot.hears(/^显示实时汇率$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   const rate = chat.realtimeRate ?? chat.fixedRate
   await ctx.reply(`当前汇率：${rate ?? '未设置'}`)
+})
+
+// 🔥 OKX C2C价格查询（z0命令）
+bot.hears(/^(z0|Z0)$/i, async (ctx) => {
+  try {
+    // 默认获取所有支付方式的数据
+    const sellers = await getOKXC2CSellers('all')
+    
+    if (sellers.length === 0) {
+      return ctx.reply('❌ 无法获取OKX实时U价数据，请稍后重试。')
+    }
+    
+    // 格式化价格排行榜
+    const topSellers = sellers.slice(0, 10)
+    const now = new Date()
+    const timeStr = now.toLocaleString('zh-CN', { 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit', 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    })
+    
+    let priceText = '━━━ 💰 OKX实时U价 TOP 10 ━━━\n\n'
+    
+    topSellers.forEach((seller, index) => {
+      const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
+      priceText += `${emoji}    ${seller.price.toFixed(3)}    ${seller.nickName}\n`
+    })
+    
+    priceText += `\n获取时间：${timeStr}`
+    
+    // 创建内联菜单按钮（所有、银行卡、支付宝、微信）
+    const inlineKb = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('所有', 'okx_c2c_all'),
+        Markup.button.callback('银行卡', 'okx_c2c_bank')
+      ],
+      [
+        Markup.button.callback('支付宝', 'okx_c2c_alipay'),
+        Markup.button.callback('微信', 'okx_c2c_wxpay')
+      ]
+    ])
+    
+    await ctx.reply(priceText, { ...inlineKb })
+  } catch (e) {
+    console.error('[OKX C2C价格查询失败]', e)
+    await ctx.reply('❌ 查询OKX实时U价失败，请稍后重试。')
+  }
+})
+
+// 🔥 处理OKX C2C内联菜单按钮回调
+bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
+  try {
+    await ctx.answerCbQuery()
+    
+    const paymentMethod = ctx.match[1]
+    
+    // 映射支付方式
+    const methodMap = {
+      'all': 'all',
+      'bank': 'bank',
+      'alipay': 'aliPay',
+      'wxpay': 'wxPay'
+    }
+    
+    const okxMethod = methodMap[paymentMethod] || 'all'
+    const sellers = await getOKXC2CSellers(okxMethod)
+    
+    if (sellers.length === 0) {
+      return ctx.reply('❌ 无法获取该支付方式的数据，请稍后重试。')
+    }
+    
+    // 格式化价格排行榜
+    const topSellers = sellers.slice(0, 10)
+    const now = new Date()
+    const timeStr = now.toLocaleString('zh-CN', { 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit', 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    })
+    
+    const methodName = {
+      'all': '所有',
+      'bank': '银行卡',
+      'alipay': '支付宝',
+      'wxpay': '微信'
+    }[paymentMethod]
+    
+    let priceText = `━━━ 💰 OKX实时U价 ${methodName} TOP 10 ━━━\n\n`
+    
+    topSellers.forEach((seller, index) => {
+      const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
+      priceText += `${emoji}    ${seller.price.toFixed(3)}    ${seller.nickName}\n`
+    })
+    
+    priceText += `\n获取时间：${timeStr}`
+    
+    // 创建内联菜单按钮
+    const inlineKb = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('所有', 'okx_c2c_all'),
+        Markup.button.callback('银行卡', 'okx_c2c_bank')
+      ],
+      [
+        Markup.button.callback('支付宝', 'okx_c2c_alipay'),
+        Markup.button.callback('微信', 'okx_c2c_wxpay')
+      ]
+    ])
+    
+    await ctx.editMessageText(priceText, { ...inlineKb })
+  } catch (e) {
+    console.error('[OKX C2C内联菜单处理失败]', e)
+    await ctx.answerCbQuery('❌ 获取数据失败，请稍后重试。', { show_alert: true })
+  }
 })
 
 // 🔥 添加操作员方式一：添加操作员 @AAA @BBB（支持多个用户名）
