@@ -1075,6 +1075,7 @@ async function formatSummary(ctx, chat, options = {}) {
   let previousNotDispatched = 0
   let previousNotDispatchedUSDT = 0
   let accountingMode = 'DAILY_RESET'
+  let settings = null // 🔥 在函数作用域声明 settings 变量
   
   // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
   // 🔥 优化：只在内存记录为空或明显不一致时才同步，避免频繁查询
@@ -1086,7 +1087,7 @@ async function formatSummary(ctx, chat, options = {}) {
   
   try {
     // 🔥 并行获取设置和账单数据（如果需要同步）
-    const [settings, billData] = await Promise.all([
+    const [settingsData, billData] = await Promise.all([
       prisma.setting.findUnique({ 
         where: { chatId },
         select: {
@@ -1126,6 +1127,9 @@ async function formatSummary(ctx, chat, options = {}) {
         }
       })() : Promise.resolve(null)
     ])
+    
+    // 🔥 将 settingsData 赋值给外层的 settings 变量
+    settings = settingsData
     
     accountingMode = settings?.accountingMode || 'DAILY_RESET'
     
