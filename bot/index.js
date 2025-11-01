@@ -1734,15 +1734,19 @@ function isAccountingCommand(text) {
 bot.use(async (ctx, next) => {
   try {
     const text = ctx.message?.text
+    if (!text) return next()
+    
     // 🔥 只对基础记账命令进行权限检查
-    if (isAccountingCommand(text)) {
+    const isAccounting = isAccountingCommand(text)
+    if (isAccounting) {
       // 🔥 临时：添加日志以便调试
-      console.log('[权限检查] 检测到记账命令', { text, chatId: ctx.chat?.id })
+      console.log('[权限检查] 检测到记账命令', { text: text.substring(0, 50), chatId: ctx.chat?.id })
       
       const ok = await isFeatureEnabled(ctx, 'accounting_basic')
-      console.log('[权限检查] 权限检查结果', { text, ok, chatId: ctx.chat?.id })
+      console.log('[权限检查] 权限检查结果', { text: text.substring(0, 50), ok, chatId: ctx.chat?.id })
       
       if (!ok) {
+        console.log('[权限检查] 权限检查失败，阻止执行', { text: text.substring(0, 50), chatId: ctx.chat?.id })
         // 检查是否启用了基础记账功能
         try {
           const chatId = await ensureDbChat(ctx)
@@ -2008,16 +2012,24 @@ bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
 // +金额 或 +金额/汇率 或 +金额u（USDT）；-金额 表示撤销/负向入款
 // 支持数学表达式：+100-50, +100*2, +80/21+30
 bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
+  console.log('[记账命令] 开始处理', { text: ctx.message.text, chatId: ctx.chat?.id })
+  
   const chat = ensureChat(ctx)
-  if (!chat) return
+  if (!chat) {
+    console.log('[记账命令] ensureChat失败')
+    return
+  }
   
   // 权限检查：默认只有管理员可以记账，其他人需要添加到操作人列表
-  if (!(await hasOperatorPermission(ctx))) {
+  const hasPermission = await hasOperatorPermission(ctx)
+  console.log('[记账命令] 操作权限检查', { hasPermission, chatId: ctx.chat?.id })
+  if (!hasPermission) {
     return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。\n请联系管理员使用"设置操作人 @你的用户名"添加权限。')
   }
   
   const chatId = await ensureDbChat(ctx)
   const text = ctx.message.text.trim()
+  console.log('[记账命令] 开始解析', { text, chatId })
   
   // 🔥 保存用户ID映射（用于显示时链接到用户主页）
   if (ctx.from?.id && ctx.from?.username) {
@@ -2101,8 +2113,25 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   }
   
   // 发送完整账单（不发送确认消息）
-  const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+  try {
+    console.log('[记账命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
+    const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+    console.log('[记账命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
+    
+    const inlineKb = await buildInlineKb(ctx)
+    console.log('[记账命令] 内联键盘生成完成', { chatId: ctx.chat?.id })
+    
+    await ctx.reply(summary, { ...inlineKb, parse_mode: 'Markdown' })
+    console.log('[记账命令] 回复消息已发送', { chatId: ctx.chat?.id })
+  } catch (e) {
+    console.error('[记账命令] 发送回复失败', { error: e.message, stack: e.stack, chatId: ctx.chat?.id })
+    // 即使发送失败，也尝试发送一个简单回复
+    try {
+      await ctx.reply('✅ 记账已保存（账单显示失败，请稍后查看）')
+    } catch (e2) {
+      console.error('[记账命令] 发送备用回复也失败', { error: e2.message })
+    }
+  }
 })
 
 // 下发xxxx 或 下发10u（USDT）或 下发-xxxx （支持负数）
@@ -2187,8 +2216,25 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
     console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
     // 🔥 即使保存失败，也继续执行（避免影响用户体验）
   }
-  const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
-  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+  try {
+    console.log('[下发命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
+    const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
+    console.log('[下发命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
+    
+    const inlineKb = await buildInlineKb(ctx)
+    console.log('[下发命令] 内联键盘生成完成', { chatId: ctx.chat?.id })
+    
+    await ctx.reply(summary, { ...inlineKb, parse_mode: 'Markdown' })
+    console.log('[下发命令] 回复消息已发送', { chatId: ctx.chat?.id })
+  } catch (e) {
+    console.error('[下发命令] 发送回复失败', { error: e.message, stack: e.stack, chatId: ctx.chat?.id })
+    // 即使发送失败，也尝试发送一个简单回复
+    try {
+      await ctx.reply('✅ 下发已记录（账单显示失败，请稍后查看）')
+    } catch (e2) {
+      console.error('[下发命令] 发送备用回复也失败', { error: e2.message })
+    }
+  }
 })
 
 // 保存账单：把 current 推入 history，并清空 current
