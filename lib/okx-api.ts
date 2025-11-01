@@ -17,21 +17,26 @@ export interface OKXC2CSeller {
 
 /**
  * 获取OKX C2C挂单数据
- * @param paymentMethod - 支付方式 ('all', 'aliPay', 'wxPay', 'bank')
+ * @param paymentMethod - 支付方式 ('all', 'alipay', 'wxPay', 'bank')
  * @returns 返回处理过的卖家列表（按价格从低到高排序）
  */
 export async function getOKXC2CSellers(
-  paymentMethod: 'all' | 'aliPay' | 'wxPay' | 'bank' = 'all'
+  paymentMethod: 'all' | 'alipay' | 'wxPay' | 'bank' = 'all'
 ): Promise<OKXC2CSeller[]> {
   const BASE_URL = 'https://www.okx.com/v3/c2c/tradingOrders/books'
 
-  // 构建请求参数
+  // 构建请求参数（根据用户提供的真实API格式）
   const params = new URLSearchParams({
-    side: 'sell',
-    baseCurrency: 'USDT',
     quoteCurrency: 'CNY',
-    userType: 'all',
+    baseCurrency: 'USDT',
     paymentMethod: paymentMethod,
+    showTrade: 'false',
+    receivingAds: 'false',
+    isAbleFilter: 'false',
+    showFollow: 'false',
+    showAlreadyTraded: 'false',
+    side: 'sell',
+    userType: 'all',
     t: Date.now().toString(), // 使用当前时间戳防止缓存
   })
 

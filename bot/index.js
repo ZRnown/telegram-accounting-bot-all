@@ -2506,7 +2506,7 @@ bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
     const methodMap = {
       'all': 'all',
       'bank': 'bank',
-      'alipay': 'aliPay',
+      'alipay': 'alipay',
       'wxpay': 'wxPay'
     }
     

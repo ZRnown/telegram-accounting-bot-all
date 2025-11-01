@@ -2,19 +2,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 
 type FeatureInput = { feature: string; enabled: boolean }
+// 🔥 简化功能开关：只保留基础记账
 const DEFAULT_FEATURES: FeatureInput[] = [
-  { feature: 'realtime_rate', enabled: true },
-  { feature: 'fixed_rate', enabled: true },
-  { feature: 'fee_setting', enabled: true },
-  { feature: 'rmb_mode', enabled: false },
-  { feature: 'commission_mode', enabled: false },
-  { feature: 'display_modes', enabled: true },
-  { feature: 'show_mode_compact', enabled: true },
-  { feature: 'show_mode_full', enabled: true },
-  { feature: 'class_mute', enabled: true },
-  { feature: 'operators_bypass_mute', enabled: true },
   { feature: 'accounting_basic', enabled: true },
-  { feature: 'title_setting', enabled: true },
 ]
 
 export async function GET(_: NextRequest, context: { params: Promise<{ id: string }> }) {
