@@ -1141,6 +1141,12 @@ async function formatSummary(ctx, chat, options = {}) {
     console.error('获取设置或同步数据失败', e)
   }
 
+  // 🔥 从settings或chat中获取汇率信息，判断是固定汇率还是实时汇率
+  const currentFixedRate = settings?.fixedRate ?? chat.fixedRate ?? null
+  const currentRealtimeRate = settings?.realtimeRate ?? chat.realtimeRate ?? null
+  const isFixedRate = currentFixedRate != null
+  const rateLabel = isFixedRate ? '固定汇率' : '实时汇率'
+  
   const s = summarize(chat, { previousNotDispatched, previousNotDispatchedUSDT })
   const rateVal = s.effectiveRate || 0
 
@@ -1226,7 +1232,7 @@ async function formatSummary(ctx, chat, options = {}) {
     disPart,
     `\n总入款金额：${formatMoney(s.totalIncome)}`,
     `费率：${s.feePercent}%`,
-    `实时汇率：${rateVal || '未设置'}`,
+    `${rateLabel}：${rateVal || '未设置'}`,
     historicalInfo,
     ...(chat.rmbMode
       ? [
@@ -2389,17 +2395,17 @@ bot.hears(/^设置费率\s*(-?\d+(?:\.\d+)?)%?$/i, async (ctx) => {
   await ctx.reply(`费率已设置为 ${chat.feePercent}%`)
 })
 
-// 设置汇率（可带数值，也可不带数值查看当前）
-bot.hears(/^设置汇率(?:(?:\s+)(\d+(?:\.\d+)?))?$/i, async (ctx) => {
+// 设置汇率（可带数值，也可不带数值查看当前，支持不加空格：设置汇率7.2）
+bot.hears(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   const chatId = await ensureDbChat(ctx)
-  const m = ctx.message.text.match(/^设置汇率(?:(?:\s+)(\d+(?:\.\d+)?))?$/i)
+  const m = ctx.message.text.match(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i)
   const val = m && m[1] ? Number(m[1]) : null
   if (val == null) {
     const settings = await prisma.setting.findUnique({ where: { chatId } })
     const current = settings?.fixedRate ?? settings?.realtimeRate ?? null
-    return ctx.reply(`当前汇率：${current ?? '未设置'}\n用法：设置汇率 7.5`)
+    return ctx.reply(`当前汇率：${current ?? '未设置'}\n用法：设置汇率7.2 或 设置汇率 7.2`)
   }
   chat.fixedRate = val
   chat.realtimeRate = null
