@@ -851,12 +851,23 @@ const FEATURE_TTL_MS = 60 * 60 * 1000 // 1小时过期，释放内存
 async function isFeatureEnabled(ctx, feature) {
   try {
     const chatId = await ensureDbChat(ctx)
-    if (!chatId) return false
+    if (!chatId) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[isFeatureEnabled] chatId为空', { feature })
+      }
+      // 🔥 简化权限系统：基础记账功能默认允许
+      if (feature === 'accounting_basic') return true
+      return false
+    }
     
     const now = Date.now()
     const cached = featureCache.get(chatId)
     if (cached && cached.expires > now) {
-      return cached.set.has(feature)
+      const result = cached.set.has(feature)
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[isFeatureEnabled] 使用缓存', { chatId, feature, result })
+      }
+      return result
     }
     
     // 🔥 从群组级别的功能开关读取（ChatFeatureFlag）
@@ -866,17 +877,29 @@ async function isFeatureEnabled(ctx, feature) {
       select: { feature: true, enabled: true } 
     })
     
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[isFeatureEnabled] 查询数据库', { chatId, feature, flagsCount: flags.length, flags })
+    }
+    
     const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
     
     // 🔥 简化权限系统：如果没有任何功能开关记录，默认允许基础记账（向后兼容）
     if (flags.length === 0 && feature === 'accounting_basic') {
       // 将 accounting_basic 添加到缓存中，标记为启用
       set.add('accounting_basic')
+      if (process.env.DEBUG_BOT === 'true') {
+        console.log('[isFeatureEnabled] 无功能开关记录，默认允许基础记账', { chatId, feature })
+      }
     }
     
     featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
-    return set.has(feature)
-  } catch {
+    const result = set.has(feature)
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[isFeatureEnabled] 结果', { chatId, feature, result, enabledFeatures: Array.from(set) })
+    }
+    return result
+  } catch (e) {
+    console.error('[isFeatureEnabled] 异常', { feature, error: e.message })
     // 🔥 简化权限系统：出错时，基础记账功能默认允许（向后兼容）
     if (feature === 'accounting_basic') {
       return true
@@ -1713,7 +1736,12 @@ bot.use(async (ctx, next) => {
     const text = ctx.message?.text
     // 🔥 只对基础记账命令进行权限检查
     if (isAccountingCommand(text)) {
+      // 🔥 临时：添加日志以便调试
+      console.log('[权限检查] 检测到记账命令', { text, chatId: ctx.chat?.id })
+      
       const ok = await isFeatureEnabled(ctx, 'accounting_basic')
+      console.log('[权限检查] 权限检查结果', { text, ok, chatId: ctx.chat?.id })
+      
       if (!ok) {
         // 检查是否启用了基础记账功能
         try {
@@ -1758,16 +1786,23 @@ bot.use(async (ctx, next) => {
           }
           
           if (shouldWarn) {
+            console.log('[权限检查] 发送警告消息', { chatId, text })
             await ctx.reply('未开通基础记账功能')
           }
         } catch (e) {
           console.error('[权限检查][错误]', e)
         }
-        return
+        return // 🔥 权限检查失败，阻止继续执行
       }
+      // 🔥 权限检查通过，继续执行后续命令处理
+      console.log('[权限检查] 权限通过，继续执行', { text, chatId: ctx.chat?.id })
+      return next()
     }
+    // 🔥 非记账命令，直接放行
     return next()
-  } catch {
+  } catch (e) {
+    // 🔥 出错时默认放行，避免影响其他功能
+    console.error('[权限检查中间件][异常]', e)
     return next()
   }
 })
