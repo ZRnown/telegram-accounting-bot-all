@@ -2471,7 +2471,7 @@ bot.hears(/^(z0|Z0)$/i, async (ctx) => {
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
-      priceText += `${emoji}    ${seller.price.toFixed(3)}    ${seller.nickName}\n`
+      priceText += `${emoji}    ${seller.price.toFixed(2)}    ${seller.nickName}\n`
     })
     
     priceText += `\n获取时间：${timeStr}`
@@ -2540,7 +2540,7 @@ bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
-      priceText += `${emoji}    ${seller.price.toFixed(3)}    ${seller.nickName}\n`
+      priceText += `${emoji}    ${seller.price.toFixed(2)}    ${seller.nickName}\n`
     })
     
     priceText += `\n获取时间：${timeStr}`

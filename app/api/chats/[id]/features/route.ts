@@ -24,12 +24,18 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
       orderBy: { feature: 'asc' },
     })
     
-    if (!flags.length) {
-      // 🔥 如果没有功能开关，返回默认的全部启用状态
-      const defaultItems = DEFAULT_FEATURES.map(f => ({ feature: f, enabled: false }))
+    // 🔥 简化功能开关：只返回基础记账功能，过滤掉其他不需要的功能
+    const validFeatures = new Set(DEFAULT_FEATURES)
+    const filteredFlags = flags.filter(f => validFeatures.has(f.feature))
+    
+    if (!filteredFlags.length) {
+      // 🔥 如果没有功能开关，返回默认的基础记账功能（默认启用）
+      const defaultItems = DEFAULT_FEATURES.map(f => ({ feature: f, enabled: true }))
       return Response.json({ items: defaultItems, isDefault: true })
     }
-    return Response.json({ items: flags, isDefault: false })
+    
+    // 🔥 只返回基础记账功能
+    return Response.json({ items: filteredFlags, isDefault: false })
   } catch (e) {
     console.error('[GET /api/chats/[id]/features]', e)
     return new Response('Server error', { status: 500 })
@@ -55,12 +61,17 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
       return new Response('Chat not found', { status: 404 })
     }
 
-    // 删除现有的功能开关，重新创建
+    // 🔥 只保存基础记账功能，删除其他不需要的功能开关
+    const validFeatures = new Set(DEFAULT_FEATURES)
+    const validFeaturesToSave = body.features.filter(f => validFeatures.has(f.feature))
+    
+    // 删除所有现有的功能开关（包括不需要的）
     await prisma.chatFeatureFlag.deleteMany({ where: { chatId } })
     
-    if (body.features.length) {
+    // 只创建基础记账功能开关
+    if (validFeaturesToSave.length) {
       await prisma.chatFeatureFlag.createMany({
-        data: body.features.map((f) => ({
+        data: validFeaturesToSave.map((f) => ({
           chatId,
           feature: f.feature,
           enabled: Boolean(f.enabled),
@@ -68,13 +79,16 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
       })
     }
 
+    // 返回只包含基础记账功能的结果
     const flags = await prisma.chatFeatureFlag.findMany({
       where: { chatId },
       select: { feature: true, enabled: true },
       orderBy: { feature: 'asc' },
     })
     
-    return Response.json({ items: flags })
+    // 再次过滤，确保只返回有效的功能
+    const filteredFlags = flags.filter(f => validFeatures.has(f.feature))
+    return Response.json({ items: filteredFlags })
   } catch (e) {
     console.error('[PUT /api/chats/[id]/features]', e)
     return new Response('Server error', { status: 500 })
