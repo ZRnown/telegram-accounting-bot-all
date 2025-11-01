@@ -4,8 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-// ENV required: BOT_TOKEN
-// Optional: PROXY_URL (default: http://127.0.0.1:7897)
+
 
 import { Telegraf, Markup } from 'telegraf'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -1679,31 +1678,24 @@ bot.on('my_chat_member', async (ctx) => {
 function matchFeatureByText(text) {
   if (!text) return null
   const t = text.trim()
-  // class_mute
-  if (/^(上课|开始上课|下课|解除禁言|开口|查询工时)$/i.test(t)) return 'class_mute'
   // accounting_basic（基础记账、显示账单、下发）
   if (/^开始记账$/i.test(t)) return 'accounting_basic'
-  // 支持数学表达式的记账命令
   if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return 'accounting_basic'
   if (/^(下发)\b/.test(t)) return 'accounting_basic'
   if (/^(显示账单|\+0)$/i.test(t)) return 'accounting_basic'
   if (/^显示历史账单$/i.test(t)) return 'accounting_basic'
   if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return 'accounting_basic'
   if (/^(我的账单|\/我)$/i.test(t)) return 'accounting_basic'
-  // fee / rate
-  if (/^设置费率\s+/i.test(t)) return 'fee_setting'
-  if (/^设置汇率\s+/i.test(t)) return 'fixed_rate'
-  if (/^(设置实时汇率|刷新实时汇率|显示实时汇率)$/i.test(t)) return 'realtime_rate'
-  // z0 命令单独处理（OKX C2C价格）
+  // okx_c2c（OKX价格查询）
   if (/^(z0|Z0)$/i.test(t)) return 'okx_c2c'
-  // display modes
-  if (/^显示模式[123]$/i.test(t)) return 'display_modes'
-  if (/^(人民币模式|双显模式)$/i.test(t)) return 'display_modes'
-  // title
-  if (/^设置标题\s+/i.test(t)) return 'title_setting'
-  // commission
-  if (/^佣金\s*模式$/i.test(t)) return 'commission_mode'
-  if (/^(查询佣金|佣金清零)$/i.test(t)) return 'commission_mode'
+  // realtime_rate（实时汇率）
+  if (/^(设置实时汇率|刷新实时汇率|显示实时汇率)$/i.test(t)) return 'realtime_rate'
+  // fee_setting（费率设置）
+  if (/^设置费率\s+/i.test(t)) return 'fee_setting'
+  // display_modes（显示模式）
+  if (/^显示模式[123456]$/i.test(t)) return 'display_modes'
+  // class_mute（下课禁言）
+  if (/^(上课|开始上课|下课|解除禁言|开口|查询工时)$/i.test(t)) return 'class_mute'
   return null
 }
 
@@ -3306,7 +3298,8 @@ bot.action('help', async (ctx) => {
     '• 设置汇率 7.2 - 固定汇率（1U = 7.2元）',
     '• 设置实时汇率 - 自动抓取市场汇率（每小时更新）',
     '• 刷新实时汇率 - 手动更新实时汇率',
-    '• 显示实时汇率 或 z0 - 查看汇率',
+    '• 显示实时汇率 - 查看汇率',
+    '• z0 - 查询OKX实时U价',
     '• 设置费率 5 - 手续费5%（可选）',
     '',
     '【📊 记账模式】',

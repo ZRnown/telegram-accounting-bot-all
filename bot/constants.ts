@@ -1,18 +1,12 @@
 // 功能开关的默认配置（统一管理，避免重复）
 // ⚠️ 注意：这里只定义功能名称，创建时会全部设为 enabled: true
 export const DEFAULT_FEATURES = [
-  'realtime_rate',
-  'fixed_rate',
-  'fee_setting',
-  'rmb_mode',
-  'commission_mode',
-  'display_modes',
-  'show_mode_compact',
-  'show_mode_full',
-  'class_mute',
-  'operators_bypass_mute',
-  'accounting_basic',
-  'title_setting',
+  'accounting_basic',      // 基础记账
+  'okx_c2c',              // OKX C2C价格查询（z0）
+  'realtime_rate',        // 实时汇率
+  'fee_setting',          // 费率设置
+  'display_modes',        // 显示模式
+  'class_mute',           // 下课禁言
 ]
 
 /**

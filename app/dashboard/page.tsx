@@ -43,18 +43,12 @@ function DashboardPageInner() {
   const [inviteTotal, setInviteTotal] = useState(0)
 
   const FEATURE_NAME_MAP: Record<string, string> = {
-    realtime_rate: '实时汇率',
-    fixed_rate: '固定汇率',
-    fee_setting: '费率设置',
-    rmb_mode: '人民币模式',
-    commission_mode: '佣金模式',
-    display_modes: '显示模式控制',
-    show_mode_compact: '紧凑显示',
-    show_mode_full: '完整显示',
-    class_mute: '下课禁言',
-    operators_bypass_mute: '禁言时操作员可发言',
     accounting_basic: '基础记账',
-    title_setting: '标题设置',
+    okx_c2c: 'OKX价格查询（z0）',
+    realtime_rate: '实时汇率',
+    fee_setting: '费率设置',
+    display_modes: '显示模式',
+    class_mute: '下课禁言',
   }
 
   useEffect(() => {
