@@ -44,11 +44,6 @@ function DashboardPageInner() {
 
   const FEATURE_NAME_MAP: Record<string, string> = {
     accounting_basic: '基础记账',
-    okx_c2c: 'OKX价格查询（z0）',
-    realtime_rate: '实时汇率',
-    fee_setting: '费率设置',
-    display_modes: '显示模式',
-    class_mute: '下课禁言',
   }
 
   useEffect(() => {

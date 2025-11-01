@@ -1674,38 +1674,81 @@ bot.on('my_chat_member', async (ctx) => {
   } catch {}
 })
 
-// 基于消息文本的功能开关总控（在各指令前统一拦截）
-function matchFeatureByText(text) {
-  if (!text) return null
+// 🔥 简化权限系统：只对基础记账相关命令进行权限检查
+// 其他功能（z0、汇率、显示模式、下课禁言等）无需权限检查，直接可用
+function isAccountingCommand(text) {
+  if (!text) return false
   const t = text.trim()
-  // accounting_basic（基础记账、显示账单、下发）
-  if (/^开始记账$/i.test(t)) return 'accounting_basic'
-  if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return 'accounting_basic'
-  if (/^(下发)\b/.test(t)) return 'accounting_basic'
-  if (/^(显示账单|\+0)$/i.test(t)) return 'accounting_basic'
-  if (/^显示历史账单$/i.test(t)) return 'accounting_basic'
-  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return 'accounting_basic'
-  if (/^(我的账单|\/我)$/i.test(t)) return 'accounting_basic'
-  // okx_c2c（OKX价格查询）
-  if (/^(z0|Z0)$/i.test(t)) return 'okx_c2c'
-  // realtime_rate（实时汇率）
-  if (/^(设置实时汇率|刷新实时汇率|显示实时汇率)$/i.test(t)) return 'realtime_rate'
-  // fee_setting（费率设置）
-  if (/^设置费率\s+/i.test(t)) return 'fee_setting'
-  // display_modes（显示模式）
-  if (/^显示模式[123456]$/i.test(t)) return 'display_modes'
-  // class_mute（下课禁言）
-  if (/^(上课|开始上课|下课|解除禁言|开口|查询工时)$/i.test(t)) return 'class_mute'
-  return null
+  // 只检查基础记账相关命令
+  if (/^开始记账$/i.test(t)) return true
+  if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return true
+  if (/^(下发)\b/.test(t)) return true
+  if (/^(显示账单|\+0)$/i.test(t)) return true
+  if (/^显示历史账单$/i.test(t)) return true
+  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return true
+  if (/^(我的账单|\/我)$/i.test(t)) return true
+  return false
 }
 
 bot.use(async (ctx, next) => {
   try {
     const text = ctx.message?.text
-    const feature = matchFeatureByText(text)
-    if (!feature) return next()
-    if (await ensureFeature(ctx, feature)) return next()
-    return
+    // 🔥 只对基础记账命令进行权限检查
+    if (isAccountingCommand(text)) {
+      const ok = await isFeatureEnabled(ctx, 'accounting_basic')
+      if (!ok) {
+        // 检查是否启用了基础记账功能
+        try {
+          const chatId = await ensureDbChat(ctx)
+          const setting = await prisma.setting.findUnique({ 
+            where: { chatId },
+            select: { featureWarningMode: true }
+          })
+          
+          const warningMode = setting?.featureWarningMode || 'always'
+          let shouldWarn = false
+          
+          if (warningMode === 'always') {
+            shouldWarn = true
+          } else if (warningMode === 'once') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
+            })
+            if (!existingLog) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
+                create: { chatId, feature: 'accounting_basic' },
+                update: { warnedAt: new Date() }
+              }).catch(() => {})
+            }
+          } else if (warningMode === 'daily') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
+            })
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            
+            if (!existingLog || existingLog.warnedAt < today) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
+                create: { chatId, feature: 'accounting_basic' },
+                update: { warnedAt: now }
+              }).catch(() => {})
+            }
+          }
+          
+          if (shouldWarn) {
+            await ctx.reply('未开通基础记账功能')
+          }
+        } catch (e) {
+          console.error('[权限检查][错误]', e)
+        }
+        return
+      }
+    }
+    return next()
   } catch {
     return next()
   }
@@ -1823,7 +1866,6 @@ bot.hears(/^(禁止本群|移出白名单)$/i, async (ctx) => {
 })
 
 bot.hears(/^开始记账$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'accounting_basic'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   await ensureDbChat(ctx)
@@ -1832,7 +1874,6 @@ bot.hears(/^开始记账$/i, async (ctx) => {
 
 // 上课：开始计时（若已在计时则忽略）
 bot.hears(/^(上课|开始上课)$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'class_mute'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   await ensureDbChat(ctx)
@@ -1844,7 +1885,6 @@ bot.hears(/^(上课|开始上课)$/i, async (ctx) => {
 
 // 下课：停止计时并开启全体禁言（管理员不受影响；操作员放行）
 bot.hears(/^下课$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'class_mute'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   await ensureDbChat(ctx)
@@ -1859,7 +1899,6 @@ bot.hears(/^下课$/i, async (ctx) => {
 
 // 解除禁言/开口：关闭全体禁言
 bot.hears(/^(解除禁言|开口)$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'class_mute'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   await ensureDbChat(ctx)
@@ -1870,7 +1909,6 @@ bot.hears(/^(解除禁言|开口)$/i, async (ctx) => {
 
 // 查询工时：累计时长 + 进行中时长
 bot.hears(/^查询工时$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'class_mute'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   await ensureDbChat(ctx)
@@ -1917,7 +1955,6 @@ bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
 // +金额 或 +金额/汇率 或 +金额u（USDT）；-金额 表示撤销/负向入款
 // 支持数学表达式：+100-50, +100*2, +80/21+30
 bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
-  if (!(await ensureFeature(ctx, 'accounting_basic'))) return
   const chat = ensureChat(ctx)
   if (!chat) return
   
