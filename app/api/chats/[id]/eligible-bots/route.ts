@@ -4,8 +4,9 @@ import { prisma } from '@/lib/db'
 // 简易内存缓存：key=chatId，值为 { expires, items }
 type EligibleItem = { id: string; name: string }
 const cache = new Map<string, { expires: number; items: EligibleItem[] }>()
-const TTL_MS = 60_000 // 60s
-const CONCURRENCY = 4
+const TTL_MS = 5 * 60_000 // 🔥 增加到5分钟缓存，减少验证频率
+const CONCURRENCY = 3 // 🔥 适度增加并发数，提升速度
+const REQUEST_TIMEOUT_MS = 1000 // 🔥 1秒超时，快速失败
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -30,11 +31,16 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
         if (!b?.token) continue
         try {
           const url = `https://api.telegram.org/bot${encodeURIComponent(b.token)}/getChat?chat_id=${encodeURIComponent(id)}`
-          const resp = await fetch(url, { method: 'GET' })
+          const resp = await fetch(url, { 
+            method: 'GET',
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) // 🔥 快速超时
+          })
           if (!resp.ok) continue
           const j = await resp.json().catch(() => null)
           if (j && j.ok) eligible.push({ id: b.id, name: b.name })
-        } catch {}
+        } catch {
+          // 超时或失败时跳过，继续下一个
+        }
       }
     }
     const workers = Array.from({ length: Math.min(CONCURRENCY, Math.max(1, bots.length)) }, () => worker())

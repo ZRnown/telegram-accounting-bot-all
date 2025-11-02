@@ -6,7 +6,6 @@ import {
   registerSetRealtimeRate,
   registerRefreshRate,
   registerShowRate,
-  registerGlobalCutoff,
   registerOverDepositLimit
 } from './settings.js'
 import {
@@ -55,7 +54,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerSetRealtimeRate(bot, ensureChat)
   registerRefreshRate(bot, ensureChat)
   registerShowRate(bot, ensureChat)
-  registerGlobalCutoff(bot)
+  // registerGlobalCutoff - 已删除，改为后台设置
   registerOverDepositLimit(bot, ensureChat)
   
   // OKX相关

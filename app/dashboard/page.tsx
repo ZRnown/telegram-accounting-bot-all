@@ -36,11 +36,7 @@ function DashboardPageInner() {
   const [whitelistForm, setWhitelistForm] = useState({ userId: '', note: '' })
   const [whitelistSaving, setWhitelistSaving] = useState(false)
   
-  // 邀请记录状态
-  const [inviteRecords, setInviteRecords] = useState<Array<{ id: string; chatId: string; chatTitle: string | null; inviterId: string; inviterUsername: string | null; autoAllowed: boolean; createdAt: string }>>([])
-  const [inviteLoading, setInviteLoading] = useState(false)
-  const [invitePage, setInvitePage] = useState(1)
-  const [inviteTotal, setInviteTotal] = useState(0)
+  // 🔥 邀请记录功能已删除
 
   const FEATURE_NAME_MAP: Record<string, string> = {
     accounting_basic: '基础记账',
@@ -54,10 +50,9 @@ function DashboardPageInner() {
     if (!chatId && !token) {
       router.push("/")
     }
-    // 加载白名单和邀请记录
+    // 加载白名单
     if (!chatId && token) {
       loadWhitelistedUsers()
-      loadInviteRecords()
     }
   }, [router, chatId])
   
@@ -127,43 +122,7 @@ function DashboardPageInner() {
     }
   }
   
-  // 加载邀请记录
-  const loadInviteRecords = async (page = 1) => {
-    setInviteLoading(true)
-    try {
-      const res = await fetch(`/api/invite-records?page=${page}&size=20`)
-      if (res.ok) {
-        const json = await res.json()
-        setInviteRecords(Array.isArray(json.items) ? json.items : [])
-        setInviteTotal(json.total || 0)
-        setInvitePage(page)
-      }
-    } catch (e) {
-      console.error('加载邀请记录失败', e)
-    } finally {
-      setInviteLoading(false)
-    }
-  }
-  
-  // 删除邀请记录
-  const deleteInviteRecord = async (id: string) => {
-    if (!confirm('确定要删除这条邀请记录吗？')) return
-    try {
-      const res = await fetch('/api/invite-records', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      })
-      if (res.ok) {
-        await loadInviteRecords(invitePage)
-        alert('删除成功')
-      } else {
-        alert('删除失败')
-      }
-    } catch (e) {
-      alert('删除失败')
-    }
-  }
+  // 🔥 邀请记录功能已删除
 
   // 仅展示"已在该群内的机器人"
   const [eligibleBots, setEligibleBots] = useState<Record<string, Array<{ id: string; name: string }>>>({})
@@ -279,8 +238,12 @@ function DashboardPageInner() {
               }).catch(() => {})
             }, 100)
           } else {
-            // 没有缓存，正常加载
-            const botsRes = await fetch('/api/bots')
+            // 🔥 并行加载机器人和群组，提升加载速度
+            const [botsRes, chatsRes] = await Promise.all([
+              fetch('/api/bots'),
+              fetch('/api/chats')
+            ])
+            
             if (botsRes.ok) {
               const data = await botsRes.json()
               const items = Array.isArray(data?.items) ? data.items : []
@@ -288,9 +251,9 @@ function DashboardPageInner() {
               setBots(botsData)
               setCachedData(CACHE_KEY_BOTS, botsData)
             }
-            const res = await fetch('/api/chats')
-            if (res.ok) {
-              const json = await res.json()
+            
+            if (chatsRes.ok) {
+              const json = await chatsRes.json()
               const items = (Array.isArray(json?.items) ? json.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
               setGroups(items)
               setGroupsCount(items.length)
@@ -462,98 +425,6 @@ function DashboardPageInner() {
                     )}
                   </tbody>
                 </table>
-              </div>
-
-              {/* 邀请记录 */}
-              <div className="mt-6">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-medium text-slate-700">📋 最近邀请记录</div>
-                  <button
-                    className="text-xs px-2 py-1 border rounded hover:bg-slate-50"
-                    onClick={() => loadInviteRecords(invitePage)}
-                    disabled={inviteLoading}
-                  >
-                    {inviteLoading ? '刷新中...' : '刷新'}
-                  </button>
-                </div>
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 border-b">
-                      <tr>
-                        <th className="text-left py-2 px-3 text-slate-600">群组</th>
-                        <th className="text-left py-2 px-3 text-slate-600">邀请人ID</th>
-                        <th className="text-left py-2 px-3 text-slate-600">邀请人用户名</th>
-                        <th className="text-center py-2 px-3 text-slate-600">自动授权</th>
-                        <th className="text-left py-2 px-3 text-slate-600">时间</th>
-                        <th className="text-right py-2 px-3 text-slate-600">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inviteLoading ? (
-                        <tr>
-                          <td colSpan={6} className="text-center py-6 text-slate-500">
-                            加载中...
-                          </td>
-                        </tr>
-                      ) : inviteRecords.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="text-center py-6 text-slate-500">
-                            暂无邀请记录
-                          </td>
-                        </tr>
-                      ) : (
-                        inviteRecords.map((record) => (
-                          <tr key={record.id} className="border-b hover:bg-slate-50">
-                            <td className="py-2 px-3">{record.chatTitle || record.chatId}</td>
-                            <td className="py-2 px-3 font-mono">{record.inviterId}</td>
-                            <td className="py-2 px-3">{record.inviterUsername || '-'}</td>
-                            <td className="py-2 px-3 text-center">
-                              {record.autoAllowed ? (
-                                <span className="inline-block px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
-                                  ✓ 已授权
-                                </span>
-                              ) : (
-                                <span className="inline-block px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">
-                                  待审核
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-slate-600">
-                              {new Date(record.createdAt).toLocaleString('zh-CN')}
-                            </td>
-                            <td className="py-2 px-3 text-right">
-                              <button
-                                className="px-2 py-1 text-xs border rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600"
-                                onClick={() => deleteInviteRecord(record.id)}
-                              >
-                                删除
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {inviteTotal > 20 && (
-                  <div className="flex items-center justify-between mt-3 text-xs text-slate-600">
-                    <button
-                      className="px-3 py-1 border rounded hover:bg-slate-50 disabled:opacity-50"
-                      onClick={() => loadInviteRecords(invitePage - 1)}
-                      disabled={invitePage <= 1 || inviteLoading}
-                    >
-                      上一页
-                    </button>
-                    <span>第 {invitePage} 页 / 共 {Math.ceil(inviteTotal / 20)} 页</span>
-                    <button
-                      className="px-3 py-1 border rounded hover:bg-slate-50 disabled:opacity-50"
-                      onClick={() => loadInviteRecords(invitePage + 1)}
-                      disabled={invitePage * 20 >= inviteTotal || inviteLoading}
-                    >
-                      下一页
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
 

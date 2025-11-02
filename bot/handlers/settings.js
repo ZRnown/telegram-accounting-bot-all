@@ -3,7 +3,6 @@ import { prisma } from '../../lib/db.ts'
 import { ensureDbChat, updateSettings } from '../database.js'
 import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, isAdmin } from '../helpers.js'
 import { formatMoney } from '../utils.js'
-import { getGlobalDailyCutoffHour, setGlobalDailyCutoffHour } from '../utils.js'
 
 /**
  * 设置费率
@@ -139,36 +138,7 @@ export function registerShowRate(bot, ensureChat) {
   })
 }
 
-/**
- * 全局日切时间
- */
-export function registerGlobalCutoff(bot) {
-  bot.hears(/^全局日切时间\s+(\d+)$/i, async (ctx) => {
-    const hour = parseInt(ctx.match[1], 10)
-    
-    if (hour < 0 || hour > 23) {
-      return ctx.reply('❌ 日切时间必须在 0-23 之间')
-    }
-    
-    const isAdminUser = await isAdmin(ctx)
-    if (!isAdminUser) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以设置全局配置。')
-      }
-    }
-    
-    try {
-      const userId = String(ctx.from?.id || '')
-      await setGlobalDailyCutoffHour(hour, userId)
-      await ctx.reply(`✅ 已设置全局日切时间为 ${hour}:00\n所有群组都将应用此配置。`)
-    } catch (e) {
-      console.error('[全局日切时间]', e)
-      await ctx.reply('❌ 设置失败，请稍后重试')
-    }
-  })
-}
+// 🔥 全局日切时间命令已删除，改为后台设置
 
 /**
  * 设置超押提醒额度

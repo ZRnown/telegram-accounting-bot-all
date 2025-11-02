@@ -161,17 +161,6 @@ model WhitelistedUser {
   updatedAt DateTime @updatedAt
 }
 
-model InviteRecord {
-  id              String   @id @default(cuid())
-  chatId          String
-  chatTitle       String?
-  inviterId       String
-  inviterUsername String?
-  botId           String?
-  autoAllowed     Boolean  @default(false)
-  createdAt       DateTime @default(now())
-}
-
 model FeatureWarningLog {
   id       String   @id @default(cuid())
   chatId   String

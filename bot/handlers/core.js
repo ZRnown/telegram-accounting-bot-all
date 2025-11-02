@@ -176,17 +176,8 @@ export function registerHelp(bot) {
       '• 开启地址验证 - 启用钱包地址验证功能',
       '• 关闭地址验证 - 关闭钱包地址验证功能',
       '• 设置额度 10000 - 设置超押提醒额度（设置为0则关闭）',
-      '• 全局日切时间 8 - 设置全局日切时间（所有群组都应用）',
       '• 机器人退群 - 机器人自动退群并删除所有权限和数据',
       '💡 适用于机器人只发送通告的群，与其他机器人互不打扰',
-      '',
-      '【⚙️ 群组独立设置】',
-      '• 每个群组独立的功能开关',
-      '• 每个群组独立的记账模式设置',
-      '• 每个群组独立的操作人员名单',
-      '• 每个群组独立的汇率和费率设置',
-      '💡 在后台管理面板可设置每个群组的功能',
-      '💡 不同群组的设置互不影响',
       '',
       '【💡 使用示例】',
       '场景：客户充100U，做单扣10U',
@@ -228,10 +219,9 @@ export function registerDashboard(bot) {
  */
 export function registerStartAccountingAction(bot) {
   bot.action('start_accounting', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
     // 只在私聊中处理
     if (ctx.chat?.type !== 'private') {
+      try { await ctx.answerCbQuery('此功能仅在私聊中使用') } catch {}
       return ctx.reply('此功能仅在私聊中使用')
     }
     
@@ -244,6 +234,7 @@ export function registerStartAccountingAction(bot) {
     
     if (!whitelistedUser) {
       // 非白名单用户：显示提示信息
+      try { await ctx.answerCbQuery() } catch {}
       const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
       const firstName = ctx.from?.first_name || ''
       const lastName = ctx.from?.last_name || ''
@@ -260,33 +251,24 @@ export function registerStartAccountingAction(bot) {
     }
     
     // 🔥 白名单用户：直接打开邀请链接
-    // 获取机器人的用户名
-    let botUsername = process.env.BOT_USERNAME || ''
-    if (!botUsername) {
-      try {
-        const bot = await prisma.bot.findFirst({
-          where: { enabled: true },
-          select: { token: true }
+    // 使用当前 bot 实例获取用户名（最快方式）
+    try {
+      const me = await ctx.telegram.getMe()
+      const botUsername = me?.username
+      
+      if (botUsername) {
+        const inviteLink = `https://t.me/${botUsername}`
+        // 🔥 使用 answerCbQuery 的 url 选项直接打开链接（只能调用一次）
+        await ctx.answerCbQuery('正在打开邀请链接...', {
+          url: inviteLink
         })
-        if (bot?.token) {
-          const resp = await fetch(`https://api.telegram.org/bot${bot.token}/getMe`)
-          const data = await resp.json()
-          if (data.ok && data.result?.username) {
-            botUsername = data.result.username
-          }
-        }
-      } catch (e) {
-        console.error('获取机器人用户名失败', e)
+      } else {
+        try { await ctx.answerCbQuery() } catch {}
+        await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
       }
-    }
-    
-    if (botUsername) {
-      const inviteLink = `https://t.me/${botUsername.replace('@', '')}`
-      // 🔥 直接打开邀请链接，不显示回复消息
-      await ctx.answerCbQuery('正在打开邀请链接...', {
-        url: inviteLink
-      })
-    } else {
+    } catch (e) {
+      console.error('获取机器人用户名失败', e)
+      try { await ctx.answerCbQuery() } catch {}
       await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
     }
   })

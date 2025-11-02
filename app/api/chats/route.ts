@@ -59,44 +59,8 @@ export async function GET(req: NextRequest) {
       },
     })
     
-    // 🔥 后台异步验证（不阻塞响应，不修改返回数据）
-    // 验证失败不会导致群组从UI消失
-    setImmediate(async () => {
-      try {
-        const chatsToValidate = chats.slice(0, 10).filter(ch => ch.botId && ch.bot?.token)
-        if (chatsToValidate.length === 0) return
-        
-        const validationResults = await Promise.allSettled(
-          chatsToValidate.map(async (ch) => {
-            try {
-              const url = `https://api.telegram.org/bot${encodeURIComponent(ch.bot!.token)}/getChat?chat_id=${encodeURIComponent(ch.id)}`
-              const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(2000) })
-              const ok = resp.ok && (await resp.json().catch(() => null))?.ok
-              return { chatId: ch.id, valid: !!ok }
-            } catch {
-              return { chatId: ch.id, valid: false }
-            }
-          })
-        )
-        
-        // 只在确认无效时才更新（不更新返回的数据）
-        const invalidChats = validationResults
-          .filter((r) => r.status === 'fulfilled' && !r.value.valid)
-          .map((r: any) => r.value.chatId)
-        
-        // 🔥 延迟更新，避免频繁操作数据库
-        if (invalidChats.length > 0) {
-          setTimeout(async () => {
-            await prisma.chat.updateMany({
-              where: { id: { in: invalidChats } },
-              data: { botId: null }
-            }).catch(() => {})
-          }, 5000) // 5秒后更新
-        }
-      } catch (e) {
-        // 静默失败，不影响主流程
-      }
-    })
+    // 🔥 移除实时验证，直接返回数据（提升加载速度）
+    // 验证逻辑已移除，避免阻塞响应和导致群组消失
     
     return Response.json({ items: chats })
   } catch (e) {

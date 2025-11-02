@@ -45,45 +45,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '该用户ID已在白名单中' }, { status: 409 })
     }
 
-    // 🔥 优化：按优先级获取用户名
+    // 🔥 优化：通过 Telegram Bot API 获取用户名
     if (!username || !username.trim()) {
-      // 1. 尝试从邀请记录获取
-      const inviteRecord = await prisma.inviteRecord.findFirst({
-        where: { inviterId: userId },
-        orderBy: { createdAt: 'desc' },
-        select: { inviterUsername: true }
-      })
-      
-      if (inviteRecord?.inviterUsername) {
-        username = inviteRecord.inviterUsername
-      } else {
-        // 2. 尝试通过 Telegram Bot API 获取
-        try {
-          const bot = await prisma.bot.findFirst({
-            where: { enabled: true },
-            select: { token: true }
-          })
+      try {
+        const bot = await prisma.bot.findFirst({
+          where: { enabled: true },
+          select: { token: true }
+        })
 
-          if (bot?.token) {
-            const response = await fetch(
-              `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${userId}`,
-              { signal: AbortSignal.timeout(5000) }
-            )
-            const data = await response.json()
+        if (bot?.token) {
+          const response = await fetch(
+            `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${userId}`,
+            { signal: AbortSignal.timeout(5000) }
+          )
+          const data = await response.json()
 
-            if (data.ok && data.result) {
-              const user = data.result
-              username = user.username ? `@${user.username}` : 
-                        (user.first_name || user.last_name) ? 
-                        `${user.first_name || ''} ${user.last_name || ''}`.trim() :
-                        null
-              
-              console.log('[whitelisted-users][telegram-api-success]', { userId, username })
-            }
+          if (data.ok && data.result) {
+            const user = data.result
+            username = user.username ? `@${user.username}` : 
+                      (user.first_name || user.last_name) ? 
+                      `${user.first_name || ''} ${user.last_name || ''}`.trim() :
+                      null
+            
+            console.log('[whitelisted-users][telegram-api-success]', { userId, username })
           }
-        } catch (e) {
-          console.log('[whitelisted-users][telegram-api-failed]', userId, (e as Error).message)
         }
+      } catch (e) {
+        console.log('[whitelisted-users][telegram-api-failed]', userId, (e as Error).message)
       }
     }
 

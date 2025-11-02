@@ -667,72 +667,7 @@ bot.on('my_chat_member', async (ctx) => {
         }
       }
       
-      // 🔥 记录邀请信息（仅新加入时）
-      // 使用 upsert 确保即使重复也能记录（可能因为网络问题导致重复）
-      try {
-        // 🔥 使用 findFirst 查找最近的记录（同一群组同一邀请人）
-        const existing = await prisma.inviteRecord.findFirst({
-          where: {
-            chatId,
-            inviterId
-          },
-          orderBy: { createdAt: 'desc' }
-        })
-        
-        if (!existing) {
-          // 不存在记录，创建新记录
-          const newRecord = await prisma.inviteRecord.create({
-            data: {
-              chatId,
-              chatTitle: title,
-              inviterId,
-              inviterUsername,
-              botId,
-              autoAllowed
-            }
-          })
-          console.log('[invite-record] ✅ 创建成功', { 
-            id: newRecord.id,
-            chatId, 
-            inviterId, 
-            inviterUsername, 
-            autoAllowed,
-            title
-          })
-        } else {
-          // 已存在记录，更新信息（可能用户名或状态有变化）
-          await prisma.inviteRecord.update({
-            where: { id: existing.id },
-            data: {
-              chatTitle: title,
-              inviterUsername,
-              botId,
-              autoAllowed
-            }
-          })
-          console.log('[invite-record] ✅ 更新成功', { 
-            id: existing.id,
-            chatId, 
-            inviterId, 
-            inviterUsername, 
-            autoAllowed,
-            title
-          })
-        }
-      } catch (e) {
-        // 🔥 记录详细错误信息，帮助排查问题
-        console.error('[invite-record] ❌ 创建/更新失败', { 
-          chatId, 
-          inviterId,
-          inviterUsername,
-          title,
-          botId,
-          autoAllowed,
-          error: e.message,
-          code: e.code,
-          stack: e.stack
-        })
-      }
+      // 🔥 邀请记录功能已删除
       
       // Upsert chat，如果邀请人在白名单，自动设置 allowed=true
       const res = await prisma.chat.upsert({
@@ -2792,17 +2727,8 @@ const HELP_CONTENT = [
     '• 开启地址验证 - 启用钱包地址验证功能',
     '• 关闭地址验证 - 关闭钱包地址验证功能',
     '• 设置额度 10000 - 设置超押提醒额度（设置为0则关闭）',
-    '• 全局日切时间 8 - 设置全局日切时间（所有群组都应用）',
     '• 机器人退群 - 机器人自动退群并删除所有权限和数据',
     '💡 适用于机器人只发送通告的群，与其他机器人互不打扰',
-    '',
-    '【⚙️ 群组独立设置】',
-    '• 每个群组独立的功能开关',
-    '• 每个群组独立的记账模式设置',
-    '• 每个群组独立的操作人员名单',
-    '• 每个群组独立的汇率和费率设置',
-    '💡 在后台管理面板可设置每个群组的功能',
-    '💡 不同群组的设置互不影响',
     '',
     '【💡 使用示例】',
     '场景：客户充100U，做单扣10U',
@@ -2928,7 +2854,7 @@ bot.launch().then(async () => {
       // 🔥 更新机器人描述
       try {
         await bot.telegram.setMyDescription(
-          '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证、多群组独立设置。\n\n' +
+          '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证。\n\n' +
           '主要功能：\n' +
           '• 基础记账：+金额、下发金额、显示账单\n' +
           '• 数学计算：支持+100-50、+100*2等表达式\n' +
@@ -2939,8 +2865,7 @@ bot.launch().then(async () => {
           '• 地址验证：检测钱包地址变更并提醒\n' +
           '• 权限管理：显示管理员、权限人、操作员信息\n' +
           '• 机器人退群：一键退群并清除所有数据\n' +
-          '• 功能开关：开启所有功能/关闭所有功能\n' +
-          '• 多群组独立配置：每个群组独立设置\n\n' +
+          '• 功能开关：开启所有功能/关闭所有功能\n\n' +
           '发送 /help 查看完整使用说明。'
         )
       console.log('已更新机器人描述')
