@@ -43,8 +43,9 @@ export async function GET(req: NextRequest) {
       botId: { not: null },
     }
 
-    // 🔥 内存优化：减少查询字段，移除 featureFlags（如需要可单独查询）
-    let chats = await prisma.chat.findMany({
+    // 🔥 优化：直接返回群组数据，移除实时验证（避免群组消失）
+    // 验证逻辑移到后台任务，不阻塞API响应
+    const chats = await prisma.chat.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       select: {
@@ -58,34 +59,45 @@ export async function GET(req: NextRequest) {
       },
     })
     
-    // 🔥 内存优化：将惰性校验改为异步批量验证，只验证前20个群组
-    const chatsToValidate = chats.slice(0, 20).filter(ch => ch.botId && ch.bot?.token)
-    const validationResults = await Promise.allSettled(
-      chatsToValidate.map(async (ch) => {
-        try {
-          const url = `https://api.telegram.org/bot${encodeURIComponent(ch.bot!.token)}/getChat?chat_id=${encodeURIComponent(ch.id)}`
-          const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(3000) })
-          const ok = resp.ok && (await resp.json().catch(() => null))?.ok
-          return { chatId: ch.id, valid: !!ok }
-        } catch {
-          return { chatId: ch.id, valid: false }
+    // 🔥 后台异步验证（不阻塞响应，不修改返回数据）
+    // 验证失败不会导致群组从UI消失
+    setImmediate(async () => {
+      try {
+        const chatsToValidate = chats.slice(0, 10).filter(ch => ch.botId && ch.bot?.token)
+        if (chatsToValidate.length === 0) return
+        
+        const validationResults = await Promise.allSettled(
+          chatsToValidate.map(async (ch) => {
+            try {
+              const url = `https://api.telegram.org/bot${encodeURIComponent(ch.bot!.token)}/getChat?chat_id=${encodeURIComponent(ch.id)}`
+              const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(2000) })
+              const ok = resp.ok && (await resp.json().catch(() => null))?.ok
+              return { chatId: ch.id, valid: !!ok }
+            } catch {
+              return { chatId: ch.id, valid: false }
+            }
+          })
+        )
+        
+        // 只在确认无效时才更新（不更新返回的数据）
+        const invalidChats = validationResults
+          .filter((r) => r.status === 'fulfilled' && !r.value.valid)
+          .map((r: any) => r.value.chatId)
+        
+        // 🔥 延迟更新，避免频繁操作数据库
+        if (invalidChats.length > 0) {
+          setTimeout(async () => {
+            await prisma.chat.updateMany({
+              where: { id: { in: invalidChats } },
+              data: { botId: null }
+            }).catch(() => {})
+          }, 5000) // 5秒后更新
         }
-      })
-    )
+      } catch (e) {
+        // 静默失败，不影响主流程
+      }
+    })
     
-    // 批量更新无效的绑定
-    const invalidChats = validationResults
-      .filter((r) => r.status === 'fulfilled' && !r.value.valid)
-      .map((r: any) => r.value.chatId)
-    
-    if (invalidChats.length > 0) {
-      await prisma.chat.updateMany({
-        where: { id: { in: invalidChats } },
-        data: { botId: null }
-      })
-      // 更新返回的数据
-      chats = chats.map(ch => invalidChats.includes(ch.id) ? { ...ch, botId: null, bot: null } : ch)
-    }
     return Response.json({ items: chats })
   } catch (e) {
     console.error(e)

@@ -3,14 +3,14 @@
 
 import { LRUCache, limitMapSize, limitArraySize } from './lru-cache.js'
 
-// 配置项：内存优化
-const MAX_BOTS = 10 // 最多支持的机器人数量
-const MAX_CHATS_PER_BOT = 1000 // 每个机器人最多缓存的聊天数量
-const MAX_USER_ID_CACHE = 500 // 每个聊天最多缓存的用户ID映射
-const MAX_COMMISSIONS = 100 // 每个聊天最多缓存的佣金记录
-const MAX_HISTORY = 30 // 最多保留的历史账单数量
-const MAX_INCOMES = 1000 // 当前账单最多保留的入款记录
-const MAX_DISPATCHES = 1000 // 当前账单最多保留的下发记录
+// 配置项：内存优化（降低内存占用）
+const MAX_BOTS = 5 // 最多支持的机器人数量（减少）
+const MAX_CHATS_PER_BOT = 500 // 每个机器人最多缓存的聊天数量（减少）
+const MAX_USER_ID_CACHE = 200 // 每个聊天最多缓存的用户ID映射（减少）
+const MAX_COMMISSIONS = 50 // 每个聊天最多缓存的佣金记录（减少）
+const MAX_HISTORY = 10 // 最多保留的历史账单数量（减少，历史记录存数据库）
+const MAX_INCOMES = 200 // 当前账单最多保留的入款记录（减少，实际数据在数据库）
+const MAX_DISPATCHES = 200 // 当前账单最多保留的下发记录（减少，实际数据在数据库）
 
 // 使用 LRU 缓存存储 bot
 const bots = new LRUCache(MAX_BOTS)

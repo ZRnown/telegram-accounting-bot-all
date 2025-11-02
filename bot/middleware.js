@@ -1,0 +1,141 @@
+// 中间件模块
+import { prisma } from '../lib/db.ts'
+import { ensureDbChat } from './database.js'
+import { LRUCache } from './lru-cache.js'
+
+// 功能开关缓存
+const featureCache = new LRUCache(500)
+const FEATURE_TTL_MS = 60 * 60 * 1000 // 1小时
+
+/**
+ * 检查功能是否启用
+ */
+export async function isFeatureEnabled(ctx, feature) {
+  try {
+    const chatId = await ensureDbChat(ctx)
+    if (!chatId) {
+      if (feature === 'accounting_basic') return true
+      return false
+    }
+    
+    const now = Date.now()
+    const cached = featureCache.get(chatId)
+    if (cached && cached.expires > now) {
+      return cached.set.has(feature)
+    }
+    
+    const flags = await prisma.chatFeatureFlag.findMany({ 
+      where: { chatId }, 
+      select: { feature: true, enabled: true } 
+    })
+    
+    const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
+    
+    // 如果没有任何功能开关记录，默认允许基础记账
+    if (flags.length === 0 && feature === 'accounting_basic') {
+      set.add('accounting_basic')
+    }
+    
+    featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
+    return set.has(feature)
+  } catch (e) {
+    console.error('[isFeatureEnabled] 异常', { feature, error: e.message })
+    if (feature === 'accounting_basic') return true
+    return false
+  }
+}
+
+/**
+ * 清除功能开关缓存（用于功能开关更新后立即生效）
+ */
+export function clearFeatureCache(chatId) {
+  featureCache.delete(chatId)
+}
+
+/**
+ * 判断是否是记账命令
+ */
+export function isAccountingCommand(text) {
+  if (!text) return false
+  const t = text.trim()
+  if (/^开始记账$/i.test(t)) return true
+  if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return true
+  if (/^(下发)\b/.test(t)) return true
+  if (/^(显示账单|\+0)$/i.test(t)) return true
+  if (/^显示历史账单$/i.test(t)) return true
+  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return true
+  if (/^(我的账单|\/我)$/i.test(t)) return true
+  return false
+}
+
+/**
+ * 权限检查中间件
+ */
+export function createPermissionMiddleware() {
+  return async (ctx, next) => {
+    try {
+      const text = ctx.message?.text
+      if (!text || !isAccountingCommand(text)) {
+        return next()
+      }
+      
+      const ok = await isFeatureEnabled(ctx, 'accounting_basic')
+      if (!ok) {
+        try {
+          const chatId = await ensureDbChat(ctx)
+          const setting = await prisma.setting.findUnique({ 
+            where: { chatId },
+            select: { featureWarningMode: true }
+          })
+          
+          const warningMode = setting?.featureWarningMode || 'always'
+          let shouldWarn = false
+          
+          if (warningMode === 'always') {
+            shouldWarn = true
+          } else if (warningMode === 'once') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
+            })
+            if (!existingLog) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
+                create: { chatId, feature: 'accounting_basic' },
+                update: { warnedAt: new Date() }
+              }).catch(() => {})
+            }
+          } else if (warningMode === 'daily') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
+            })
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            
+            if (!existingLog || existingLog.warnedAt < today) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
+                create: { chatId, feature: 'accounting_basic' },
+                update: { warnedAt: now }
+              }).catch(() => {})
+            }
+          }
+          
+          if (shouldWarn) {
+            await ctx.reply('未开通基础记账功能')
+          }
+        } catch (e) {
+          console.error('[权限检查][错误]', e)
+        }
+        return
+      }
+      
+      return next()
+    } catch (e) {
+      console.error('[权限检查中间件][异常]', e)
+      return next()
+    }
+  }
+}
+

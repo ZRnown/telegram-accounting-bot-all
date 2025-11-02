@@ -8,11 +8,20 @@ import dotenv from 'dotenv'
 
 import { Telegraf, Markup } from 'telegraf'
 import { HttpsProxyAgent } from 'https-proxy-agent'
-import { getChat, parseAmountAndRate, summarize, safeCalculate, cleanupInactiveChats } from './state.js'
+import { getChat, safeCalculate, cleanupInactiveChats } from './state.js'
 import { prisma } from '../lib/db.ts'
 import { ensureDefaultFeatures } from './constants.ts'
-import { LRUCache } from './lru-cache.js'
-import { getOKXC2CSellers } from '../lib/okx-api.ts'
+import { 
+  getGlobalDailyCutoffHour, 
+  formatMoney, 
+  formatDuration
+} from './utils.js'
+// 新模块导入
+import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill } from './database.js'
+import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
+import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, hasOperatorPermission, getUsername, isAdmin } from './helpers.js'
+import { formatSummary } from './formatting.js'
+import { registerAllHandlers } from './handlers/index.js'
 
 const BOT_TOKEN = process.env.BOT_TOKEN
 if (!BOT_TOKEN) {
@@ -461,15 +470,7 @@ async function ensureCurrentBotId() {
   }
 }
 
-function getUsername(ctx) {
-  // 记账时不使用 @ 符号，直接返回用户名或姓名
-  const u = ctx.from?.username
-  if (u) return u
-  const firstName = ctx.from?.first_name || ''
-  const lastName = ctx.from?.last_name || ''
-  return [firstName, lastName].filter(Boolean).join(' ') || '未知用户'
-}
-
+// 🔥 简化：使用模块中的函数
 function ensureChat(ctx) {
   const chatId = ctx.chat?.id
   if (chatId == null) return null
@@ -477,816 +478,37 @@ function ensureChat(ctx) {
   return getChat(CURRENT_BOT_ID, chatId)
 }
 
-async function ensureDbChat(ctx) {
-  const chatId = String(ctx.chat?.id)
-  let title = ctx.chat?.title || null
-  // 为私聊设置人类可读标题：@username 或 姓名
-  if (!title && ctx.chat && ctx.chat.type === 'private') {
-    const u = ctx.chat
-    title = u.username ? `@${u.username}` : [u.first_name, u.last_name].filter(Boolean).join(' ') || null
-  }
-  if (!chatId) return null
-  // upsert chat，首次仅登记群组信息，不绑定机器人，默认待审批
-  await prisma.chat.upsert({
-    where: { id: chatId },
-    update: { title },
-    create: { id: chatId, title, status: 'PENDING', allowed: false },
-  })
-  // ensure settings
-  await prisma.setting.upsert({
-    where: { chatId },
-    update: {},
-    create: { chatId },
-  })
-  // Sync in-memory chat state with DB settings so summaries use latest fee/rate
-  // 🔥 优化：合并查询，减少数据库访问次数
+// 🔥 简化：使用数据库模块，自动同步设置
+async function ensureDbChatWithSync(ctx) {
   const chat = ensureChat(ctx)
-  try {
-    // 🔥 并行查询设置和操作人列表（如果需要）
-    const [settings, needOperators] = await Promise.all([
-      prisma.setting.findUnique({ 
-        where: { chatId },
-        select: {
-          feePercent: true,
-          fixedRate: true,
-          realtimeRate: true,
-          headerText: true,
-          everyoneAllowed: true
-        }
-      }),
-      chat ? (async () => {
-        const lastSyncTime = chat._operatorsLastSync || 0
-        const now = Date.now()
-        return (now - lastSyncTime > 5 * 60 * 1000 || chat.operators.size === 0)
-      })() : Promise.resolve(false)
-    ])
-    
-    if (settings && chat) {
-      if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
-      if (settings.fixedRate != null) chat.fixedRate = settings.fixedRate
-      if (settings.realtimeRate != null) chat.realtimeRate = settings.realtimeRate
-      if (settings.headerText != null) chat.headerText = settings.headerText
-      if (typeof settings.everyoneAllowed === 'boolean') chat.everyoneAllowed = settings.everyoneAllowed
-      
-      // 🔥 如果没有设置任何汇率，默认启用实时汇率
-      if (settings.fixedRate == null && settings.realtimeRate == null) {
-        const rate = await fetchRealtimeRateUSDTtoCNY()
-        if (rate) {
-          chat.realtimeRate = rate
-          await updateSettings(chatId, { realtimeRate: rate })
-          if (process.env.DEBUG_BOT === 'true') {
-            console.log(`[ensureDbChat][auto-set-realtime-rate] chatId=${chatId}, rate=${rate}`)
-          }
-        }
+  const chatId = await ensureDbChat(ctx, chat)
+  
+  // 如果没有设置汇率，自动设置实时汇率
+  if (chat && !chat.fixedRate && !chat.realtimeRate) {
+    try {
+      const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
+      const rate = await fetchRealtimeRateUSDTtoCNY()
+      if (rate) {
+        chat.realtimeRate = rate
+        await updateSettings(chatId, { realtimeRate: rate })
       }
+    } catch (e) {
+      // 静默失败
     }
-    
-    // 🔥 从数据库同步操作人列表到内存（修复操作人权限不生效的问题）
-    // 🔥 优化：使用缓存，避免每次都查询数据库
-    if (chat && needOperators) {
-      const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
-      chat.operators.clear()
-      for (const op of operators) {
-        chat.operators.add(op.username)
-      }
-      chat._operatorsLastSync = Date.now()
-    }
-  } catch (e) {
-    console.error('同步设置到内存失败', e)
   }
+  
   return chatId
 }
 
-async function updateSettings(chatId, data) {
-  await prisma.setting.update({ where: { chatId }, data })
-  // 🔥 如果更新了日切时间，清除缓存
-  if (data.dailyCutoffHour !== undefined) {
-    clearDailyCutoffCache(chatId)
-  }
-}
-
-/**
- * 获取群组的日切时间设置（带缓存优化）
- * @param {string} chatId - 群组ID
- * @returns {Promise<number>} 日切小时（0-23）
- */
-// 🔥 缓存日切时间设置，减少数据库查询
-const dailyCutoffCache = new Map() // Map<chatId, { value: number, timestamp: number }>
-const CUTOFF_CACHE_TTL = 5 * 60 * 1000 // 5分钟缓存
-
-async function getDailyCutoffHour(chatId) {
-  try {
-    // 🔥 检查缓存
-    const cached = dailyCutoffCache.get(chatId)
-    if (cached && (Date.now() - cached.timestamp < CUTOFF_CACHE_TTL)) {
-      return cached.value
-    }
-    
-    // 🔥 查询数据库
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { dailyCutoffHour: true }
-    })
-    const value = setting?.dailyCutoffHour ?? 0
-    
-    // 🔥 更新缓存
-    dailyCutoffCache.set(chatId, { value, timestamp: Date.now() })
-    
-    // 🔥 清理过期缓存（每100次调用清理一次）
-    if (dailyCutoffCache.size > 1000) {
-      const now = Date.now()
-      for (const [key, val] of dailyCutoffCache.entries()) {
-        if (now - val.timestamp >= CUTOFF_CACHE_TTL) {
-          dailyCutoffCache.delete(key)
-        }
-      }
-    }
-    
-    return value
-  } catch (e) {
-    console.error('[getDailyCutoffHour][error]', e)
-    return 0  // 默认0点
-  }
-}
-
-/**
- * 🔥 清除日切时间缓存（当设置更新时调用）
- */
-function clearDailyCutoffCache(chatId) {
-  dailyCutoffCache.delete(chatId)
-}
-
-/**
- * 🔥 获取或创建当天的OPEN账单（优化重复代码）
- * @param {string} chatId - 群组ID
- * @returns {Promise<{bill: any, gte: Date, lt: Date}>}
- */
-async function getOrCreateTodayBill(chatId) {
-  const cutoffHour = await getDailyCutoffHour(chatId)
-  const now = new Date()
-  const gte = startOfDay(now, cutoffHour)
-  const lt = endOfDay(now, cutoffHour)
-  
-  let bill = await prisma.bill.findFirst({ 
-    where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
-    orderBy: { openedAt: 'asc' } 
-  })
-  
-  if (!bill) {
-    // 🔥 创建新账单时，使用当天的起始时间（gte）作为 openedAt，确保查询时能匹配到
-    bill = await prisma.bill.create({ 
-      data: { 
-        chatId, 
-        status: 'OPEN', 
-        openedAt: new Date(gte), // 🔥 使用当天的起始时间，而不是当前时间
-        savedAt: new Date() 
-      } 
-    })
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[记账][创建新账单]', { chatId, billId: bill.id, openedAt: gte, cutoffHour })
-    }
-  }
-  
-  return { bill, gte, lt }
-}
-
-/**
- * 日切时间函数 - 支持自定义小时
- * @param {Date} d - 基准日期
- * @param {number} cutoffHour - 日切小时（0-23），默认0点
- * @returns {Date} 当天日切时间点
- */
-function startOfDay(d = new Date(), cutoffHour = 0) {
-  const x = new Date(d)
-  x.setHours(cutoffHour, 0, 0, 0)
-  
-  // 如果当前时间在日切点之前，需要退到前一天的日切点
-  if (d.getHours() < cutoffHour) {
-    x.setDate(x.getDate() - 1)
-  }
-  
-  return x
-}
-
-function endOfDay(d = new Date(), cutoffHour = 0) {
-  const x = new Date(d)
-  x.setDate(x.getDate() + 1)
-  x.setHours(cutoffHour, 0, 0, 0)
-  
-  // 如果当前时间在日切点之前，endOfDay 也要相应调整
-  if (d.getHours() < cutoffHour) {
-    x.setDate(x.getDate() - 1)
-  }
-  
-  return x
-}
-
-/**
- * 计算历史未下发金额（用于累计模式）
- * 读取今天之前所有账单（包括未关闭的），计算累计未下发
- */
-async function getHistoricalNotDispatched(chatId, settings) {
-  try {
-    // 只在累计模式下才计算历史
-    if (settings?.accountingMode !== 'CARRY_OVER') {
-      return { notDispatched: 0, notDispatchedUSDT: 0 }
-    }
-
-    const cutoffHour = await getDailyCutoffHour(chatId)
-    const today = startOfDay(new Date(), cutoffHour)
-    // 🔥 查找今天之前所有账单（包括OPEN和CLOSED状态）
-    // 优化：只选择必要的字段，减少内存占用
-    const historicalBills = await prisma.bill.findMany({
-      where: { 
-        chatId, 
-        openedAt: { lt: today }  // 使用 openedAt 而不是 closedAt
-      },
-      include: { 
-        items: {
-          select: {
-            type: true,
-            amount: true,
-            rate: true
-          }
-        }
-      },
-      orderBy: { openedAt: 'asc' }
-    })
-
-    const feePercent = settings?.feePercent ?? 0
-    const fixedRate = settings?.fixedRate ?? null
-    const realtimeRate = settings?.realtimeRate ?? null
-
-    let totalHistoricalIncome = 0
-    let totalHistoricalDispatch = 0
-    let totalHistoricalIncomeUSDT = 0
-    let totalHistoricalDispatchUSDT = 0
-
-    for (const bill of historicalBills) {
-      const incomes = bill.items.filter(i => i.type === 'INCOME')
-      const dispatches = bill.items.filter(i => i.type === 'DISPATCH')
-
-      const billIncome = incomes.reduce((s, i) => s + (Number(i.amount) || 0), 0)
-      const billDispatch = dispatches.reduce((s, d) => s + (Number(d.amount) || 0), 0)
-
-      // 计算汇率
-      let rate = fixedRate ?? realtimeRate ?? 0
-      if (!rate) {
-        const lastIncWithRate = [...incomes].reverse().find(i => i.rate && i.rate > 0)
-        if (lastIncWithRate?.rate) rate = Number(lastIncWithRate.rate)
-      }
-
-      // 扣除费用后的应下发（允许负数）
-      const fee = (billIncome * feePercent) / 100
-      const shouldDispatch = billIncome - fee  // 移除 Math.max，允许负数
-      const shouldDispatchUSDT = rate ? Number((shouldDispatch / rate).toFixed(2)) : 0
-
-      totalHistoricalIncome += shouldDispatch
-      totalHistoricalDispatch += billDispatch
-      totalHistoricalIncomeUSDT += shouldDispatchUSDT
-      totalHistoricalDispatchUSDT += rate ? Number((billDispatch / rate).toFixed(2)) : 0
-    }
-
-    // 允许负数：当历史下发超过收入时显示负数
-    const notDispatched = totalHistoricalIncome - totalHistoricalDispatch
-    const notDispatchedUSDT = totalHistoricalIncomeUSDT - totalHistoricalDispatchUSDT
-
-    return { notDispatched, notDispatchedUSDT }
-  } catch (e) {
-    console.error('计算历史未下发金额失败', e)
-    return { notDispatched: 0, notDispatchedUSDT: 0 }
-  }
-}
-
-async function deleteLastIncome(chatId) {
-  const { bill } = await getOrCreateTodayBill(chatId)
-  
-  // 🔥 从 BillItem 表查询（新的存储方式）
-  if (!bill) return false
-  
-  // 查找账单中的最后一个入款记录
-  const lastItem = await prisma.billItem.findFirst({
-    where: { billId: bill.id, type: 'INCOME' },
-    orderBy: { createdAt: 'desc' }
-  })
-  
-  if (!lastItem) return false
-  
-  await prisma.billItem.delete({ where: { id: lastItem.id } })
-  return { amount: Number(lastItem.amount), rate: lastItem.rate ? Number(lastItem.rate) : undefined }
-}
-
-async function deleteLastDispatch(chatId) {
-  const { bill } = await getOrCreateTodayBill(chatId)
-  
-  // 🔥 从 BillItem 表查询（新的存储方式）
-  if (!bill) return false
-  
-  // 查找账单中的最后一个下发记录
-  const lastItem = await prisma.billItem.findFirst({
-    where: { billId: bill.id, type: 'DISPATCH' },
-    orderBy: { createdAt: 'desc' }
-  })
-  
-  if (!lastItem) return false
-  
-  await prisma.billItem.delete({ where: { id: lastItem.id } })
-  return { amount: Number(lastItem.amount), usdt: lastItem.usdt ? Number(lastItem.usdt) : 0 }
-}
-
-async function isAdmin(ctx) {
-  try {
-    const admins = await ctx.getChatAdministrators()
-    const uid = ctx.from?.id
-    return !!admins.find(a => a.user?.id === uid)
-  } catch {
-    return false
-  }
-}
-
-/**
- * 检查用户是否有操作权限（记账权限）
- * 规则：
- * 1. 管理员默认有权限
- * 2. 操作人列表中的用户有权限
- * 3. 如果启用了"所有人可操作"，则所有人都有权限
- */
-async function hasOperatorPermission(ctx) {
-  const chat = ensureChat(ctx)
-  if (!chat) return false
-  
-  // 如果启用了"所有人可操作"，直接通过
-  if (chat.everyoneAllowed) return true
-  
-  // 检查是否是管理员
-  if (await isAdmin(ctx)) return true
-  
-  // 检查是否在操作人列表中
-  const username = ctx.from?.username ? `@${ctx.from.username}` : null
-  if (username && chat.operators.has(username)) return true
-  
-  return false
-}
-
-function formatMoney(n) {
-  return Number(n || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
-}
-
-function formatDuration(ms) {
-  const sec = Math.floor(ms / 1000)
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  const parts = []
-  if (h) parts.push(`${h}小时`)
-  if (m) parts.push(`${m}分`)
-  if (s || parts.length === 0) parts.push(`${s}秒`)
-  return parts.join('')
-}
-
-// 🔥 优化：使用 LRU 缓存替代无限增长的 Map
-const featureCache = new LRUCache(500) // 最多缓存 500 个群组的功能开关
-const FEATURE_TTL_MS = 60 * 60 * 1000 // 1小时过期，释放内存
-
-async function isFeatureEnabled(ctx, feature) {
-  try {
-    const chatId = await ensureDbChat(ctx)
-    if (!chatId) {
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[isFeatureEnabled] chatId为空', { feature })
-      }
-      // 🔥 简化权限系统：基础记账功能默认允许
-      if (feature === 'accounting_basic') return true
-      return false
-    }
-    
-    const now = Date.now()
-    const cached = featureCache.get(chatId)
-    if (cached && cached.expires > now) {
-      const result = cached.set.has(feature)
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[isFeatureEnabled] 使用缓存', { chatId, feature, result })
-      }
-      return result
-    }
-    
-    // 🔥 从群组级别的功能开关读取（ChatFeatureFlag）
-    // 优化：只选择必要的字段，减少内存占用
-    const flags = await prisma.chatFeatureFlag.findMany({ 
-      where: { chatId }, 
-      select: { feature: true, enabled: true } 
-    })
-    
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[isFeatureEnabled] 查询数据库', { chatId, feature, flagsCount: flags.length, flags })
-    }
-    
-    const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
-    
-    // 🔥 简化权限系统：如果没有任何功能开关记录，默认允许基础记账（向后兼容）
-    if (flags.length === 0 && feature === 'accounting_basic') {
-      // 将 accounting_basic 添加到缓存中，标记为启用
-      set.add('accounting_basic')
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[isFeatureEnabled] 无功能开关记录，默认允许基础记账', { chatId, feature })
-      }
-    }
-    
-    featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
-    const result = set.has(feature)
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[isFeatureEnabled] 结果', { chatId, feature, result, enabledFeatures: Array.from(set) })
-    }
-    return result
-  } catch (e) {
-    console.error('[isFeatureEnabled] 异常', { feature, error: e.message })
-    // 🔥 简化权限系统：出错时，基础记账功能默认允许（向后兼容）
-    if (feature === 'accounting_basic') {
-      return true
-    }
-    return false
-  }
-}
-
-async function ensureFeature(ctx, feature) {
-  const ok = await isFeatureEnabled(ctx, feature)
-  if (!ok) {
-    // 🔥 根据群组设置决定是否发送提示
-    try {
-      const chatId = await ensureDbChat(ctx)
-      const setting = await prisma.setting.findUnique({ 
-        where: { chatId },
-        select: { featureWarningMode: true }
-      })
-      
-      const warningMode = setting?.featureWarningMode || 'always'
-      let shouldWarn = false
-      
-      if (warningMode === 'always') {
-        // 每次都提示
-        shouldWarn = true
-      } else if (warningMode === 'once') {
-        // 只提示一次（检查是否已经提示过）
-        const existingLog = await prisma.featureWarningLog.findUnique({
-          where: { chatId_feature: { chatId, feature } }
-        })
-        if (!existingLog) {
-          shouldWarn = true
-          // 记录已提示
-          await prisma.featureWarningLog.upsert({
-            where: { chatId_feature: { chatId, feature } },
-            create: { chatId, feature },
-            update: { warnedAt: new Date() }
-          }).catch(() => {})
-        }
-      } else if (warningMode === 'daily') {
-        // 每天提示一次
-        const existingLog = await prisma.featureWarningLog.findUnique({
-          where: { chatId_feature: { chatId, feature } }
-        })
-        const now = new Date()
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        
-        if (!existingLog || existingLog.warnedAt < today) {
-          shouldWarn = true
-          // 更新最后提示时间
-          await prisma.featureWarningLog.upsert({
-            where: { chatId_feature: { chatId, feature } },
-            create: { chatId, feature },
-            update: { warnedAt: now }
-          }).catch(() => {})
-        }
-      }
-      // warningMode === 'silent' 时不提示
-      
-      if (shouldWarn) {
-        await ctx.reply('未开通该功能')
-      }
-    } catch (e) {
-      console.error('[ensureFeature][warning-error]', e)
-    }
-  }
-  return ok
-}
-
-function isPublicUrl(u) {
-  try {
-    const url = new URL(u)
-    const host = url.hostname
-    if (!/^https?:$/.test(url.protocol)) return false
-    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return false
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function fetchCoinGeckoRateUSDTtoCNY() {
-  try {
-    const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny', { method: 'GET' })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    const rate = Number(data?.tether?.cny)
-    if (!rate || !Number.isFinite(rate)) throw new Error('Invalid CoinGecko rate')
-    return rate
-  } catch (e) {
-    if (process.env.DEBUG_BOT === 'true') {
-      console.error('CoinGecko 汇率获取失败', e)
-    }
-    return null
-  }
-}
-
-async function fetchExchangeRateHostUSDToCNY() {
-  try {
-    const resp = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=CNY', { method: 'GET' })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    const rate = Number(data?.rates?.CNY)
-    if (!rate || !Number.isFinite(rate)) throw new Error('Invalid exchangerate.host rate')
-    return rate
-  } catch (e) {
-    if (process.env.DEBUG_BOT === 'true') {
-      console.error('exchangerate.host 汇率获取失败', e)
-    }
-    return null
-  }
-}
-
-async function fetchRealtimeRateUSDTtoCNY() {
-  const secondary = await fetchCoinGeckoRateUSDTtoCNY()
-  if (secondary) return Number(secondary.toFixed(2)) // 🔥 保留2位小数
-  const tertiary = await fetchExchangeRateHostUSDToCNY()
-  return tertiary ? Number(tertiary.toFixed(2)) : null // 🔥 保留2位小数
-}
-
-async function buildInlineKb(ctx, options = {}) {
-  const rows = []
-  const chatId = String(ctx?.chat?.id || '')
-  
-  // 🔥 如果指定了 hideHelpAndOrder，不显示使用说明和查看完整订单（用于 z0 命令）
-  if (options.hideHelpAndOrder) {
-    return Markup.inlineKeyboard(rows) // 返回空菜单
-  }
-  
-  // 🔥 私聊时显示特殊菜单
-  if (ctx.chat?.type === 'private') {
-    rows.push([
-      Markup.button.callback('使用说明', 'help'),
-      Markup.button.callback('开始记账', 'start_accounting')
-    ])
-    return Markup.inlineKeyboard(rows)
-  }
-  
-  // 🔥 群聊时：根据设置决定是否显示"使用说明"按钮，"查看完整订单"始终显示
-  try {
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { hideHelpButton: true }
-    })
-    
-    if (!setting?.hideHelpButton) {
-      rows.push([Markup.button.callback('使用说明', 'help')])
-    }
-  } catch (e) {
-    // 如果查询失败，默认显示"使用说明"
-    rows.push([Markup.button.callback('使用说明', 'help')])
-  }
-  
-  // 🔥 "查看完整订单"按钮始终显示（不受 hideHelpButton 影响）
-  if (isPublicUrl(BACKEND_URL)) {
-    try {
-      const u = new URL(BACKEND_URL)
-      u.searchParams.set('chatId', chatId)
-      rows.push([Markup.button.url('查看完整订单', u.toString())])
-    } catch {
-      rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
-    }
-  } else if (BACKEND_URL) {
-    rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
-  }
-  return Markup.inlineKeyboard(rows)
-}
-
-async function formatSummary(ctx, chat, options = {}) {
-  const chatId = String(ctx?.chat?.id || '')
-  
-  // 🔥 优化：合并数据库查询，减少查询次数
-  let previousNotDispatched = 0
-  let previousNotDispatchedUSDT = 0
-  let accountingMode = 'DAILY_RESET'
-  let settings = null // 🔥 在函数作用域声明 settings 变量
-  
-  // 🔥 从数据库同步当天的记录到内存（解决重启后数据丢失问题）
-  // 🔥 优化：只在内存记录为空或明显不一致时才同步，避免频繁查询
-  const lastSyncTime = chat._billLastSync || 0
-  const now = Date.now()
-  const needsSync = !chat._billLastSync || 
-                    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
-                    (now - lastSyncTime > 30 * 60 * 1000) // 30分钟同步一次
-  
-  try {
-    // 🔥 并行获取设置和账单数据（如果需要同步）
-    const [settingsData, billData] = await Promise.all([
-      prisma.setting.findUnique({ 
-        where: { chatId },
-        select: {
-          accountingMode: true,
-          feePercent: true,
-          fixedRate: true,
-          realtimeRate: true
-        }
-      }),
-      needsSync ? (async () => {
-        try {
-          const cutoffHour = await getDailyCutoffHour(chatId)
-          const gte = startOfDay(new Date(), cutoffHour)
-          const lt = endOfDay(new Date(), cutoffHour)
-          return await prisma.bill.findFirst({ 
-            where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-            include: { 
-              items: {
-                select: {
-                  type: true,
-                  amount: true,
-                  rate: true,
-                  usdt: true,
-                  replier: true,
-                  operator: true,
-                  createdAt: true
-                }
-              }
-            },
-            orderBy: { openedAt: 'asc' }
-          })
-        } catch (e) {
-          if (process.env.DEBUG_BOT === 'true') {
-            console.error('查询账单失败', e)
-          }
-          return null
-        }
-      })() : Promise.resolve(null)
-    ])
-    
-    // 🔥 将 settingsData 赋值给外层的 settings 变量
-    settings = settingsData
-    
-    accountingMode = settings?.accountingMode || 'DAILY_RESET'
-    
-    // 处理历史未下发金额
-    if (accountingMode === 'CARRY_OVER') {
-      const historical = await getHistoricalNotDispatched(chatId, settings)
-      previousNotDispatched = historical.notDispatched
-      previousNotDispatchedUSDT = historical.notDispatchedUSDT
-      // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log('[formatSummary][累计模式] 历史未下发', { chatId, previousNotDispatched, previousNotDispatchedUSDT })
-      }
-    }
-    
-    // 同步账单数据到内存
-    if (needsSync && billData?.items) {
-      // 同步收入记录
-      const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => ({
-        amount: Number(i.amount),
-        rate: i.rate ? Number(i.rate) : undefined,
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
-      
-      // 同步下发记录
-      const dbDispatches = billData.items.filter(i => i.type === 'DISPATCH').map(i => ({
-        amount: Number(i.amount),
-        usdt: Number(i.usdt),
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
-      
-      // 更新内存状态（如果数据库有更多记录，则使用数据库的）
-      if (dbIncomes.length >= chat.current.incomes.length) {
-        chat.current.incomes = dbIncomes
-      }
-      if (dbDispatches.length >= chat.current.dispatches.length) {
-        chat.current.dispatches = dbDispatches
-      }
-      chat._billLastSync = now
-    } else if (needsSync) {
-      // 数据库中没有账单，但标记已同步
-      chat._billLastSync = now
-    }
-  } catch (e) {
-    console.error('获取设置或同步数据失败', e)
-  }
-
-  // 🔥 从settings或chat中获取汇率信息，判断是固定汇率还是实时汇率
-  const currentFixedRate = settings?.fixedRate ?? chat.fixedRate ?? null
-  const currentRealtimeRate = settings?.realtimeRate ?? chat.realtimeRate ?? null
-  const isFixedRate = currentFixedRate != null
-  const rateLabel = isFixedRate ? '固定汇率' : '实时汇率'
-  
-  const s = summarize(chat, { previousNotDispatched, previousNotDispatchedUSDT })
-  const rateVal = s.effectiveRate || 0
-
-  const incCount = chat.current.incomes.length
-  const disCount = chat.current.dispatches.length
-
-  // apply display mode
-  let showIncomes = chat.current.incomes
-  let showDispatches = chat.current.dispatches
-  if (chat.displayMode === 1) {
-    showIncomes = showIncomes.slice(-3)
-    showDispatches = showDispatches.slice(-3)
-  } else if (chat.displayMode === 2) {
-    showIncomes = showIncomes.slice(-5)
-    showDispatches = showDispatches.slice(-5)
-  } else if (chat.displayMode === 3) {
-    showIncomes = []
-    showDispatches = []
-  } else if (chat.displayMode === 4) {
-    showIncomes = showIncomes.slice(-10)
-    showDispatches = showDispatches.slice(-10)
-  } else if (chat.displayMode === 5) {
-    showIncomes = showIncomes.slice(-20)
-    showDispatches = showDispatches.slice(-20)
-  } else if (chat.displayMode === 6) {
-    // 显示全部
-  }
-
-  const incPart = incCount > 0 && showIncomes.length > 0
-    ? showIncomes.map((i) => {
-        const t = i.createdAt.toTimeString().slice(0, 8)
-        const rate = i.rate ?? rateVal
-        const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
-        const amount = Math.abs(i.amount)
-        const who = (i.operator || i.replier || '')
-        
-        // 构建格式：时间 金额 / 汇率=USDTU 用户名
-        // 金额和用户名都使用蓝色链接
-        let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
-        if (rate) {
-          line += ` / ${rate}=${usdt}U`
-        }
-        if (who) {
-          // 尝试从内存映射中获取用户ID（尝试带@和不带@两种格式）
-          const whoWithAt = who.startsWith('@') ? who : `@${who}`
-          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
-          if (userId) {
-            // 使用真实用户ID创建链接
-            line += ` [${who}](tg://user?id=${userId})`
-          } else {
-            // 如果找不到用户ID，使用粗体
-            line += ` *${who}*`
-          }
-        }
-        return line
-      }).join('\n')
-    : (incCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无入款')
-
-  const disPart = disCount > 0 && showDispatches.length > 0
-    ? showDispatches.map((d) => {
-        const t = d.createdAt.toTimeString().slice(0, 8)
-        const amount = Math.abs(d.amount)
-        const usdt = Math.abs(d.usdt)
-        // 下发金额使用蓝色链接
-        return `${t} [${formatMoney(amount)}](tg://user?id=0) (${formatMoney(usdt)}U)`
-      }).join('\n')
-    : (disCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无下发')
-
-  const header = chat.headerText ? `${chat.headerText}\n` : ''
-  const modeTag = accountingMode === 'CARRY_OVER' ? '【累计模式】' : ''
-
-  // 在累计模式下显示详细的历史和今日数据分解
-  let historicalInfo = ''
-  if (accountingMode === 'CARRY_OVER' && (previousNotDispatched !== 0 || previousNotDispatchedUSDT !== 0)) {
-    historicalInfo = `\n账单拆解：\n今日入款：${formatMoney(s.totalIncome)}\n历史未下发：${formatMoney(previousNotDispatched)} | ${formatMoney(previousNotDispatchedUSDT)}U`
-  }
-
-  return [
-    header + `${modeTag}${options.title || '账单状态'}`,
-    `已入款（${incCount}笔）：`,
-    incPart,
-    `\n已下发（${disCount}笔）：`,
-    disPart,
-    `\n总入款金额：${formatMoney(s.totalIncome)}`,
-    `费率：${s.feePercent}%`,
-    `${rateLabel}：${rateVal || '未设置'}`,
-    historicalInfo,
-    ...(chat.rmbMode
-      ? [
-          `应下发：${formatMoney(s.shouldDispatch)}`,
-          `已下发：${formatMoney(s.dispatched)}`,
-          `未下发：${formatMoney(s.notDispatched)}`,
-        ]
-      : [
-          `应下发：${formatMoney(s.shouldDispatch)} | ${formatMoney(s.shouldDispatchUSDT)}U`,
-          `已下发：${formatMoney(s.dispatched)} | ${formatMoney(s.dispatchedUSDT)}U`,
-          `未下发：${formatMoney(s.notDispatched)} | ${formatMoney(s.notDispatchedUSDT)}U`,
-        ]
-    ),
-  ].join('\n')
-}
+// 🔥 所有重复函数已移至对应模块：
+// - getOrCreateTodayBill, getHistoricalNotDispatched, deleteLastIncome, deleteLastDispatch -> database.js
+// - startOfDay, endOfDay, formatMoney, formatDuration -> utils.js
+// - isAdmin, hasOperatorPermission -> helpers.js
+// - isFeatureEnabled, ensureFeature -> middleware.js
+// - isPublicUrl -> utils.js
+// - fetchCoinGeckoRateUSDTtoCNY, fetchExchangeRateHostUSDToCNY, fetchRealtimeRateUSDTtoCNY -> helpers.js
+// - buildInlineKb -> helpers.js
+// - formatSummary -> formatting.js
 
 // Helpers to extract @username from text
 function extractMention(text) {
@@ -1294,94 +516,7 @@ function extractMention(text) {
   return m ? `@${m[1]}` : null
 }
 
-// Core commands
-bot.start(async (ctx) => {
-  const userId = ctx.from?.id
-  const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
-  const firstName = ctx.from?.first_name || ''
-  const lastName = ctx.from?.last_name || ''
-  const fullName = `${firstName} ${lastName}`.trim()
-  
-  if (ctx.chat?.type === 'private') {
-    // 🔥 私聊：检查是否在白名单，显示不同的提示信息
-    const userIdStr = String(userId || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId: userIdStr }
-    })
-    
-    if (whitelistedUser) {
-      // 🔥 白名单用户：显示简要信息，提供内联菜单
-      await ctx.reply(
-        `👤 您的用户信息：\n\n` +
-        `🆔 用户ID：\`${userId}\`\n` +
-        `👤 用户名：${username}\n` +
-        `📛 昵称：${fullName || '无'}\n\n` +
-        `✅ 您已在白名单中，可以邀请机器人进群自动授权。\n\n` +
-        `💡 点击下方按钮开始使用：`,
-        { 
-          parse_mode: 'Markdown',
-          ...(await buildInlineKb(ctx))
-        }
-      )
-    } else {
-      // 🔥 非白名单用户：显示详细提示信息
-      await ctx.reply(
-        `👤 您的用户信息：\n\n` +
-        `🆔 用户ID：\`${userId}\`\n` +
-        `👤 用户名：${username}\n` +
-        `📛 昵称：${fullName || '无'}\n\n` +
-        `💡 将上面的用户ID提供给管理员，添加到白名单后，您邀请机器人进群将自动授权。\n\n` +
-        `⚠️ 使用提示：\n` +
-        `本机器人仅支持在群组中使用记账功能。\n` +
-        `如需使用，请：\n` +
-        `1. 将机器人添加到群组\n` +
-        `2. 联系管理员将您的ID添加到白名单\n` +
-        `3. 点击下方按钮查看使用说明`,
-        { 
-          parse_mode: 'Markdown',
-          ...(await buildInlineKb(ctx))
-        }
-      )
-    }
-  } else {
-    // 群聊：初始化记账
-    const chat = ensureChat(ctx)
-    if (!chat) return
-    await ctx.reply(
-      `开始记账，使用 +金额 / -金额 记录入款，使用 "下发金额" 记录下发。输入 "显示账单" 查看汇总。\n\n` +
-      `👤 您的ID：\`${userId}\` 用户名：${username}`,
-      { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' }
-    )
-  }
-})
-
-// 开始记账（群聊快捷命令）
-bot.hears(/^开始记账$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const userId = ctx.from?.id
-  const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
-  
-  await ctx.reply(
-    `开始记账，使用 +金额 / -金额 记录入款，使用 "下发金额" 记录下发。输入 "显示账单" 查看汇总。\n\n` +
-    `👤 您的ID：\`${userId}\` 用户名：${username}`,
-    { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' }
-  )
-})
-
-// 获取我的ID
-bot.command('myid', async (ctx) => {
-  const userId = ctx.from?.id
-  const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
-  
-  await ctx.reply(
-    `👤 您的用户信息：\n` +
-    `🆔 ID：\`${userId}\`\n` +
-    `👤 用户名：${username}\n\n` +
-    `💡 私聊机器人发送 /start 查看详细信息`,
-    { parse_mode: 'Markdown' }
-  )
-})
+// 🔥 核心命令（bot.start, bot.command('myid')）已移至 handlers/core.js
 
 // /help 别名（与“使用说明”一致）
 // 审批中间件：群组需后台审批通过（Chat.status === 'APPROVED'）后才允许普通指令
@@ -1719,101 +854,11 @@ bot.on('my_chat_member', async (ctx) => {
   } catch {}
 })
 
-// 🔥 简化权限系统：只对基础记账相关命令进行权限检查
-// 其他功能（z0、汇率、显示模式、下课禁言等）无需权限检查，直接可用
-function isAccountingCommand(text) {
-  if (!text) return false
-  const t = text.trim()
-  // 只检查基础记账相关命令
-  if (/^开始记账$/i.test(t)) return true
-  if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return true
-  if (/^(下发)\b/.test(t)) return true
-  if (/^(显示账单|\+0)$/i.test(t)) return true
-  if (/^显示历史账单$/i.test(t)) return true
-  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return true
-  if (/^(我的账单|\/我)$/i.test(t)) return true
-  return false
-}
+// 🔥 注册所有命令处理器（模块化）
+registerAllHandlers(bot, ensureChat)
 
-bot.use(async (ctx, next) => {
-  try {
-    const text = ctx.message?.text
-    if (!text) return next()
-    
-    // 🔥 只对基础记账命令进行权限检查
-    const isAccounting = isAccountingCommand(text)
-    if (isAccounting) {
-      // 🔥 临时：添加日志以便调试
-      console.log('[权限检查] 检测到记账命令', { text: text.substring(0, 50), chatId: ctx.chat?.id })
-      
-      const ok = await isFeatureEnabled(ctx, 'accounting_basic')
-      console.log('[权限检查] 权限检查结果', { text: text.substring(0, 50), ok, chatId: ctx.chat?.id })
-      
-      if (!ok) {
-        console.log('[权限检查] 权限检查失败，阻止执行', { text: text.substring(0, 50), chatId: ctx.chat?.id })
-        // 检查是否启用了基础记账功能
-        try {
-          const chatId = await ensureDbChat(ctx)
-          const setting = await prisma.setting.findUnique({ 
-            where: { chatId },
-            select: { featureWarningMode: true }
-          })
-          
-          const warningMode = setting?.featureWarningMode || 'always'
-          let shouldWarn = false
-          
-          if (warningMode === 'always') {
-            shouldWarn = true
-          } else if (warningMode === 'once') {
-            const existingLog = await prisma.featureWarningLog.findUnique({
-              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
-            })
-            if (!existingLog) {
-              shouldWarn = true
-              await prisma.featureWarningLog.upsert({
-                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
-                create: { chatId, feature: 'accounting_basic' },
-                update: { warnedAt: new Date() }
-              }).catch(() => {})
-            }
-          } else if (warningMode === 'daily') {
-            const existingLog = await prisma.featureWarningLog.findUnique({
-              where: { chatId_feature: { chatId, feature: 'accounting_basic' } }
-            })
-            const now = new Date()
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            
-            if (!existingLog || existingLog.warnedAt < today) {
-              shouldWarn = true
-              await prisma.featureWarningLog.upsert({
-                where: { chatId_feature: { chatId, feature: 'accounting_basic' } },
-                create: { chatId, feature: 'accounting_basic' },
-                update: { warnedAt: now }
-              }).catch(() => {})
-            }
-          }
-          
-          if (shouldWarn) {
-            console.log('[权限检查] 发送警告消息', { chatId, text })
-            await ctx.reply('未开通基础记账功能')
-          }
-        } catch (e) {
-          console.error('[权限检查][错误]', e)
-        }
-        return // 🔥 权限检查失败，阻止继续执行
-      }
-      // 🔥 权限检查通过，继续执行后续命令处理
-      console.log('[权限检查] 权限通过，继续执行', { text, chatId: ctx.chat?.id })
-      return next()
-    }
-    // 🔥 非记账命令，直接放行
-    return next()
-  } catch (e) {
-    // 🔥 出错时默认放行，避免影响其他功能
-    console.error('[权限检查中间件][异常]', e)
-    return next()
-  }
-})
+// 🔥 使用模块化的权限检查中间件（减少代码，提升性能）
+bot.use(createPermissionMiddleware())
 
 // 设置群全体禁言/解除禁言（不影响管理员）。禁言时为操作员名单单独放行发言。
 // ⚠️ 注意：此功能需要机器人拥有管理员权限（限制成员权限）
@@ -2114,6 +1159,66 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
     console.error('写入 BillItem(INCOME) 失败', e)
     console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
     // 🔥 即使保存失败，也继续执行（避免影响用户体验）
+  }
+  
+  // 🔥 超押提醒检查（仅在入款时检查，且金额为正数）
+  if (amountRMB > 0) {
+    try {
+      const setting = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { overDepositLimit: true, lastOverDepositWarning: true }
+      })
+      
+      if (setting?.overDepositLimit && setting.overDepositLimit > 0) {
+        // 计算当前总入款（包括本次）
+        const { bill } = await getOrCreateTodayBill(chatId)
+        const totalIncome = await prisma.billItem.aggregate({
+          where: {
+            billId: bill.id,
+            type: 'INCOME'
+          },
+          _sum: {
+            amount: true
+          }
+        })
+        
+        const currentTotal = (totalIncome._sum.amount || 0)
+        const limit = setting.overDepositLimit
+        
+        // 检查是否需要提醒（超过或即将超过额度）
+        const shouldWarn = currentTotal >= limit || (currentTotal >= limit * 0.9 && currentTotal < limit)
+        
+        // 避免频繁提醒：如果已经提醒过，且距离上次提醒不超过1小时，则不重复提醒
+        const lastWarning = setting.lastOverDepositWarning
+        const shouldSendWarning = shouldWarn && (!lastWarning || Date.now() - lastWarning.getTime() > 60 * 60 * 1000)
+        
+        if (shouldSendWarning) {
+          let warningText = ''
+          if (currentTotal >= limit) {
+            warningText = `⚠️ *超押提醒*\n\n` +
+              `当前入款总额：${formatMoney(currentTotal)} 元\n` +
+              `设置额度：${formatMoney(limit)} 元\n` +
+              `已超过额度：${formatMoney(currentTotal - limit)} 元`
+          } else {
+            warningText = `⚠️ *超押提醒*\n\n` +
+              `当前入款总额：${formatMoney(currentTotal)} 元\n` +
+              `设置额度：${formatMoney(limit)} 元\n` +
+              `即将超过额度，还差：${formatMoney(limit - currentTotal)} 元`
+          }
+          
+          await ctx.reply(warningText, { parse_mode: 'Markdown' })
+          
+          // 更新最后提醒时间
+          await prisma.setting.update({
+            where: { chatId },
+            data: { lastOverDepositWarning: new Date() }
+          })
+        }
+      }
+    } catch (e) {
+      console.error('[超押提醒]', e)
+      // 不影响正常流程
+    }
   }
   
   // 发送完整账单（不发送确认消息）
@@ -2570,7 +1675,7 @@ bot.hears(/^(z0|Z0)$/i, async (ctx) => {
       second: '2-digit'
     })
     
-    let priceText = '💰 OKX实时U价 TOP 10\n\n'
+    let priceText = '━━━ 💰 OKX实时U价 TOP 10 ━━━\n\n'
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -2639,7 +1744,7 @@ bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
       'wxpay': '微信'
     }[paymentMethod]
     
-    let priceText = `💰 OKX实时U价 ${methodName} TOP 10\n\n`
+    let priceText = `━━━ 💰 OKX实时U价 ${methodName} TOP 10 ━━━\n\n`
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -3268,7 +2373,7 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   })
   
   // 🔥 清除功能开关缓存，确保立即生效
-  featureCache.delete(chatId)
+  clearFeatureCache(chatId)
   
   await ctx.reply('✅ 已开启所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
@@ -3303,7 +2408,7 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   })
   
   // 🔥 清除功能开关缓存，确保立即生效
-  featureCache.delete(chatId)
+  clearFeatureCache(chatId)
   
   await ctx.reply('⭕ 已关闭所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
@@ -3373,42 +2478,246 @@ bot.hears(/^关闭地址验证$/i, async (ctx) => {
   console.log('[关闭地址验证]', { chatId })
 })
 
-// 使用说明（内联菜单）
-bot.action('help', async (ctx) => {
-  try { 
-    await ctx.answerCbQuery() 
-  } catch (e) {
-    console.error('[help-action][answerCbQuery-error]', e)
+// 🔥 全局配置日切时间（仅管理员/白名单用户）
+bot.hears(/^全局日切时间\s+(\d+)$/i, async (ctx) => {
+  const hour = parseInt(ctx.match[1], 10)
+  
+  if (hour < 0 || hour > 23) {
+    return ctx.reply('❌ 日切时间必须在 0-23 之间')
   }
   
-  // 🔥 私聊时显示简化的使用说明
-  if (ctx.chat?.type === 'private') {
-    const helpText = [
-      '📖 机器人使用说明',
-      '',
-      '本机器人仅支持在群组中使用记账功能。',
-      '',
-      '【📋 使用步骤】',
-      '1. 将机器人添加到群组',
-      '2. 联系管理员将您的ID添加到白名单',
-      '3. 在群组中使用记账功能',
-      '',
-      '【💰 基础记账】',
-      '• +720 - 记录人民币收入',
-      '• +100u - 记录USDT收入',
-      '• 下发10 - 下发10人民币',
-      '• 下发10u - 下发10USDT',
-      '• 显示账单 - 查看当前账单',
-      '',
-      '💡 更多功能请查看完整使用说明：',
-      'https://t.me/your_bot_username'
-    ].join('\n')
+  // 权限检查：管理员或白名单用户
+  const isAdminUser = await isAdmin(ctx)
+  if (!isAdminUser) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
     
-    return ctx.reply(helpText, { parse_mode: 'Markdown' })
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以设置全局配置。')
+    }
   }
   
-  const help = [
-    '📖 机器人使用说明',
+  try {
+    const userId = String(ctx.from?.id || '')
+    await setGlobalDailyCutoffHour(hour, userId)
+    await ctx.reply(`✅ 已设置全局日切时间为 ${hour}:00\n所有群组都将应用此配置。`)
+  } catch (e) {
+    console.error('[全局日切时间]', e)
+    await ctx.reply('❌ 设置失败，请稍后重试')
+  }
+})
+
+// 🔥 机器人退群（在群内发送后机器人自动退群，并删除所有权限）
+bot.hears(/^机器人退群$/i, async (ctx) => {
+  if (ctx.chat?.type === 'private') {
+    return ctx.reply('此命令仅在群组中使用')
+  }
+  
+  // 权限检查：管理员或白名单用户
+  const isAdminUser = await isAdmin(ctx)
+  if (!isAdminUser) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
+    }
+  }
+  
+  const chatId = String(ctx.chat?.id || '')
+  
+  try {
+    // 删除所有相关数据
+    await prisma.chatFeatureFlag.deleteMany({ where: { chatId } })
+    await prisma.setting.deleteMany({ where: { chatId } })
+    await prisma.operator.deleteMany({ where: { chatId } })
+    await prisma.addressVerification.deleteMany({ where: { chatId } })
+    await prisma.featureWarningLog.deleteMany({ where: { chatId } })
+    await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
+    
+    // 机器人退群
+    await ctx.leaveChat()
+    console.log('[机器人退群]', { chatId })
+  } catch (e) {
+    console.error('[机器人退群]', e)
+    // 即使出错也尝试退群
+    try {
+      await ctx.leaveChat()
+    } catch (e2) {
+      console.error('[机器人退群] 二次尝试失败', e2)
+    }
+  }
+})
+
+// 🔥 查询汇率/映射表（显示点位汇率映射关系）
+bot.hears(/^(查询汇率|查询映射表)(?:\s+(.+))?$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  const query = ctx.match[2]?.trim() || ''
+  const chatId = await ensureDbChat(ctx)
+  
+  try {
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: {
+        fixedRate: true,
+        realtimeRate: true,
+        feePercent: true
+      }
+    })
+    
+    let rateText = ''
+    if (query) {
+      // 自定义查询：支持查询固定汇率或实时汇率
+      const rate = parseFloat(query)
+      if (!isNaN(rate) && rate > 0) {
+        rateText = `查询汇率 ${rate} 的映射关系：\n` +
+          `• 1 USDT = ${rate} CNY\n` +
+          `• 1 CNY = ${(1 / rate).toFixed(6)} USDT\n` +
+          `• 100 CNY = ${(100 / rate).toFixed(2)} USDT\n` +
+          `• 100 USDT = ${(100 * rate).toFixed(2)} CNY`
+      } else {
+        rateText = `❌ 无效的汇率值：${query}`
+      }
+    } else {
+      // 显示当前群组的汇率映射
+      const fixedRate = setting?.fixedRate
+      const realtimeRate = setting?.realtimeRate
+      const feePercent = setting?.feePercent || 0
+      
+      rateText = '━━━ 💱 汇率映射表 ━━━\n\n'
+      
+      if (fixedRate) {
+        rateText += `【固定汇率】\n` +
+          `• 1 USDT = ${fixedRate} CNY\n` +
+          `• 1 CNY = ${(1 / fixedRate).toFixed(6)} USDT\n` +
+          `• 100 CNY = ${(100 / fixedRate).toFixed(2)} USDT\n` +
+          `• 100 USDT = ${(100 * fixedRate).toFixed(2)} CNY\n\n`
+      } else if (realtimeRate) {
+        rateText += `【实时汇率】\n` +
+          `• 1 USDT = ${realtimeRate} CNY\n` +
+          `• 1 CNY = ${(1 / realtimeRate).toFixed(6)} USDT\n` +
+          `• 100 CNY = ${(100 / realtimeRate).toFixed(2)} USDT\n` +
+          `• 100 USDT = ${(100 * realtimeRate).toFixed(2)} CNY\n\n`
+      } else {
+        rateText += `⚠️ 未设置汇率\n\n`
+      }
+      
+      if (feePercent > 0) {
+        rateText += `【费率】${feePercent}%\n`
+      }
+      
+      rateText += `\n💡 提示：使用"查询汇率 7.2"可以查询指定汇率的映射关系`
+    }
+    
+    await ctx.reply(rateText, { ...(await buildInlineKb(ctx)) })
+  } catch (e) {
+    console.error('[查询汇率]', e)
+    await ctx.reply('❌ 查询失败，请稍后重试')
+  }
+})
+
+// 🔥 设置超押提醒额度
+bot.hears(/^设置额度\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 权限检查：管理员或白名单用户
+  if (!(await hasOperatorPermission(ctx))) {
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
+    })
+    
+    if (!whitelistedUser) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+  }
+  
+  const limit = parseFloat(ctx.match[1])
+  const chatId = await ensureDbChat(ctx)
+  
+  try {
+    await prisma.setting.upsert({
+      where: { chatId },
+      update: { overDepositLimit: limit },
+      create: { chatId, overDepositLimit: limit }
+    })
+    
+    if (limit === 0) {
+      await ctx.reply('✅ 已关闭超押提醒', { ...(await buildInlineKb(ctx)) })
+    } else {
+      await ctx.reply(`✅ 已设置超押提醒额度为 ${formatMoney(limit)} 元`, { ...(await buildInlineKb(ctx)) })
+    }
+  } catch (e) {
+    console.error('[设置额度]', e)
+    await ctx.reply('❌ 设置失败，请稍后重试')
+  }
+})
+
+// 🔥 群内管理员：显示管理员、权限人、操作员信息
+bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
+  if (ctx.chat?.type === 'private') {
+    return ctx.reply('此命令仅在群组中使用')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  
+  try {
+    // 获取管理员列表
+    const admins = await ctx.getChatAdministrators()
+    const adminList = admins
+      .filter(a => !a.user.is_bot)
+      .map(a => {
+        const name = a.user.username 
+          ? `@${a.user.username}` 
+          : `${a.user.first_name || ''} ${a.user.last_name || ''}`.trim() || `用户${a.user.id}`
+        const status = a.status === 'creator' ? '👑 群主' : '👤 管理员'
+        return `• ${name} (${status})`
+      })
+    
+    // 获取操作员列表
+    const operators = await prisma.operator.findMany({
+      where: { chatId },
+      select: { username: true }
+    })
+    
+    // 获取设置
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { everyoneAllowed: true }
+    })
+    
+    let text = '━━━ 👥 群组权限信息 ━━━\n\n'
+    
+    if (adminList.length > 0) {
+      text += `【👑 群主/管理员】\n${adminList.join('\n')}\n\n`
+    }
+    
+    if (setting?.everyoneAllowed) {
+      text += `【✅ 权限设置】\n• 所有人可操作\n\n`
+    } else if (operators.length > 0) {
+      text += `【👤 操作员】\n${operators.map(op => `• ${op.username}`).join('\n')}\n\n`
+    } else {
+      text += `【👤 操作员】\n• 仅管理员可操作\n\n`
+    }
+    
+    await ctx.reply(text, { ...(await buildInlineKb(ctx)) })
+  } catch (e) {
+    console.error('[群内管理员]', e)
+    await ctx.reply('❌ 获取信息失败，请稍后重试')
+  }
+})
+
+// 🔥 使用说明 action 已移至 handlers/core.js
+// 临时保留 help 内容以备参考（将在后续删除）
+const HELP_CONTENT = [
+    '━━━ 📖 机器人使用说明 ━━━',
     '',
     '【💰 基础记账】',
     '• 开始记账 - 初始化群组记账',
@@ -3440,6 +2749,8 @@ bot.action('help', async (ctx) => {
     '• 刷新实时汇率 - 手动更新实时汇率',
     '• 显示实时汇率 - 查看汇率',
     '• z0 - 查询OKX实时U价',
+    '• 查询汇率 或 查询映射表 - 查看点位汇率映射关系',
+    '• 查询汇率 7.2 - 自定义查询指定汇率的映射关系',
     '• 设置费率 5 - 手续费5%（可选）',
     '',
     '【📊 记账模式】',
@@ -3463,7 +2774,7 @@ bot.action('help', async (ctx) => {
     '添加操作员方式三：添加操作员 @所有人（群内所有人都可以记账）',
     '删除操作员方式一：删除操作员 @AAA @BBB',
     '删除操作员方式二：回复指定人消息：删除操作员（对方无用户名）',
-    '• 显示操作人 - 查看列表',
+    '• 显示操作人 / 管理员 / 权限人 - 显示群组权限信息',
     '💡 需禁用Privacy Mode或设为管理员',
     '💡 管理员和操作人可记账！',
     '',
@@ -3480,6 +2791,9 @@ bot.action('help', async (ctx) => {
     '• 关闭所有功能 - 关闭所有功能开关',
     '• 开启地址验证 - 启用钱包地址验证功能',
     '• 关闭地址验证 - 关闭钱包地址验证功能',
+    '• 设置额度 10000 - 设置超押提醒额度（设置为0则关闭）',
+    '• 全局日切时间 8 - 设置全局日切时间（所有群组都应用）',
+    '• 机器人退群 - 机器人自动退群并删除所有权限和数据',
     '💡 适用于机器人只发送通告的群，与其他机器人互不打扰',
     '',
     '【⚙️ 群组独立设置】',
@@ -3502,115 +2816,8 @@ bot.action('help', async (ctx) => {
     '• 显示模式4 - 推荐设置！',
     '• 设置汇率 7.2 - 设置你的汇率',
     '• 设置操作人 @xxx - 添加员工权限',
-  ].join('\n')
-  await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
-})
-
-// 本地开发：发送文本链接
-bot.action('open_dashboard', async (ctx) => {
-  try { await ctx.answerCbQuery('已发送链接') } catch {}
-  if (!BACKEND_URL) return ctx.reply('未配置后台地址。')
-  const chatId = String(ctx.chat?.id || '')
-  try {
-    const u = new URL(BACKEND_URL)
-    u.searchParams.set('chatId', chatId)
-    await ctx.reply(`查看完整订单：\n${u.toString()}`)
-  } catch {
-    await ctx.reply(`查看完整订单：\n${BACKEND_URL}`)
-  }
-})
-
-// 🔥 私聊时"开始记账"按钮回调
-bot.action('start_accounting', async (ctx) => {
-  try { await ctx.answerCbQuery() } catch {}
-  
-  // 只在私聊中处理
-  if (ctx.chat?.type !== 'private') {
-    return ctx.reply('此功能仅在私聊中使用')
-  }
-  
-  const userId = String(ctx.from?.id || '')
-  const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
-  const firstName = ctx.from?.first_name || ''
-  const lastName = ctx.from?.last_name || ''
-  const fullName = `${firstName} ${lastName}`.trim()
-  
-  // 🔥 检查是否在白名单
-  const whitelistedUser = await prisma.whitelistedUser.findUnique({
-    where: { userId }
-  })
-  
-  if (whitelistedUser) {
-    // 🔥 白名单用户：提供邀请机器人进群的链接
-    // 获取机器人的用户名（从 BOT_TOKEN 或从数据库）
-    let botUsername = process.env.BOT_USERNAME || ''
-    if (!botUsername) {
-      try {
-        const bot = await prisma.bot.findFirst({
-          where: { enabled: true },
-          select: { token: true }
-        })
-        if (bot?.token) {
-          // 尝试从 Telegram API 获取机器人信息
-          const resp = await fetch(`https://api.telegram.org/bot${bot.token}/getMe`)
-          const data = await resp.json()
-          if (data.ok && data.result?.username) {
-            botUsername = data.result.username
-          }
-        }
-      } catch (e) {
-        console.error('获取机器人用户名失败', e)
-      }
-    }
-    
-    if (botUsername) {
-      const inviteLink = `https://t.me/${botUsername.replace('@', '')}`
-      await ctx.reply(
-        `✅ 您已在白名单中！\n\n` +
-        `📋 邀请机器人进群：\n` +
-        `1. 点击下方链接添加机器人\n` +
-        `2. 选择要添加的群组\n` +
-        `3. 机器人将自动启用所有功能\n\n` +
-        `🔗 ${inviteLink}\n\n` +
-        `💡 提示：您可以将机器人添加到群组后，所有功能将自动启用。`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                Markup.button.url('➕ 添加机器人到群组', inviteLink)
-              ]
-            ]
-          }
-        }
-      )
-    } else {
-      await ctx.reply(
-        `✅ 您已在白名单中！\n\n` +
-        `💡 请将机器人添加到群组，所有功能将自动启用。\n\n` +
-        `添加方式：\n` +
-        `1. 在群组中点击"添加成员"\n` +
-        `2. 搜索机器人的用户名\n` +
-        `3. 添加机器人到群组`
-      )
-    }
-  } else {
-    // 🔥 非白名单用户：显示提示信息
-    await ctx.reply(
-      `👤 您的用户信息：\n\n` +
-      `🆔 用户ID：\`${userId}\`\n` +
-      `👤 用户名：${username}\n` +
-      `📛 昵称：${fullName || '无'}\n\n` +
-      `💡 将上面的用户ID提供给管理员，添加到白名单后，您邀请机器人进群将自动授权。\n\n` +
-      `⚠️ 使用提示：\n` +
-      `本机器人仅支持在群组中使用记账功能。\n` +
-      `如需使用，请：\n` +
-      `1. 将机器人添加到群组\n` +
-      `2. 联系管理员将您的ID添加到白名单\n` +
-      `3. 邀请机器人进群后将自动启用所有功能`,
-      { parse_mode: 'Markdown' }
-    )
-  }
-})
+  ]
+// 🔥 action 处理器（help, open_dashboard, start_accounting）已移至 handlers/core.js
 
 // 🔥 每小时自动更新实时汇率的定时任务
 async function updateAllRealtimeRates() {
@@ -3684,24 +2891,7 @@ bot.launch().then(async () => {
     }
   }, 3600000) // 1小时
   
-  // 2. 每6小时清理过期的功能开关缓存
-  setInterval(() => {
-    try {
-      const now = Date.now()
-      let cleaned = 0
-      for (const [chatId, cache] of featureCache.cache.entries()) {
-        if (cache.expires && cache.expires < now) {
-          featureCache.delete(chatId)
-          cleaned++
-        }
-      }
-      if (cleaned > 0) {
-        console.log(`[内存清理] 清理了 ${cleaned} 个过期的功能开关缓存`)
-      }
-    } catch (e) {
-      console.error('[定时任务] 清理功能开关缓存失败:', e)
-    }
-  }, 6 * 3600000) // 6小时
+  // 2. 每6小时清理过期的功能开关缓存（由 middleware.js 内部 LRU 缓存自动处理）
   
   // 3. 每12小时打印内存使用情况（仅在DEBUG模式下）
   if (process.env.DEBUG_BOT === 'true') {
@@ -3711,8 +2901,7 @@ bot.launch().then(async () => {
         rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
         heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
         heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-        external: `${Math.round(used.external / 1024 / 1024)}MB`,
-        featureCacheSize: featureCache.size
+        external: `${Math.round(used.external / 1024 / 1024)}MB`
       })
     }
     logMemoryUsage() // 启动时打印一次
@@ -3736,19 +2925,24 @@ bot.launch().then(async () => {
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
     
-    // 🔥 更新机器人描述
-    try {
-      await bot.telegram.setMyDescription(
-        '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证、多群组独立设置。\n\n' +
-        '主要功能：\n' +
-        '• 基础记账：+金额、下发金额、显示账单\n' +
-        '• 数学计算：支持+100-50、+100*2等表达式\n' +
-        '• 实时汇率：自动获取USDT到CNY汇率\n' +
-        '• 地址验证：检测钱包地址变更并提醒\n' +
-        '• 功能开关：开启所有功能/关闭所有功能\n' +
-        '• 多群组独立配置：每个群组独立设置\n\n' +
-        '发送 /help 查看完整使用说明。'
-      )
+      // 🔥 更新机器人描述
+      try {
+        await bot.telegram.setMyDescription(
+          '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证、多群组独立设置。\n\n' +
+          '主要功能：\n' +
+          '• 基础记账：+金额、下发金额、显示账单\n' +
+          '• 数学计算：支持+100-50、+100*2等表达式\n' +
+          '• 实时汇率：自动获取USDT到CNY汇率、OKX C2C价格查询\n' +
+          '• 查询汇率：查看点位汇率映射关系，支持自定义查询\n' +
+          '• 超押提醒：设置额度后自动提醒入款超限\n' +
+          '• 全局配置：全局日切时间设置，所有群组统一应用\n' +
+          '• 地址验证：检测钱包地址变更并提醒\n' +
+          '• 权限管理：显示管理员、权限人、操作员信息\n' +
+          '• 机器人退群：一键退群并清除所有数据\n' +
+          '• 功能开关：开启所有功能/关闭所有功能\n' +
+          '• 多群组独立配置：每个群组独立设置\n\n' +
+          '发送 /help 查看完整使用说明。'
+        )
       console.log('已更新机器人描述')
     } catch (e) {
       console.error('设置机器人描述失败（可能需要通过BotFather手动设置）：', e)
