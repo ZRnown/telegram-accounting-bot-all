@@ -50,7 +50,7 @@ export async function checkAndClearIfNewDay(chat, chatId) {
     
     const settings = await prisma.setting.findUnique({
       where: { chatId },
-      select: { accountingMode: true }
+      select: { accountingMode: true, dailyCutoffHour: true }
     })
     
     const accountingMode = settings?.accountingMode || 'DAILY_RESET'
@@ -58,7 +58,11 @@ export async function checkAndClearIfNewDay(chat, chatId) {
     // 只有每日清零模式才需要清空内存数据
     if (accountingMode !== 'DAILY_RESET') return false
     
-    const cutoffHour = await getGlobalDailyCutoffHour()
+    // 🔥 修复：优先使用群组级别的日切时间，与 getOrCreateTodayBill 保持一致
+    const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
+      ? settings.dailyCutoffHour
+      : await getGlobalDailyCutoffHour()
+    
     const now = new Date()
     
     // 🔥 修复：使用与 getOrCreateTodayBill 相同的日切逻辑计算当前账单周期的开始时间
@@ -106,8 +110,29 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 }
 
 /**
+ * 获取群组的日切时间（优先使用群组级别，否则使用全局配置）
+ */
+async function getChatDailyCutoffHour(chatId) {
+  try {
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { dailyCutoffHour: true }
+    })
+    // 🔥 修复：优先使用群组级别的日切时间，如果为null或undefined，则使用全局配置
+    if (setting?.dailyCutoffHour != null && setting.dailyCutoffHour >= 0 && setting.dailyCutoffHour <= 23) {
+      return setting.dailyCutoffHour
+    }
+  } catch (e) {
+    console.error('[getChatDailyCutoffHour] 查询失败', e)
+  }
+  // 如果没有群组级别配置，使用全局配置
+  return await getGlobalDailyCutoffHour()
+}
+
+/**
  * 获取或创建当天的OPEN账单
  * 🔥 修复日切逻辑：根据当前时间判断应该归入哪个账单周期
+ * 🔥 修复：优先使用群组级别的日切时间，确保与前端一致
  * 
  * 日切逻辑说明：
  * - 如果日切时间是凌晨2点
@@ -116,7 +141,7 @@ export async function checkAndClearIfNewDay(chat, chatId) {
  * - 如果当前时间是3号凌晨1点（< 3号02:00），归入2号的账单（2025/11/02 02:00:00 — 2025/11/03 02:00:00）
  */
 export async function getOrCreateTodayBill(chatId) {
-  const cutoffHour = await getGlobalDailyCutoffHour()
+  const cutoffHour = await getChatDailyCutoffHour(chatId)
   const now = new Date()
   
   // 🔥 计算今天的日切开始时间
@@ -226,7 +251,10 @@ export async function getHistoricalNotDispatched(chatId, settings) {
       return { notDispatched: 0, notDispatchedUSDT: 0 }
     }
 
-    const cutoffHour = await getGlobalDailyCutoffHour()
+    // 🔥 修复：优先使用群组级别的日切时间
+    const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
+      ? settings.dailyCutoffHour
+      : await getGlobalDailyCutoffHour()
     const today = startOfDay(new Date(), cutoffHour)
     
     const historicalBills = await prisma.bill.findMany({
@@ -325,18 +353,13 @@ export async function deleteLastDispatch(chatId) {
  */
 export async function performAutoDailyCutoff(getChat) {
   try {
-    const cutoffHour = await getGlobalDailyCutoffHour()
     const now = new Date()
-    const todayStart = startOfDay(now, cutoffHour)
-    const yesterdayEnd = new Date(todayStart)
-    yesterdayEnd.setTime(yesterdayEnd.getTime() - 1) // 昨天的最后一刻
     
-    // 查找所有昨天还有OPEN账单的群组（使用groupBy获取唯一的chatId）
-    const yesterdayBillsGrouped = await prisma.bill.groupBy({
+    // 查找所有还有OPEN账单的群组（使用groupBy获取唯一的chatId）
+    const openBillsGrouped = await prisma.bill.groupBy({
       by: ['chatId'],
       where: {
-        status: 'OPEN',
-        openedAt: { lt: todayStart }
+        status: 'OPEN'
       },
       _count: {
         id: true
@@ -344,23 +367,23 @@ export async function performAutoDailyCutoff(getChat) {
     })
     
     // 转换为简单数组格式
-    const yesterdayBills = yesterdayBillsGrouped.map(g => ({ chatId: g.chatId }))
+    const openBills = openBillsGrouped.map(g => ({ chatId: g.chatId }))
     
-    if (yesterdayBills.length === 0) {
+    if (openBills.length === 0) {
       return 0
     }
     
     // 🔥 性能优化：批量查询所有群组的设置，避免N+1查询问题
-    const chatIds = yesterdayBills.map(b => b.chatId)
+    const chatIds = openBills.map(b => b.chatId)
     const allSettings = await prisma.setting.findMany({
       where: { chatId: { in: chatIds } },
-      select: { chatId: true, accountingMode: true }
+      select: { chatId: true, accountingMode: true, dailyCutoffHour: true }
     })
     const settingsMap = new Map(allSettings.map(s => [s.chatId, s]))
     
     let processedCount = 0
     
-    for (const bill of yesterdayBills) {
+    for (const bill of openBills) {
       try {
         const chatId = bill.chatId
         
@@ -370,6 +393,13 @@ export async function performAutoDailyCutoff(getChat) {
         
         // 只有每日清零模式才需要关闭昨天的账单
         if (accountingMode === 'DAILY_RESET') {
+          // 🔥 修复：优先使用群组级别的日切时间
+          const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
+            ? settings.dailyCutoffHour
+            : await getGlobalDailyCutoffHour()
+          
+          const todayStart = startOfDay(now, cutoffHour)
+          
           // 查找所有昨天的OPEN账单并关闭它们
           const billsToClose = await prisma.bill.findMany({
             where: {

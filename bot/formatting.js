@@ -37,7 +37,15 @@ export async function formatSummary(ctx, chat, options = {}) {
       }),
       needsSync ? (async () => {
         try {
-          const cutoffHour = await getGlobalDailyCutoffHour()
+          // 🔥 修复：优先使用群组级别的日切时间，与 getOrCreateTodayBill 保持一致
+          const setting = await prisma.setting.findUnique({
+            where: { chatId },
+            select: { dailyCutoffHour: true }
+          })
+          const cutoffHour = setting?.dailyCutoffHour != null && setting.dailyCutoffHour >= 0 && setting.dailyCutoffHour <= 23
+            ? setting.dailyCutoffHour
+            : await getGlobalDailyCutoffHour()
+          
           // 🔥 修复：使用与 getOrCreateTodayBill 相同的日切逻辑
           const now = new Date()
           
@@ -119,7 +127,15 @@ export async function formatSummary(ctx, chat, options = {}) {
       }
       chat._billLastSync = now
       // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
-      const cutoffHour = await getGlobalDailyCutoffHour()
+      // 🔥 修复：优先使用群组级别的日切时间
+      const setting = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { dailyCutoffHour: true }
+      }).catch(() => null)
+      const cutoffHour = setting?.dailyCutoffHour != null && setting.dailyCutoffHour >= 0 && setting.dailyCutoffHour <= 23
+        ? setting.dailyCutoffHour
+        : await getGlobalDailyCutoffHour()
+      
       const nowDate = new Date()
       const todayCutoff = new Date()
       todayCutoff.setFullYear(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate())

@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 
 interface TransactionTablesProps {
   currentDate: Date
@@ -12,7 +12,7 @@ interface TransactionTablesProps {
 export function TransactionTables({ currentDate, chatId }: TransactionTablesProps) {
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
-  const incomeRefs = useRef<HTMLTableRowElement[]>([])
+  // 🔥 删除无用的 incomeRefs，不再需要高亮功能
 
   useEffect(() => {
     const controller = new AbortController()
@@ -32,28 +32,27 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
       }
     }
     load()
-    return () => controller.abort()
+    
+    // 🔥 优化：添加轮询机制，每5秒自动刷新数据（仅当日期是今天时）
+    const isToday = currentDate.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+    let intervalId: NodeJS.Timeout | null = null
+    if (isToday) {
+      intervalId = setInterval(() => {
+        if (!controller.signal.aborted) {
+          load().catch((e) => {
+            if ((e as any).name !== 'AbortError') console.error(e)
+          })
+        }
+      }, 5000) // 每5秒刷新一次
+    }
+    
+    return () => {
+      controller.abort()
+      if (intervalId) clearInterval(intervalId)
+    }
   }, [currentDate, pick, chatId])
 
-  useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent).detail as { type: 'income'|'dispatch'; index: number }
-      if (!detail) return
-      // 切换账单选择并高亮对应行（若存在）
-      if (detail.index > 0) setPick(detail.index)
-      if (detail.type === 'income') {
-        const idx = detail.index - 1
-        const row = incomeRefs.current[idx]
-        if (row) {
-          row.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          row.classList.add('bg-yellow-50')
-          setTimeout(() => row.classList.remove('bg-yellow-50'), 1500)
-        }
-      }
-    }
-    window.addEventListener('goto-bill', handler as any)
-    return () => window.removeEventListener('goto-bill', handler as any)
-  }, [])
+  // 🔥 删除高亮闪烁的无用逻辑
 
   if (!data) return null
 
@@ -78,7 +77,7 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
               <TableBody>
                 {data.incomeRecords.length > 0 ? (
                   data.incomeRecords.map((record: any, index: number) => (
-                    <TableRow key={index} ref={(el) => { if (el) incomeRefs.current[index] = el }}>
+                    <TableRow key={index}>
                       <TableCell className="text-xs">{record.time}</TableCell>
                       <TableCell className="text-xs font-medium">{record.amount}</TableCell>
                       <TableCell className="text-xs text-slate-500">{record.remark || '-'}</TableCell>

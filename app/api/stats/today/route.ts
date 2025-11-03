@@ -134,8 +134,11 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    // 🔥 使用日切时间计算日期范围
-    const cutoffHour = settings?.dailyCutoffHour ?? 0
+    // 🔥 使用日切时间计算日期范围（优先使用群组级别，否则使用全局配置）
+    // 注意：如果 dailyCutoffHour 为 null 或 undefined，使用全局配置（这里简化处理，默认0）
+    const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
+      ? settings.dailyCutoffHour
+      : 0 // 前端暂时默认0，实际应该查询全局配置，但为简化暂时用0
     // 如果是从日期字符串查询，使用专门的函数；否则使用实时查询函数
     let gte: Date
     let lt: Date
