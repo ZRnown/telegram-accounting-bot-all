@@ -80,7 +80,7 @@ export function registerQueryRate(bot, ensureChat) {
         const realtimeRate = setting?.realtimeRate
         const feePercent = setting?.feePercent || 0
         
-        rateText = '━━━ 💱 汇率映射表 ━━━\n\n'
+        rateText = ' 💱 汇率映射表 \n\n'
         
         if (fixedRate) {
           rateText += `【固定汇率】\n` +
@@ -141,7 +141,7 @@ export function registerAdminInfo(bot) {
           return `• ${name} (${status})`
         })
       
-      let text = '━━━ 👥 群组权限信息 ━━━\n\n'
+      let text = ' 👥 群组权限信息 \n\n'
       
       if (adminList.length > 0) {
         text += `【👑 群主/管理员】\n${adminList.join('\n')}\n\n`

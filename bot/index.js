@@ -516,7 +516,7 @@ function extractMention(text) {
   return m ? `@${m[1]}` : null
 }
 
-// 🔥 核心命令（bot.start, bot.command('myid')）已移至 handlers/core.js
+// 🔥 核心命令（bot.start）已移至 handlers/core.js，只保留 /start 命令
 
 // /help 别名（与“使用说明”一致）
 // 审批中间件：群组需后台审批通过（Chat.status === 'APPROVED'）后才允许普通指令
@@ -1617,7 +1617,7 @@ bot.hears(/^(z0|Z0)$/i, async (ctx) => {
       second: '2-digit'
     })
     
-    let priceText = '━━━ 💰 OKX实时U价 TOP 10 ━━━\n\n'
+    let priceText = ' 💰 OKX实时U价 TOP 10 \n\n'
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -1686,7 +1686,7 @@ bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
       'wxpay': '微信'
     }[paymentMethod]
     
-    let priceText = `━━━ 💰 OKX实时U价 ${methodName} TOP 10 ━━━\n\n`
+    let priceText = ` 💰 OKX实时U价 ${methodName} TOP 10 \n\n`
     
     topSellers.forEach((seller, index) => {
       const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
@@ -2532,7 +2532,7 @@ bot.hears(/^(查询汇率|查询映射表)(?:\s+(.+))?$/i, async (ctx) => {
       const realtimeRate = setting?.realtimeRate
       const feePercent = setting?.feePercent || 0
       
-      rateText = '━━━ 💱 汇率映射表 ━━━\n\n'
+      rateText = ' 💱 汇率映射表 \n\n'
       
       if (fixedRate) {
         rateText += `【固定汇率】\n` +
@@ -2635,7 +2635,7 @@ bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
       select: { everyoneAllowed: true }
     })
     
-    let text = '━━━ 👥 群组权限信息 ━━━\n\n'
+    let text = ' 👥 群组权限信息 \n\n'
     
     if (adminList.length > 0) {
       text += `【👑 群主/管理员】\n${adminList.join('\n')}\n\n`
@@ -2659,7 +2659,7 @@ bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
 // 🔥 使用说明 action 已移至 handlers/core.js
 // 临时保留 help 内容以备参考（将在后续删除）
 const HELP_CONTENT = [
-    '━━━ 📖 机器人使用说明 ━━━',
+    ' 📖 机器人使用说明 ',
     '',
     '【💰 基础记账】',
     '• 开始记账 - 初始化群组记账',
@@ -2854,16 +2854,8 @@ bot.launch().then(async () => {
   
   console.log('[内存优化] 定期清理任务已启动')
   
-  const commands = [
-    { command: 'help', description: '使用说明（命令列表）' },
-    { command: 'show', description: '显示账单' },
-    { command: 'history', description: '显示历史账单（最近5条）' },
-    { command: 'setfee', description: '设置费率，如 /setfee 5 或 /setfee 0.05' },
-    { command: 'setrate', description: '设置固定汇率，如 /setrate 7.5' },
-    { command: 'realtime', description: '启用实时汇率（示例值）' },
-    { command: 'activate', description: '激活机器人（本群）' },
-    { command: 'allowgroup', description: '管理员：将本群加入白名单' },
-  ]
+  // 🔥 只保留 /start 命令，其他命令已删除（只使用中文指令）
+  const commands = []
   try {
     await bot.telegram.setMyCommands(commands)
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
@@ -2884,7 +2876,7 @@ bot.launch().then(async () => {
           '• 权限管理：显示管理员、权限人、操作员信息\n' +
           '• 机器人退群：一键退群并清除所有数据\n' +
           '• 功能开关：开启所有功能/关闭所有功能\n\n' +
-          '发送 /help 查看完整使用说明。'
+          '私聊机器人发送 /start 开始使用。'
         )
       console.log('已更新机器人描述')
     } catch (e) {

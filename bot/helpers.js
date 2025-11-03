@@ -59,26 +59,42 @@ export async function buildInlineKb(ctx, options = {}) {
   try {
     const setting = await prisma.setting.findUnique({
       where: { chatId },
-      select: { hideHelpButton: true }
+      select: { hideHelpButton: true, hideOrderButton: true }
     })
     
+    // 使用说明按钮（根据设置决定是否显示）
     if (!setting?.hideHelpButton) {
       rows.push([Markup.button.callback('使用说明', 'help')])
     }
-  } catch {
-    rows.push([Markup.button.callback('使用说明', 'help')])
-  }
-  
-  if (isPublicUrl(BACKEND_URL)) {
-    try {
-      const u = new URL(BACKEND_URL)
-      u.searchParams.set('chatId', chatId)
-      rows.push([Markup.button.url('查看完整订单', u.toString())])
-    } catch {
-      rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
+    
+    // 查看完整订单按钮（根据设置决定是否显示）
+    if (!setting?.hideOrderButton) {
+      if (isPublicUrl(BACKEND_URL)) {
+        try {
+          const u = new URL(BACKEND_URL)
+          u.searchParams.set('chatId', chatId)
+          rows.push([Markup.button.url('查看完整订单', u.toString())])
+        } catch {
+          rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
+        }
+      } else if (BACKEND_URL) {
+        rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
+      }
     }
-  } else if (BACKEND_URL) {
-    rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
+  } catch {
+    // 默认情况下都显示
+    rows.push([Markup.button.callback('使用说明', 'help')])
+    if (isPublicUrl(BACKEND_URL)) {
+      try {
+        const u = new URL(BACKEND_URL)
+        u.searchParams.set('chatId', chatId)
+        rows.push([Markup.button.url('查看完整订单', u.toString())])
+      } catch {
+        rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
+      }
+    } else if (BACKEND_URL) {
+      rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
+    }
   }
   
   return Markup.inlineKeyboard(rows)

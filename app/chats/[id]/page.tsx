@@ -16,6 +16,7 @@ interface ChatSettings {
     addressVerificationEnabled?: boolean
     dailyCutoffHour?: number
     hideHelpButton?: boolean
+    hideOrderButton?: boolean
   }
 }
 
@@ -41,6 +42,7 @@ export default function ChatSettingsPage() {
   const [addressVerificationEnabled, setAddressVerificationEnabled] = useState<boolean>(false)
   const [dailyCutoffHour, setDailyCutoffHour] = useState<number>(0)
   const [hideHelpButton, setHideHelpButton] = useState<boolean>(false)
+  const [hideOrderButton, setHideOrderButton] = useState<boolean>(false)
   
   // 操作人管理状态
   const [newOperator, setNewOperator] = useState('')
@@ -68,6 +70,7 @@ export default function ChatSettingsPage() {
         setAddressVerificationEnabled(data.settings.addressVerificationEnabled || false)
         setDailyCutoffHour(data.settings.dailyCutoffHour ?? 0)
         setHideHelpButton(data.settings.hideHelpButton ?? false)
+        setHideOrderButton(data.settings.hideOrderButton ?? false)
       } else {
         alert('加载设置失败')
       }
@@ -102,6 +105,7 @@ export default function ChatSettingsPage() {
         addressVerificationEnabled,
         dailyCutoffHour,
         hideHelpButton,
+        hideOrderButton,
       }
 
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`, {
@@ -306,9 +310,15 @@ export default function ChatSettingsPage() {
           </div>
 
           {/* 界面设置 */}
-          <div className="bg-white border rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-semibold">🎨 隐藏使用说明</h3>
+          <div className="bg-white border rounded-lg p-4 space-y-4">
+            <h3 className="text-base font-semibold mb-3">🎨 按钮显示设置</h3>
+            
+            {/* 隐藏使用说明按钮 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-gray-700">隐藏使用说明按钮</div>
+                <p className="text-xs text-gray-500 mt-1">隐藏账单消息中的"使用说明"按钮</p>
+              </div>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
@@ -319,7 +329,23 @@ export default function ChatSettingsPage() {
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
             </div>
-            <p className="text-xs text-gray-600">隐藏账单消息中的"使用说明"按钮（"查看完整订单"按钮仍显示）</p>
+            
+            {/* 隐藏查看完整订单按钮 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-gray-700">隐藏查看完整订单按钮</div>
+                <p className="text-xs text-gray-500 mt-1">隐藏账单消息中的"查看完整订单"按钮</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hideOrderButton}
+                  onChange={(e) => setHideOrderButton(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
           </div>
         </div>
 

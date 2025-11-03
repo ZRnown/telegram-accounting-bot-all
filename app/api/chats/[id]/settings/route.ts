@@ -20,6 +20,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         addressVerificationEnabled: setting?.addressVerificationEnabled ?? false,
         dailyCutoffHour: setting?.dailyCutoffHour ?? 0,
         hideHelpButton: setting?.hideHelpButton ?? false,
+        hideOrderButton: setting?.hideOrderButton ?? false,
       },
     })
   } catch (e) {
@@ -42,6 +43,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       addressVerificationEnabled?: boolean
       dailyCutoffHour?: number
       hideHelpButton?: boolean
+      hideOrderButton?: boolean
     }
 
     // Update Chat.title if provided
@@ -68,6 +70,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.addressVerificationEnabled === 'boolean') patchData.addressVerificationEnabled = body.addressVerificationEnabled
     if (typeof body.dailyCutoffHour === 'number' && body.dailyCutoffHour >= 0 && body.dailyCutoffHour <= 23) patchData.dailyCutoffHour = body.dailyCutoffHour
     if (typeof body.hideHelpButton === 'boolean') patchData.hideHelpButton = body.hideHelpButton
+    if (typeof body.hideOrderButton === 'boolean') patchData.hideOrderButton = body.hideOrderButton
 
     if (Object.keys(patchData).length === 0) return new Response('Bad Request', { status: 400 })
 

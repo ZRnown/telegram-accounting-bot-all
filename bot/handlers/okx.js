@@ -16,7 +16,7 @@ export function registerZ0(bot) {
       }
       
       const top10 = sellers.slice(0, 10)
-      const lines = ['━━━ OKX实时U价 TOP 10 ━━━\n']
+      const lines = [' OKX实时U价 TOP 10 \n']
       
       top10.forEach((seller, index) => {
         const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index]
@@ -65,7 +65,7 @@ export function registerZ0(bot) {
       
       const top10 = sellers.slice(0, 10)
       const methodName = { 'all': '全部', 'bank': '银行卡', 'alipay': '支付宝', 'wxpay': '微信' }[method]
-      const lines = [`━━━ OKX实时U价 ${methodName} TOP 10 ━━━\n`]
+      const lines = [` OKX实时U价 ${methodName} TOP 10 \n`]
       
       top10.forEach((seller, index) => {
         const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index]

@@ -70,23 +70,7 @@ export function registerStart(bot, ensureChat) {
   })
 }
 
-/**
- * 注册 myid 命令
- */
-export function registerMyId(bot) {
-  bot.command('myid', async (ctx) => {
-    const userId = ctx.from?.id
-    const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
-    
-    await ctx.reply(
-      `👤 您的用户信息：\n` +
-      `🆔 ID：\`${userId}\`\n` +
-      `👤 用户名：${username}\n\n` +
-      `💡 私聊机器人发送 /start 查看详细信息`,
-      { parse_mode: 'Markdown' }
-    )
-  })
-}
+// 🔥 /myid 命令已删除，只保留中文指令
 
 /**
  * 注册 help action
@@ -101,7 +85,7 @@ export function registerHelp(bot) {
     
     // 🔥 私聊和群聊都显示完整的使用说明
     const help = [
-      '━━━ 📖 机器人使用说明 ━━━',
+      ' 📖 机器人使用说明 ',
       '',
       '【💰 基础记账】',
       '• 开始记账 - 初始化群组记账',
@@ -215,13 +199,43 @@ export function registerDashboard(bot) {
 }
 
 /**
+ * 注册查看账单命令（发送账单链接）
+ */
+export function registerViewBill(bot, ensureChat) {
+  bot.hears(/^查看账单$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    if (!BACKEND_URL) {
+      return ctx.reply('❌ 未配置后台地址')
+    }
+    
+    const chatId = String(ctx.chat?.id || '')
+    try {
+      const u = new URL(BACKEND_URL)
+      u.searchParams.set('chatId', chatId)
+      await ctx.reply(
+        `📊 查看完整账单：\n${u.toString()}`,
+        { ...(await buildInlineKb(ctx)) }
+      )
+    } catch {
+      await ctx.reply(
+        `📊 查看完整账单：\n${BACKEND_URL}`,
+        { ...(await buildInlineKb(ctx)) }
+      )
+    }
+  })
+}
+
+/**
  * 注册 start_accounting action（私聊时"开始记账"按钮回调）
  */
 export function registerStartAccountingAction(bot) {
   bot.action('start_accounting', async (ctx) => {
+    try { await ctx.answerCbQuery() } catch {}
+    
     // 只在私聊中处理
     if (ctx.chat?.type !== 'private') {
-      try { await ctx.answerCbQuery('此功能仅在私聊中使用') } catch {}
       return ctx.reply('此功能仅在私聊中使用')
     }
     
@@ -234,7 +248,6 @@ export function registerStartAccountingAction(bot) {
     
     if (!whitelistedUser) {
       // 非白名单用户：显示提示信息
-      try { await ctx.answerCbQuery() } catch {}
       const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
       const firstName = ctx.from?.first_name || ''
       const lastName = ctx.from?.last_name || ''
@@ -250,26 +263,39 @@ export function registerStartAccountingAction(bot) {
       )
     }
     
-    // 🔥 白名单用户：直接打开邀请链接
-    // 使用当前 bot 实例获取用户名（最快方式）
+    // 🔥 白名单用户：使用 Markup 创建邀请按钮
     try {
+      const { Markup } = await import('telegraf')
+      
+      // 获取机器人用户名
       const me = await ctx.telegram.getMe()
       const botUsername = me?.username
       
-      if (botUsername) {
-        const inviteLink = `https://t.me/${botUsername}`
-        // 🔥 使用 answerCbQuery 的 url 选项直接打开链接（只能调用一次）
-        await ctx.answerCbQuery('正在打开邀请链接...', {
-          url: inviteLink
-        })
-      } else {
-        try { await ctx.answerCbQuery() } catch {}
-        await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
+      if (!botUsername) {
+        return await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
       }
+      
+      // 构建带管理员权限请求的邀请链接（请求删除消息和限制成员权限）
+      const inviteLinkWithAdmin = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
+      
+      // 创建管理员邀请按钮
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.url('➕ 添加为管理员', inviteLinkWithAdmin)
+        ]
+      ])
+      
+      await ctx.reply(
+        '点击下方按钮将机器人添加到群组：\n\n' +
+        '⚠️ 需要您有管理员权限才能添加机器人为管理员',
+        { 
+          ...keyboard,
+          parse_mode: 'Markdown'
+        }
+      )
     } catch (e) {
-      console.error('获取机器人用户名失败', e)
-      try { await ctx.answerCbQuery() } catch {}
-      await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
+      console.error('创建邀请链接失败', e)
+      await ctx.reply('❌ 无法创建邀请链接，请联系管理员')
     }
   })
 }
