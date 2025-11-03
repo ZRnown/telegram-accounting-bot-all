@@ -34,8 +34,7 @@ export async function formatSummary(ctx, chat, options = {}) {
           accountingMode: true,
           feePercent: true,
           fixedRate: true,
-          realtimeRate: true,
-          showOperator: true
+          realtimeRate: true
         }
       }),
       needsSync ? (async () => {
@@ -152,16 +151,7 @@ export async function formatSummary(ctx, chat, options = {}) {
         if (rate) {
           line += ` / ${rate}=${usdt}U`
         }
-        // 🔥 根据设置决定是否显示记账人
-        if (who && settings?.showOperator !== false) {
-          const whoWithAt = who.startsWith('@') ? who : `@${who}`
-          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
-          if (userId) {
-            line += ` [${who}](tg://user?id=${userId})`
-          } else {
-            line += ` *${who}*`
-          }
-        }
+        // 🔥 不显示记账人（已取消此功能）
         return line
       }).join('\n')
     : (incCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无入款')

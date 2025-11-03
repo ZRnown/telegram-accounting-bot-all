@@ -72,7 +72,6 @@ model Setting {
   dailyCutoffHour            Int            @default(0) // 日切时间（小时，0-23），默认0点（使用全局配置，此处为保留字段）
   hideHelpButton             Boolean        @default(false) // 隐藏使用说明按钮
   hideOrderButton            Boolean        @default(false) // 隐藏查看完整订单按钮
-  showOperator               Boolean        @default(true)  // 是否显示记账人（操作人）
   overDepositLimit           Float          @default(0) // 超押提醒额度，0表示关闭提醒
   lastOverDepositWarning     DateTime? // 上次超押提醒时间
   chat                       Chat           @relation(fields: [chatId], references: [id])
