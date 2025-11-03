@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import "./globals.css"
+import { Toaster } from "@/components/ui/toaster"
 
 // 使用系统字体，避免构建时从 Google 拉取字体导致失败
 
@@ -17,7 +18,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" className={`antialiased`}>
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        {children}
+        <Toaster />
+      </body>
     </html>
   )
 }

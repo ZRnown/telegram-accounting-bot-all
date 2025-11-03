@@ -61,18 +61,39 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     }
 
     const patchData: any = {}
+    // 🔥 优化：只要有字段传入就处理，即使值为默认值也允许保存
     if (typeof body.headerText === 'string') patchData.headerText = body.headerText
     if (fixedRate !== undefined) patchData.fixedRate = fixedRate
     if (realtimeRate !== undefined) patchData.realtimeRate = realtimeRate
     if (typeof body.feePercent === 'number') patchData.feePercent = body.feePercent
     if (body.accountingMode === 'DAILY_RESET' || body.accountingMode === 'CARRY_OVER') patchData.accountingMode = body.accountingMode
     if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) patchData.featureWarningMode = body.featureWarningMode
+    // 🔥 修复：boolean字段即使是false也要添加到patchData中
     if (typeof body.addressVerificationEnabled === 'boolean') patchData.addressVerificationEnabled = body.addressVerificationEnabled
     if (typeof body.dailyCutoffHour === 'number' && body.dailyCutoffHour >= 0 && body.dailyCutoffHour <= 23) patchData.dailyCutoffHour = body.dailyCutoffHour
     if (typeof body.hideHelpButton === 'boolean') patchData.hideHelpButton = body.hideHelpButton
     if (typeof body.hideOrderButton === 'boolean') patchData.hideOrderButton = body.hideOrderButton
 
-    if (Object.keys(patchData).length === 0) return new Response('Bad Request', { status: 400 })
+    // 🔥 优化：只要有传入任何设置字段就允许保存（即使值为默认值）
+    // 如果patchData为空但传入了设置字段，仍然允许保存（可能是保存默认值）
+    const hasSettingsFields = [
+      'accountingMode',
+      'featureWarningMode',
+      'addressVerificationEnabled',
+      'dailyCutoffHour',
+      'hideHelpButton',
+      'hideOrderButton',
+      'feePercent',
+      'fixedRate',
+      'realtimeRate',
+      'headerText'
+    ].some(key => key in body)
+
+    if (Object.keys(patchData).length === 0 && !hasSettingsFields && !body.title) {
+      return new Response('Bad Request: No valid fields to update', { status: 400 })
+    }
+    
+    // 🔥 如果patchData为空但有传入字段，说明可能是保存默认值，仍然执行upsert
 
     await prisma.setting.upsert({
       where: { chatId },

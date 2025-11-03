@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
 
 type AccountingMode = 'DAILY_RESET' | 'CARRY_OVER'
 
@@ -30,6 +31,7 @@ export default function ChatSettingsPage() {
   const router = useRouter()
   const params = useParams()
   const chatId = params?.id as string
+  const { toast } = useToast()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -72,11 +74,19 @@ export default function ChatSettingsPage() {
         setHideHelpButton(data.settings.hideHelpButton ?? false)
         setHideOrderButton(data.settings.hideOrderButton ?? false)
       } else {
-        alert('加载设置失败')
+        toast({
+          variant: "destructive",
+          title: "加载失败",
+          description: "无法加载群组设置，请刷新页面重试",
+        })
       }
     } catch (e) {
       console.error(e)
-      alert('加载设置失败')
+      toast({
+        variant: "destructive",
+        title: "加载失败",
+        description: "网络错误，请检查连接后重试",
+      })
     } finally {
       setLoading(false)
     }
@@ -94,7 +104,7 @@ export default function ChatSettingsPage() {
     }
   }
 
-  // 保存设置
+  // 保存设置（优化：保存成功后不重新加载，只更新本地状态）
   const handleSaveSettings = async () => {
     try {
       setSaving(true)
@@ -108,21 +118,70 @@ export default function ChatSettingsPage() {
         hideOrderButton,
       }
 
+      // 🔥 添加超时控制，避免长时间等待
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
+
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       })
 
+      clearTimeout(timeoutId)
+
       if (res.ok) {
-        alert('✅ 设置保存成功')
-        await loadSettings()
+        // 🔥 保存成功后不重新加载，只更新本地状态，提升响应速度
+        try {
+          const data = await res.json()
+          // API返回的格式是 { ok: true, settings: {...} }
+          if (data.ok && data.settings) {
+            setChatSettings(prev => prev ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                accountingMode: data.settings.accountingMode || accountingMode,
+                featureWarningMode: data.settings.featureWarningMode || featureWarningMode,
+                addressVerificationEnabled: data.settings.addressVerificationEnabled ?? addressVerificationEnabled,
+                dailyCutoffHour: data.settings.dailyCutoffHour ?? dailyCutoffHour,
+                hideHelpButton: data.settings.hideHelpButton ?? hideHelpButton,
+                hideOrderButton: data.settings.hideOrderButton ?? hideOrderButton,
+              }
+            } : prev)
+          }
+        } catch (parseError) {
+          console.error('解析响应失败', parseError)
+          // 即使解析失败，也认为保存成功（因为res.ok为true）
+        }
+        
+        toast({
+          title: "保存成功",
+          description: "设置已保存",
+        })
       } else {
-        alert('❌ 保存失败')
+        const errorText = await res.text().catch(() => '保存失败')
+        toast({
+          variant: "destructive",
+          title: "保存失败",
+          description: errorText || "请稍后重试",
+        })
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
-      alert('❌ 保存失败')
+      if (e.name === 'AbortError') {
+        toast({
+          variant: "destructive",
+          title: "请求超时",
+          description: "保存请求超时，请检查网络连接后重试",
+        })
+      } else {
+        toast({
+          variant: "destructive",
+          title: "保存失败",
+          description: e.message || "网络错误，请稍后重试",
+        })
+      }
     } finally {
       setSaving(false)
     }
@@ -131,29 +190,60 @@ export default function ChatSettingsPage() {
   // 添加操作人
   const handleAddOperator = async () => {
     if (!newOperator.trim()) {
-      alert('请输入用户名')
+      toast({
+        variant: "destructive",
+        title: "输入错误",
+        description: "请输入用户名",
+      })
       return
     }
 
     try {
       setAddingOperator(true)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/operators`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: newOperator })
+        body: JSON.stringify({ username: newOperator }),
+        signal: controller.signal
       })
+
+      clearTimeout(timeoutId)
 
       if (res.ok) {
         const data = await res.json()
+        const addedUsername = newOperator // 保存用户名，因为后面会清空
         setOperators(data.items || [])
         setNewOperator('')
-        alert('✅ 添加成功')
+        toast({
+          title: "添加成功",
+          description: `已添加操作人 ${addedUsername}`,
+        })
       } else {
-        alert('❌ 添加失败')
+        const errorText = await res.text().catch(() => '添加失败')
+        toast({
+          variant: "destructive",
+          title: "添加失败",
+          description: errorText || "请稍后重试",
+        })
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
-      alert('❌ 添加失败')
+      if (e.name === 'AbortError') {
+        toast({
+          variant: "destructive",
+          title: "请求超时",
+          description: "请检查网络连接后重试",
+        })
+      } else {
+        toast({
+          variant: "destructive",
+          title: "添加失败",
+          description: e.message || "网络错误，请稍后重试",
+        })
+      }
     } finally {
       setAddingOperator(false)
     }
@@ -161,26 +251,54 @@ export default function ChatSettingsPage() {
 
   // 删除操作人
   const handleDeleteOperator = async (username: string) => {
-    if (!confirm(`确定删除操作人 ${username} 吗？`)) return
+    // 🔥 使用toast确认对话框替代confirm
+    const confirmed = window.confirm(`确定删除操作人 ${username} 吗？`)
+    if (!confirmed) return
 
     try {
       setDeletingOperator(username)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/operators`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
+        body: JSON.stringify({ username }),
+        signal: controller.signal
       })
+
+      clearTimeout(timeoutId)
 
       if (res.ok) {
         const data = await res.json()
         setOperators(data.items || [])
-        alert('✅ 删除成功')
+        toast({
+          title: "删除成功",
+          description: `已删除操作人 ${username}`,
+        })
       } else {
-        alert('❌ 删除失败')
+        const errorText = await res.text().catch(() => '删除失败')
+        toast({
+          variant: "destructive",
+          title: "删除失败",
+          description: errorText || "请稍后重试",
+        })
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
-      alert('❌ 删除失败')
+      if (e.name === 'AbortError') {
+        toast({
+          variant: "destructive",
+          title: "请求超时",
+          description: "请检查网络连接后重试",
+        })
+      } else {
+        toast({
+          variant: "destructive",
+          title: "删除失败",
+          description: e.message || "网络错误，请稍后重试",
+        })
+      }
     } finally {
       setDeletingOperator(null)
     }

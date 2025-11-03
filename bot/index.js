@@ -487,10 +487,10 @@ async function ensureDbChatWithSync(ctx) {
   if (chat && !chat.fixedRate && !chat.realtimeRate) {
     try {
       const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
-      const rate = await fetchRealtimeRateUSDTtoCNY()
-      if (rate) {
-        chat.realtimeRate = rate
-        await updateSettings(chatId, { realtimeRate: rate })
+        const rate = await fetchRealtimeRateUSDTtoCNY()
+        if (rate) {
+          chat.realtimeRate = rate
+          await updateSettings(chatId, { realtimeRate: rate })
       }
     } catch (e) {
       // 静默失败
@@ -1163,7 +1163,7 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   // 发送完整账单（不发送确认消息）
   try {
     console.log('[记账命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
-    const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+  const summary = await formatSummary(ctx, chat, { title: '当前账单' })
     console.log('[记账命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
     
     const inlineKb = await buildInlineKb(ctx)
@@ -1269,7 +1269,7 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   }
   try {
     console.log('[下发命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
-    const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
+  const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
     console.log('[下发命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
     
     const inlineKb = await buildInlineKb(ctx)
@@ -2450,7 +2450,7 @@ bot.hears(/^全局日切时间\s+(\d+)$/i, async (ctx) => {
     await ctx.reply('❌ 设置失败，请稍后重试')
   }
 })
-
+  
 // 🔥 机器人退群（在群内发送后机器人自动退群，并删除所有权限）
 bot.hears(/^机器人退群$/i, async (ctx) => {
   if (ctx.chat?.type === 'private') {
@@ -2861,23 +2861,23 @@ bot.launch().then(async () => {
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
     
-      // 🔥 更新机器人描述
-      try {
-        await bot.telegram.setMyDescription(
+    // 🔥 更新机器人描述
+    try {
+      await bot.telegram.setMyDescription(
           '智能记账机器人 - 支持USDT/RMB记账、实时汇率、地址验证。\n\n' +
-          '主要功能：\n' +
-          '• 基础记账：+金额、下发金额、显示账单\n' +
-          '• 数学计算：支持+100-50、+100*2等表达式\n' +
+        '主要功能：\n' +
+        '• 基础记账：+金额、下发金额、显示账单\n' +
+        '• 数学计算：支持+100-50、+100*2等表达式\n' +
           '• 实时汇率：自动获取USDT到CNY汇率、OKX C2C价格查询\n' +
           '• 查询汇率：查看点位汇率映射关系，支持自定义查询\n' +
           '• 超押提醒：设置额度后自动提醒入款超限\n' +
           '• 全局配置：全局日切时间设置，所有群组统一应用\n' +
-          '• 地址验证：检测钱包地址变更并提醒\n' +
+        '• 地址验证：检测钱包地址变更并提醒\n' +
           '• 权限管理：显示管理员、权限人、操作员信息\n' +
           '• 机器人退群：一键退群并清除所有数据\n' +
           '• 功能开关：开启所有功能/关闭所有功能\n\n' +
           '私聊机器人发送 /start 开始使用。'
-        )
+      )
       console.log('已更新机器人描述')
     } catch (e) {
       console.error('设置机器人描述失败（可能需要通过BotFather手动设置）：', e)
