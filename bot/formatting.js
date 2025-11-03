@@ -145,20 +145,11 @@ export async function formatSummary(ctx, chat, options = {}) {
         const rate = i.rate ?? rateVal
         const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
         const amount = Math.abs(i.amount)
-        const who = (i.operator || i.replier || '')
         
+        // 🔥 移除用户名显示，只显示时间和金额信息
         let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
         if (rate) {
           line += ` / ${rate}=${usdt}U`
-        }
-        if (who) {
-          const whoWithAt = who.startsWith('@') ? who : `@${who}`
-          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
-          if (userId) {
-            line += ` [${who}](tg://user?id=${userId})`
-          } else {
-            line += ` *${who}*`
-          }
         }
         return line
       }).join('\n')
@@ -187,7 +178,7 @@ export async function formatSummary(ctx, chat, options = {}) {
     incPart,
     `\n已下发（${disCount}笔）：`,
     disPart,
-    `\n总入款金额：${formatMoney(s.totalIncome)}`,
+    `\n总入款金额：${formatMoney(s.totalIncome)}U`,
     `费率：${s.feePercent}%`,
     `${rateLabel}：${rateVal || '未设置'}`,
     historicalInfo,
