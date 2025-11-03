@@ -39,6 +39,59 @@ export async function ensureDbChat(ctx, chat = null) {
 }
 
 /**
+ * 检查并处理跨日情况（如果是每日清零模式，清空内存数据）
+ * @param {object} chat - 内存中的聊天对象
+ * @param {string} chatId - 聊天ID
+ * @returns {Promise<boolean>} - 如果跨日返回true
+ */
+export async function checkAndClearIfNewDay(chat, chatId) {
+  try {
+    if (!chat || !chatId) return false
+    
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { accountingMode: true }
+    })
+    
+    const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+    
+    // 只有每日清零模式才需要清空内存数据
+    if (accountingMode !== 'DAILY_RESET') return false
+    
+    const cutoffHour = await getGlobalDailyCutoffHour()
+    const now = new Date()
+    const todayStart = startOfDay(now, cutoffHour)
+    
+    // 检查最后同步的日期（如果有）
+    const lastBillDate = chat._lastBillDate
+    if (!lastBillDate) {
+      // 首次使用，记录今天的日期
+      chat._lastBillDate = todayStart.getTime()
+      return false
+    }
+    
+    // 检查是否跨日
+    const lastDate = new Date(lastBillDate)
+    const isNewDay = todayStart.getTime() > lastDate.getTime()
+    
+    if (isNewDay) {
+      // 跨日了，清空内存中的当前账单数据
+      chat.current.incomes = []
+      chat.current.dispatches = []
+      chat._billLastSync = 0 // 清除同步标记，强制重新同步
+      chat._lastBillDate = todayStart.getTime()
+      console.log(`[日切检查] 检测到跨日，已清空内存数据`, { chatId, lastDate: lastDate.toISOString(), today: todayStart.toISOString() })
+      return true
+    }
+    
+    return false
+  } catch (e) {
+    console.error('[checkAndClearIfNewDay] 检查跨日失败', e)
+    return false
+  }
+}
+
+/**
  * 获取或创建当天的OPEN账单
  */
 export async function getOrCreateTodayBill(chatId) {

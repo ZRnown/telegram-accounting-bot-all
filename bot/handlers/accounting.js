@@ -1,7 +1,7 @@
 // 记账相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { parseAmountAndRate } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill } from '../database.js'
+import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay } from '../database.js'
 import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
@@ -33,6 +33,9 @@ export function registerIncome(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx)
+    
+    // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
+    await checkAndClearIfNewDay(chat, chatId)
     const text = ctx.message.text.trim()
 
     if (ctx.from?.id && ctx.from?.username) {
@@ -156,6 +159,9 @@ export function registerDispatch(bot, ensureChat) {
     }
     
     const chatId = await ensureDbChat(ctx)
+    
+    // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
+    await checkAndClearIfNewDay(chat, chatId)
     const text = ctx.message.text.trim()
     const isUSDT = /[uU]/.test(text)
     const m = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)/i)

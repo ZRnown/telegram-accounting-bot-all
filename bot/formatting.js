@@ -4,13 +4,16 @@ import { summarize } from './state.js'
 import { formatMoney } from './utils.js'
 import { getGlobalDailyCutoffHour } from './utils.js'
 import { startOfDay, endOfDay } from './utils.js'
-import { getHistoricalNotDispatched } from './database.js'
+import { getHistoricalNotDispatched, checkAndClearIfNewDay } from './database.js'
 
 /**
  * 格式化账单摘要
  */
 export async function formatSummary(ctx, chat, options = {}) {
   const chatId = String(ctx?.chat?.id || '')
+  
+  // 🔥 首先检查是否跨日，如果是每日清零模式则清空内存数据
+  await checkAndClearIfNewDay(chat, chatId)
   
   let previousNotDispatched = 0
   let previousNotDispatchedUSDT = 0
@@ -95,6 +98,10 @@ export async function formatSummary(ctx, chat, options = {}) {
         chat.current.dispatches = dbDispatches
       }
       chat._billLastSync = now
+      // 🔥 记录当前账单的日期，用于跨日检测
+      const cutoffHour = await getGlobalDailyCutoffHour()
+      const todayStart = startOfDay(new Date(), cutoffHour)
+      chat._lastBillDate = todayStart.getTime()
     } else if (needsSync) {
       chat._billLastSync = now
     }

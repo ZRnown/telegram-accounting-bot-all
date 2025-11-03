@@ -17,7 +17,7 @@ import {
   formatDuration
 } from './utils.js'
 // 新模块导入
-import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill } from './database.js'
+import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay } from './database.js'
 import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, hasOperatorPermission, getUsername, isAdmin } from './helpers.js'
 import { formatSummary } from './formatting.js'
@@ -1012,6 +1012,10 @@ bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (c
   }
   
   const chatId = await ensureDbChat(ctx)
+  
+  // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
+  await checkAndClearIfNewDay(chat, chatId)
+  
   const text = ctx.message.text.trim()
   console.log('[记账命令] 开始解析', { text, chatId })
   
@@ -1189,6 +1193,9 @@ bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
   }
   
   const chatId = await ensureDbChat(ctx)
+  
+  // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
+  await checkAndClearIfNewDay(chat, chatId)
   const text = ctx.message.text.trim()
   
   // 检查是否带u后缀（表示USDT）
@@ -2793,9 +2800,20 @@ async function updateAllRealtimeRates() {
   }
 }
 
-// 安全停止
-process.once('SIGINT', () => bot.stop('SIGINT'))
-process.once('SIGTERM', () => bot.stop('SIGTERM'))
+// 🔥 保存定时器引用，以便在进程退出时清理，防止内存泄露
+const intervals = []
+
+// 🔥 进程退出时清理所有定时器，防止内存泄露
+const cleanup = () => {
+  console.log('[清理] 正在清理定时器...')
+  intervals.forEach(interval => clearInterval(interval))
+  intervals.length = 0
+  bot.stop('SIGTERM')
+}
+
+process.once('SIGTERM', cleanup)
+process.once('SIGINT', cleanup)
+process.once('SIGHUP', cleanup)
 
 bot.launch().then(async () => {
   console.log('Telegram 机器人已启动')
@@ -2803,23 +2821,23 @@ bot.launch().then(async () => {
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
   
-  // 🔥 优化：定时任务 - 每小时更新汇率
-  setInterval(updateAllRealtimeRates, 3600000)
+  // 🔥 优化：定时任务 - 每小时更新汇率（保存引用）
+  intervals.push(setInterval(updateAllRealtimeRates, 3600000))
   console.log('[定时任务] 实时汇率自动更新已启动，每小时更新一次')
   
   // 🔥 新增：内存优化定时任务
-  // 1. 每小时清理不活跃的聊天
-  setInterval(() => {
+  // 1. 每小时清理不活跃的聊天（保存引用）
+  intervals.push(setInterval(() => {
     try {
       cleanupInactiveChats()
     } catch (e) {
       console.error('[定时任务] 清理不活跃聊天失败:', e)
     }
-  }, 3600000) // 1小时
+  }, 3600000)) // 1小时
   
   // 2. 每6小时清理过期的功能开关缓存（由 middleware.js 内部 LRU 缓存自动处理）
   
-  // 3. 每12小时打印内存使用情况（仅在DEBUG模式下）
+  // 3. 每12小时打印内存使用情况（仅在DEBUG模式下，保存引用）
   if (process.env.DEBUG_BOT === 'true') {
     const logMemoryUsage = () => {
       const used = process.memoryUsage()
@@ -2831,7 +2849,7 @@ bot.launch().then(async () => {
       })
     }
     logMemoryUsage() // 启动时打印一次
-    setInterval(logMemoryUsage, 12 * 3600000) // 12小时
+    intervals.push(setInterval(logMemoryUsage, 12 * 3600000)) // 12小时
   }
   
   console.log('[内存优化] 定期清理任务已启动')
