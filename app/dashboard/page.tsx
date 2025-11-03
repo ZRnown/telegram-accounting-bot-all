@@ -27,7 +27,6 @@ function DashboardPageInner() {
   const [featureSaving, setFeatureSaving] = useState<Record<string, boolean>>({})
   const [showCreateBot, setShowCreateBot] = useState<boolean>(false)
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
-  const [introspect, setIntrospect] = useState<{ username?: string; first_name?: string; id?: number } | null>(null)
   const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
@@ -517,62 +516,67 @@ function DashboardPageInner() {
                       className="border rounded px-2 py-1 text-sm flex-1"
                       placeholder="机器人 Token"
                       value={createForm.token}
-                      onChange={(e) => { setCreateForm(f => ({ ...f, token: e.target.value })); setIntrospect(null) }}
+                      onChange={(e) => setCreateForm(f => ({ ...f, token: e.target.value }))}
                     />
-                    <button
-                      className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
-                      onClick={async () => {
-                        if (!createForm.token) { toast({ title: '提示', description: '请先填写 Token', variant: 'destructive' }); return }
-                        try {
-                          const res = await fetch('/api/bots/introspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: createForm.token }) })
-                          if (res.ok) {
-                            const me = await res.json()
-                            setIntrospect(me)
-                          } else {
-                            const msg = await res.json().catch(() => ({}))
-                            toast({ title: '错误', description: `识别失败：${msg?.error || '请检查 Token'}`, variant: 'destructive' })
-                          }
-                        } catch {
-                          toast({ title: '错误', description: '识别失败，请检查网络', variant: 'destructive' })
-                        }
-                      }}
-                    >识别</button>
                   </div>
-                  <div className="text-xs text-slate-500">识别成功后将自动使用 @username 作为名称。</div>
+                  <div className="text-xs text-slate-500">系统将自动识别Token并创建机器人，自动使用 @username 作为名称。</div>
                   <label className="inline-flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={createForm.enabled} onChange={(e) => setCreateForm(f => ({ ...f, enabled: e.target.checked }))} />
                     <span>创建后立即启用</span>
                   </label>
-                  {introspect && (
-                    <div className="text-xs text-slate-500">识别成功：{introspect.username ? `@${introspect.username}` : introspect.first_name}（ID: {introspect.id}）</div>
-                  )}
                   <div>
                     <button
                       className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
-                      disabled={!introspect}
+                      disabled={!createForm.token.trim()}
                       onClick={async () => {
-                        if (!createForm.token || !introspect) { toast({ title: '提示', description: '请先识别 Token', variant: 'destructive' }); return }
-                        const name = introspect.username ? `@${introspect.username}` : (introspect.first_name || '新机器人')
-                        const payload = { name, token: createForm.token, enabled: createForm.enabled }
-                        const res = await fetch('/api/bots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-                        if (res.ok) {
-                          try {
-                            const botsRes2 = await fetch('/api/bots')
-                            if (botsRes2.ok) {
-                              const data2 = await botsRes2.json()
-                              const items2 = Array.isArray(data2?.items) ? data2.items : []
-                              setBots(items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled })))
-                            }
-                          } catch {}
-                          setCreateForm({ token: '', enabled: true })
-                          setIntrospect(null)
-                          setShowCreateBot(false)
-                          toast({ title: '成功', description: '机器人创建成功' })
-                        } else {
-                          toast({ title: '错误', description: '创建失败', variant: 'destructive' })
+                        if (!createForm.token.trim()) { toast({ title: '提示', description: '请先填写 Token', variant: 'destructive' }); return }
+                        
+                        // 🔥 自动识别并创建（合并为一个操作）
+                        try {
+                          // 先识别Token
+                          const introspectRes = await fetch('/api/bots/introspect', { 
+                            method: 'POST', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify({ token: createForm.token }) 
+                          })
+                          
+                          if (!introspectRes.ok) {
+                            const msg = await introspectRes.json().catch(() => ({}))
+                            toast({ title: '错误', description: `识别失败：${msg?.error || '请检查 Token'}`, variant: 'destructive' })
+                            return
+                          }
+                          
+                          const me = await introspectRes.json()
+                          const name = me.username ? `@${me.username}` : (me.first_name || '新机器人')
+                          
+                          // 直接创建
+                          const payload = { name, token: createForm.token, enabled: createForm.enabled }
+                          const createRes = await fetch('/api/bots', { 
+                            method: 'POST', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify(payload) 
+                          })
+                          
+                          if (createRes.ok) {
+                            try {
+                              const botsRes2 = await fetch('/api/bots')
+                              if (botsRes2.ok) {
+                                const data2 = await botsRes2.json()
+                                const items2 = Array.isArray(data2?.items) ? data2.items : []
+                                setBots(items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled })))
+                              }
+                            } catch {}
+                            setCreateForm({ token: '', enabled: true })
+                            setShowCreateBot(false)
+                            toast({ title: '成功', description: `机器人 ${name} 创建成功` })
+                          } else {
+                            toast({ title: '错误', description: '创建失败', variant: 'destructive' })
+                          }
+                        } catch {
+                          toast({ title: '错误', description: '创建失败，请检查网络和Token', variant: 'destructive' })
                         }
                       }}
-                    >创建</button>
+                    >创建机器人</button>
                   </div>
                 </div>
               )}
@@ -607,7 +611,7 @@ function DashboardPageInner() {
                           <span>{bot.enabled ? '已启用' : '未启用'}</span>
                         </label>
                       </div>
-                      <div className="text-xs text-slate-500">ID: {bot.id.slice(0, 8)}…</div>
+                      <div className="text-xs text-slate-500">{bot.name}</div>
                       <div className="flex items-center gap-2">
                         <button
                           className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"

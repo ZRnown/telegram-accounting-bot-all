@@ -135,6 +135,10 @@ export function createPermissionMiddleware() {
           
           if (warningMode === 'always') {
             shouldWarn = true
+            // 🔥 清除之前的警告记录，确保切换到always模式后立即生效
+            await prisma.featureWarningLog.deleteMany({
+              where: { chatId, feature: 'accounting_disabled' }
+            }).catch(() => {})
           } else if (warningMode === 'once') {
             const existingLog = await prisma.featureWarningLog.findUnique({
               where: { chatId_feature: { chatId, feature: 'accounting_disabled' } }

@@ -105,6 +105,14 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       create: { chatId, ...patchData },
     })
 
+    // 🔥 如果更新了featureWarningMode，清除相关的警告记录，确保新设置立即生效
+    if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) {
+      // 清除所有相关功能的警告记录，让新设置立即生效
+      await prisma.featureWarningLog.deleteMany({
+        where: { chatId }
+      }).catch(() => {})
+    }
+
     const updated = await prisma.setting.findUnique({ where: { chatId } })
     return Response.json({ ok: true, settings: updated })
   } catch (e) {
