@@ -399,9 +399,14 @@ export async function performAutoDailyCutoff(getChat) {
             ? settings.dailyCutoffHour
             : await getGlobalDailyCutoffHour()
           
-          const todayStart = startOfDay(now, cutoffHour)
+          // 🔥 修复：计算今天日切的开始时间（不使用startOfDay，因为它会根据当前时间判断）
+          // 我们需要的是"今天的日切开始时间"，无论当前时间是什么
+          const todayCutoff = new Date()
+          todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+          todayCutoff.setHours(cutoffHour, 0, 0, 0)
+          const todayStart = new Date(todayCutoff)
           
-          // 查找所有昨天的OPEN账单并关闭它们
+          // 查找所有昨天的OPEN账单并关闭它们（openedAt < 今天02:00的账单）
           const billsToClose = await prisma.bill.findMany({
             where: {
               chatId,
@@ -432,10 +437,13 @@ export async function performAutoDailyCutoff(getChat) {
               if (botId) {
                 const chat = getChat(botId, chatId)
                 if (chat) {
+                  // 🔥 清空内存中的当前账单数据
                   chat.current.incomes = []
                   chat.current.dispatches = []
                   chat._billLastSync = 0
+                  // 🔥 更新最后账单日期为今天日切的开始时间
                   chat._lastBillDate = todayStart.getTime()
+                  console.log(`[自动日切] 已清空群组 ${chatId} 的内存数据`, { todayStart: todayStart.toISOString() })
                 }
               }
             } catch (e) {
