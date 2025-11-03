@@ -1,22 +1,42 @@
 // 记账相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { parseAmountAndRate } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay } from '../database.js'
-import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEffectiveRate } from '../helpers.js'
+import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettings } from '../database.js'
+import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
 import { getUsername } from '../helpers.js'
 
 /**
- * 初始化记账（开始记账）
+ * 开始记账（激活机器人并开始记录）
  */
 export function registerStartAccounting(bot, ensureChat) {
-  bot.hears(/^开始记账$/i, async (ctx) => {
+  bot.hears(/^(开始记账|开始)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    await ensureDbChat(ctx)
-    await ctx.reply('✅ 记账已初始化', { ...(await buildInlineKb(ctx)) })
+    const chatId = await ensureDbChat(ctx)
+    await updateSettings(chatId, { accountingEnabled: true })
+    await ctx.reply('✅ 已开始记账，机器人已激活并开始记录', { ...(await buildInlineKb(ctx)) })
+  })
+}
+
+/**
+ * 停止记账（暂停机器人记录）
+ */
+export function registerStopAccounting(bot, ensureChat) {
+  bot.hears(/^(停止记账|停止)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    // 🔥 权限检查：只有管理员或操作员可以停止记账
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员或已添加的操作人可以操作。')
+    }
+    
+    const chatId = await ensureDbChat(ctx)
+    await updateSettings(chatId, { accountingEnabled: false })
+    await ctx.reply('⏸️ 已停止记账，机器人已暂停记录。发送"开始"可重新开始记账', { ...(await buildInlineKb(ctx)) })
   })
 }
 

@@ -2,12 +2,14 @@
 
 import { Fragment, Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { StatisticsCards } from "@/components/statistics-cards"
 import { TransactionTables } from "@/components/transaction-tables"
 import { CategoryStats } from "@/components/category-stats"
 
 function DashboardPageInner() {
+  const { toast } = useToast()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [mounted, setMounted] = useState(false)
@@ -77,7 +79,7 @@ function DashboardPageInner() {
   // 添加白名单用户
   const addWhitelistedUser = async () => {
     if (!whitelistForm.userId.trim()) {
-      alert('请输入用户ID')
+      toast({ title: '提示', description: '请输入用户ID', variant: 'destructive' })
       return
     }
     setWhitelistSaving(true)
@@ -90,13 +92,13 @@ function DashboardPageInner() {
       if (res.ok) {
         await loadWhitelistedUsers()
         setWhitelistForm({ userId: '', note: '' })
-        alert('添加成功！用户名已自动获取并显示在表格中。')
+        toast({ title: '成功', description: '添加成功！用户名已自动获取并显示在表格中。' })
       } else {
         const json = await res.json()
-        alert(json.error || '添加失败')
+        toast({ title: '错误', description: json.error || '添加失败', variant: 'destructive' })
       }
     } catch (e) {
-      alert('添加失败')
+      toast({ title: '错误', description: '添加失败', variant: 'destructive' })
     } finally {
       setWhitelistSaving(false)
     }
@@ -104,7 +106,7 @@ function DashboardPageInner() {
   
   // 删除白名单用户
   const removeWhitelistedUser = async (userId: string) => {
-    if (!confirm('确定要删除这个白名单用户吗？')) return
+    if (!window.confirm('确定要删除这个白名单用户吗？')) return
     try {
       const res = await fetch('/api/whitelisted-users', {
         method: 'DELETE',
@@ -113,12 +115,12 @@ function DashboardPageInner() {
       })
       if (res.ok) {
         await loadWhitelistedUsers()
-        alert('删除成功')
+        toast({ title: '成功', description: '删除成功' })
       } else {
-        alert('删除失败')
+        toast({ title: '错误', description: '删除失败', variant: 'destructive' })
       }
     } catch (e) {
-      alert('删除失败')
+      toast({ title: '错误', description: '删除失败', variant: 'destructive' })
     }
   }
   
@@ -520,7 +522,7 @@ function DashboardPageInner() {
                     <button
                       className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
                       onClick={async () => {
-                        if (!createForm.token) { alert('请先填写 Token'); return }
+                        if (!createForm.token) { toast({ title: '提示', description: '请先填写 Token', variant: 'destructive' }); return }
                         try {
                           const res = await fetch('/api/bots/introspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: createForm.token }) })
                           if (res.ok) {
@@ -528,10 +530,10 @@ function DashboardPageInner() {
                             setIntrospect(me)
                           } else {
                             const msg = await res.json().catch(() => ({}))
-                            alert(`识别失败：${msg?.error || '请检查 Token'}`)
+                            toast({ title: '错误', description: `识别失败：${msg?.error || '请检查 Token'}`, variant: 'destructive' })
                           }
                         } catch {
-                          alert('识别失败，请检查网络')
+                          toast({ title: '错误', description: '识别失败，请检查网络', variant: 'destructive' })
                         }
                       }}
                     >识别</button>
@@ -549,7 +551,7 @@ function DashboardPageInner() {
                       className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
                       disabled={!introspect}
                       onClick={async () => {
-                        if (!createForm.token || !introspect) { alert('请先识别 Token'); return }
+                        if (!createForm.token || !introspect) { toast({ title: '提示', description: '请先识别 Token', variant: 'destructive' }); return }
                         const name = introspect.username ? `@${introspect.username}` : (introspect.first_name || '新机器人')
                         const payload = { name, token: createForm.token, enabled: createForm.enabled }
                         const res = await fetch('/api/bots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -565,8 +567,9 @@ function DashboardPageInner() {
                           setCreateForm({ token: '', enabled: true })
                           setIntrospect(null)
                           setShowCreateBot(false)
+                          toast({ title: '成功', description: '机器人创建成功' })
                         } else {
-                          alert('创建失败')
+                          toast({ title: '错误', description: '创建失败', variant: 'destructive' })
                         }
                       }}
                     >创建</button>
@@ -595,8 +598,9 @@ function DashboardPageInner() {
                               })
                               if (res.ok) {
                                 setBots((prev) => prev.map((b) => b.id === bot.id ? { ...b, enabled } : b))
+                                toast({ title: '成功', description: `机器人已${enabled ? '启用' : '停用'}` })
                               } else {
-                                alert('更新启用状态失败')
+                                toast({ title: '错误', description: '更新启用状态失败', variant: 'destructive' })
                               }
                             }}
                           />
@@ -625,12 +629,13 @@ function DashboardPageInner() {
                               const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, { method: 'DELETE' })
                               if (res.status === 204) {
                                 setBots((prev) => prev.filter((b) => b.id !== bot.id))
+                                toast({ title: '成功', description: '机器人删除成功' })
                               } else {
                                 const msg = await res.text().catch(() => '')
-                                alert(`删除失败：${msg || 'Server error'}`)
+                                toast({ title: '错误', description: `删除失败：${msg || 'Server error'}`, variant: 'destructive' })
                               }
                             } catch {
-                              alert('删除失败：网络错误')
+                              toast({ title: '错误', description: '删除失败：网络错误', variant: 'destructive' })
                             }
                           }}
                         >删除机器人</button>
@@ -669,15 +674,15 @@ function DashboardPageInner() {
                                   })
                                   if (res.ok) {
                                     const json = await res.json().catch(() => null)
-                                    alert(`已发送：${json?.sent ?? 0} / ${json?.total ?? 0}`)
+                                    toast({ title: '成功', description: `已发送：${json?.sent ?? 0} / ${json?.total ?? 0}` })
                                     setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { open: false, message: '', sending: false } }))
                                   } else {
                                     const err = await res.json().catch(() => ({}))
-                                    alert(`发送失败：${err?.error || '请检查网络'}`)
+                                    toast({ title: '错误', description: `发送失败：${err?.error || '请检查网络'}`, variant: 'destructive' })
                                     setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, sending: false } }))
                                   }
                                 } catch (e) {
-                                  alert('发送失败：网络错误')
+                                  toast({ title: '错误', description: '发送失败：网络错误', variant: 'destructive' })
                                   setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, sending: false } }))
                                 }
                               }}
@@ -733,14 +738,14 @@ function DashboardPageInner() {
                       }
                       
                       setBatchSaving(false)
-                      alert(`批量保存完成！\n成功：${successCount} 个\n失败：${failCount} 个`)
+                      toast({ title: '批量保存完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
                       
                       // 清除缓存，重新加载
                       if (typeof window !== 'undefined') {
                         localStorage.removeItem('dashboard_cache_groups')
                         localStorage.removeItem('dashboard_cache_bots')
                       }
-                      window.location.reload()
+                      setTimeout(() => window.location.reload(), 1000)
                     }}
                   >{batchSaving ? '批量保存中...' : '💾 一键保存全部'}</button>
                   <button
@@ -873,9 +878,9 @@ function DashboardPageInner() {
                                           const msg = await res.text().catch(() => '')
                                           throw new Error(msg || 'save failed')
                                         }
-                                        alert('✅ 保存成功')
+                                        toast({ title: '成功', description: '保存成功' })
                                       } catch (e) {
-                                        alert(`❌ 保存失败：${(e as Error).message}`)
+                                        toast({ title: '错误', description: `保存失败：${(e as Error).message}`, variant: 'destructive' })
                                       } finally {
                                         setSaving((s) => ({ ...s, [it.id]: false }))
                                       }
@@ -891,13 +896,13 @@ function DashboardPageInner() {
                                           setGroups((prev) => prev.filter((g) => g.id !== it.id))
                                           const n = (groupsCount || 0) - 1
                                           setGroupsCount(n < 0 ? 0 : n)
-                                          alert('✅ 删除成功')
+                                          toast({ title: '成功', description: '删除成功' })
                                         } else {
                                           const msg = await res.text().catch(() => '')
-                                          alert(`❌ 删除失败：${msg || 'Server error'}`)
+                                          toast({ title: '错误', description: `删除失败：${msg || 'Server error'}`, variant: 'destructive' })
                                         }
                                       } catch {
-                                        alert('❌ 删除失败：网络错误')
+                                        toast({ title: '错误', description: '删除失败：网络错误', variant: 'destructive' })
                                       }
                                     }}
                                   >🗑️</button>
@@ -949,9 +954,9 @@ function DashboardPageInner() {
                                               const items = Array.isArray(json?.items) ? json.items : []
                                               setFeatureCache((c) => ({ ...c, [chatId]: { items } }))
                                             }
-                                            alert('已保存功能开关')
+                                            toast({ title: '成功', description: '已保存功能开关' })
                                           } catch (e) {
-                                            alert((e as Error).message)
+                                            toast({ title: '错误', description: (e as Error).message, variant: 'destructive' })
                                           } finally {
                                             setFeatureSaving((s) => ({ ...s, [chatId]: false }))
                                           }

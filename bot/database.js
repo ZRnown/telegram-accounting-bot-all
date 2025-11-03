@@ -26,7 +26,7 @@ export async function ensureDbChat(ctx, chat = null) {
     prisma.setting.upsert({
       where: { chatId },
       update: {},
-      create: { chatId },
+      create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
     })
   ])
   
@@ -205,7 +205,8 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
           fixedRate: true,
           realtimeRate: true,
           headerText: true,
-          everyoneAllowed: true
+          everyoneAllowed: true,
+          accountingEnabled: true // 🔥 同步记账开关状态
         }
       }),
       chat ? (async () => {

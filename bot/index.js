@@ -357,50 +357,76 @@ bot.on('message', async (ctx, next) => {
             // ⚠️ 不在这里创建邀请记录，避免与 my_chat_member 事件重复
             // 邀请记录只在 my_chat_member 事件中创建
             
-            // 自动授权
-            await prisma.chat.upsert({
-              where: { id: chatId },
-              create: { 
-                id: chatId, 
-                title, 
-                botId,
-                status: 'APPROVED', 
-                allowed: true 
-              },
-              update: { 
-                title,
-                botId,
-                status: 'APPROVED',
-                allowed: true
-              },
-            })
-            
-            // 🔥 自动开启所有功能开关（备用白名单检测）
-            await ensureDefaultFeatures(chatId, prisma)
+            // 自动授权（并行执行，优化性能）
+            await Promise.all([
+              prisma.chat.upsert({
+                where: { id: chatId },
+                create: { 
+                  id: chatId, 
+                  title, 
+                  botId,
+                  status: 'APPROVED', 
+                  allowed: true 
+                },
+                update: { 
+                  title,
+                  botId,
+                  status: 'APPROVED',
+                  allowed: true
+                },
+              }),
+              prisma.setting.upsert({
+                where: { chatId },
+                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+                update: {},
+              }),
+              ensureDefaultFeatures(chatId, prisma) // 🔥 自动开启所有功能开关
+            ])
             
             console.log('[message][auto-authorized]', { chatId, userId })
           } else {
             // 非白名单用户
-            await prisma.chat.upsert({
-              where: { id: chatId },
-              create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
-              update: { title, botId },
-            })
+            await Promise.all([
+              prisma.chat.upsert({
+                where: { id: chatId },
+                create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
+                update: { title, botId },
+              }),
+              prisma.setting.upsert({
+                where: { chatId },
+                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+                update: {},
+              })
+            ])
           }
         } else {
-          await prisma.chat.upsert({
-            where: { id: chatId },
-            create: { id: chatId, title, status: 'PENDING', allowed: false },
-            update: { title },
-          })
+          await Promise.all([
+            prisma.chat.upsert({
+              where: { id: chatId },
+              create: { id: chatId, title, status: 'PENDING', allowed: false },
+              update: { title },
+            }),
+            prisma.setting.upsert({
+              where: { chatId },
+              create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+              update: {},
+            })
+          ])
         }
       } catch (e) {
         console.error('[message][whitelist-check-error]', e)
-        await prisma.chat.upsert({
-          where: { id: chatId },
-          create: { id: chatId, title, status: 'PENDING', allowed: false },
-          update: { title },
-        })
+        await Promise.all([
+          prisma.chat.upsert({
+            where: { id: chatId },
+            create: { id: chatId, title, status: 'PENDING', allowed: false },
+            update: { title },
+          }),
+          prisma.setting.upsert({
+            where: { chatId },
+            create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+            update: {},
+          })
+        ])
       }
     } else {
       // 群组已存在，仅更新标题
@@ -494,27 +520,7 @@ function ensureChat(ctx) {
   return getChat(CURRENT_BOT_ID, chatId)
 }
 
-// 🔥 简化：使用数据库模块，自动同步设置
-async function ensureDbChatWithSync(ctx) {
-  const chat = ensureChat(ctx)
-  const chatId = await ensureDbChat(ctx, chat)
-  
-  // 如果没有设置汇率，自动设置实时汇率
-  if (chat && !chat.fixedRate && !chat.realtimeRate) {
-    try {
-      const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
-        const rate = await fetchRealtimeRateUSDTtoCNY()
-        if (rate) {
-          chat.realtimeRate = rate
-          await updateSettings(chatId, { realtimeRate: rate })
-      }
-    } catch (e) {
-      // 静默失败
-    }
-  }
-  
-  return chatId
-}
+// 🔥 已删除未使用的 ensureDbChatWithSync 函数，优化性能
 
 // 🔥 所有重复函数已移至对应模块：
 // - getOrCreateTodayBill, getHistoricalNotDispatched, deleteLastIncome, deleteLastDispatch -> database.js
@@ -745,10 +751,18 @@ bot.on('my_chat_member', async (ctx) => {
           disabled: verifyFlags.filter(f => !f.enabled).map(f => f.feature)
         })
         
-        // 🔥 确保地址验证保持关闭（新建群默认关闭）
-        await prisma.setting.update({
+        // 🔥 确保地址验证保持关闭（新建群默认关闭），记账功能默认开启
+        await prisma.setting.upsert({
           where: { chatId },
-          data: { addressVerificationEnabled: false }
+          update: {
+            addressVerificationEnabled: false,
+            accountingEnabled: true // 🔥 机器人进群后默认开启记账
+          },
+          create: {
+            chatId,
+            addressVerificationEnabled: false,
+            accountingEnabled: true // 🔥 机器人进群后默认开启记账
+          }
         }).catch(() => {})
         
         // 发送欢迎消息
@@ -757,7 +771,8 @@ bot.on('my_chat_member', async (ctx) => {
             `✅ 欢迎使用记账机器人！\n\n` +
             `您已被自动授权使用，所有功能已启用。\n` +
             `邀请人：${inviterUsername || inviterId}\n\n` +
-            `发送 "开始记账" 或 "使用说明" 查看使用指南。\n\n` +
+            `机器人已默认开启记账功能，可直接使用 +金额 开始记账。\n` +
+            `发送 "使用说明" 查看详细指南。\n\n` +
             `⚠️ 提示：如果机器人无响应，请：\n` +
             `1. 将机器人设为管理员，或\n` +
             `2. 找 @BotFather 发送 /setprivacy 选择 Disable`
@@ -922,12 +937,7 @@ bot.hears(/^(禁止本群|移出白名单)$/i, async (ctx) => {
   await ctx.reply('已将本群标记为 BLOCKED，后台可恢复为 APPROVED。')
 })
 
-bot.hears(/^开始记账$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  await ensureDbChat(ctx)
-  await ctx.reply('已开始记账。本群状态已初始化，使用 +金额 / -金额 进行操作。')
-})
+// 🔥 "开始记账"命令已移至 handlers/accounting.js，删除此处的冗余代码
 
 // 上课：开始计时（若已在计时则忽略）
 bot.hears(/^(上课|开始上课)$/i, async (ctx) => {

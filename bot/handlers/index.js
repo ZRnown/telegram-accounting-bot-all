@@ -1,6 +1,7 @@
 // 统一注册所有命令处理器
 import { 
   registerStartAccounting, 
+  registerStopAccounting,
   registerIncome, 
   registerDispatch,
   registerIncomeWithRemark,
@@ -43,6 +44,7 @@ export function registerAllHandlers(bot, ensureChat) {
   
   // 记账相关
   registerStartAccounting(bot, ensureChat)
+  registerStopAccounting(bot, ensureChat)
   // 🔥 先注册备注入账和指定入账（这些需要更严格的匹配）
   registerIncomeWithRemark(bot, ensureChat)
   registerIncomeWithTarget(bot, ensureChat)

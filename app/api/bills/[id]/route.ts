@@ -116,9 +116,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const realtimeRate = settings?.realtimeRate
     let effectiveRate = fixedRate ?? realtimeRate ?? 0
     
-    if (!effectiveRate) {
-      const lastIncWithRate = [...incomes].reverse().find((x: any) => x.rate && x.rate > 0)
-      if (lastIncWithRate?.rate) effectiveRate = Number(lastIncWithRate.rate)
+    if (!effectiveRate && incomes.length > 0) {
+      // 🔥 性能优化：从后往前查找，不需要reverse整个数组
+      for (let i = incomes.length - 1; i >= 0; i--) {
+        if (incomes[i].rate && Number(incomes[i].rate) > 0) {
+          effectiveRate = Number(incomes[i].rate)
+          break
+        }
+      }
     }
     
     const fee = (totalIncome * feePercent) / 100

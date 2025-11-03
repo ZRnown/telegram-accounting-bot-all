@@ -58,7 +58,7 @@ export function clearFeatureCache(chatId) {
 export function isAccountingCommand(text) {
   if (!text) return false
   const t = text.trim()
-  if (/^开始记账$/i.test(t)) return true
+  if (/^(开始记账|开始|停止记账|停止)$/i.test(t)) return true // 🔥 添加开始/停止命令
   if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return true
   if (/^(下发)\b/.test(t)) return true
   if (/^(显示账单|\+0)$/i.test(t)) return true
@@ -66,6 +66,27 @@ export function isAccountingCommand(text) {
   if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return true
   if (/^(我的账单|\/我)$/i.test(t)) return true
   return false
+}
+
+/**
+ * 检查记账是否启用
+ */
+export async function isAccountingEnabled(ctx) {
+  try {
+    const chatId = await ensureDbChat(ctx)
+    if (!chatId) return true // 默认开启
+    
+    const setting = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { accountingEnabled: true }
+    })
+    
+    // 🔥 默认开启记账（如果字段不存在，视为开启）
+    return setting?.accountingEnabled !== false
+  } catch (e) {
+    console.error('[isAccountingEnabled] 异常', e)
+    return true // 出错时默认开启
+  }
 }
 
 /**
@@ -77,6 +98,12 @@ export function createPermissionMiddleware() {
       const text = ctx.message?.text
       if (!text || !isAccountingCommand(text)) {
         return next()
+      }
+      
+      // 🔥 检查记账是否启用
+      const accountingOk = await isAccountingEnabled(ctx)
+      if (!accountingOk) {
+        return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
       }
       
       const ok = await isFeatureEnabled(ctx, 'accounting_basic')
