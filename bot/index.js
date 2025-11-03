@@ -2656,7 +2656,7 @@ bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
   }
 })
 
-// 🔥 action 处理器（help, open_dashboard, start_accounting）已移至 handlers/core.js
+// 🔥 action 处理器已移至 handlers/core.js
 
 // 🔥 每小时自动更新实时汇率的定时任务
 async function updateAllRealtimeRates() {
@@ -2781,11 +2781,12 @@ bot.launch().then(async () => {
   console.log('[内存优化] 定期清理任务已启动')
   
   // 🔥 只保留 /start 命令，其他命令已删除（只使用中文指令）
-  const commands = []
+  const commands = [{ command: 'start', description: '开始使用机器人' }]
   try {
-    await bot.telegram.setMyCommands(commands)
+    // 只为私聊设置命令菜单
     await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
-    await bot.telegram.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
+    // 群聊不设置命令菜单（使用中文指令）
+    await bot.telegram.setMyCommands([], { scope: { type: 'all_group_chats' } })
     
     // 🔥 更新机器人描述
     try {

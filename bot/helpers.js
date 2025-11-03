@@ -49,30 +49,28 @@ export async function buildInlineKb(ctx, options = {}) {
   }
   
   if (ctx.chat?.type === 'private') {
-    // 🔥 私聊菜单：直接邀请按钮和指令菜单
+    // 🔥 私聊：显示指令菜单和直接邀请按钮
+    rows.push([Markup.button.callback('📋 指令菜单', 'command_menu')])
+    
+    // 🔥 直接生成邀请链接，不需要点击后再跳转
     try {
-      // 🔥 性能优化：使用ctx.botInfo缓存，避免重复调用getMe
-      let botUsername = ctx.botInfo?.username
-      if (!botUsername) {
-        const me = await ctx.telegram.getMe()
-        botUsername = me?.username
-      }
-      
+      // 使用 ctx.botInfo 获取机器人信息（更高效，不需要额外API调用）
+      const botUsername = ctx.botInfo?.username
       if (botUsername) {
-        // 构建带管理员权限请求的邀请链接
-        const inviteLinkWithAdmin = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
-        
-        rows.push([
-          Markup.button.url('➕ 开始记账', inviteLinkWithAdmin)
-        ])
+        const inviteLink = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
+        rows.push([Markup.button.url('➕ 开始记账（添加为管理员）', inviteLink)])
+      } else {
+        // 如果 botInfo 没有，才调用 API（备用方案）
+        const me = await ctx.telegram.getMe()
+        if (me?.username) {
+          const inviteLink = `https://t.me/${me.username}?startgroup=true&admin=can_delete_messages+can_restrict_members`
+          rows.push([Markup.button.url('➕ 开始记账（添加为管理员）', inviteLink)])
+        }
       }
     } catch (e) {
-      console.error('获取机器人信息失败', e)
+      console.error('[buildInlineKb] 获取机器人信息失败:', e)
     }
     
-    rows.push([
-      Markup.button.callback('📋 指令菜单', 'commands_menu')
-    ])
     return Markup.inlineKeyboard(rows)
   }
   

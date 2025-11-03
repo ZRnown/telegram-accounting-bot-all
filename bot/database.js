@@ -299,18 +299,26 @@ export async function performAutoDailyCutoff(getChat) {
     // 转换为简单数组格式
     const yesterdayBills = yesterdayBillsGrouped.map(g => ({ chatId: g.chatId }))
     
+    if (yesterdayBills.length === 0) {
+      return 0
+    }
+    
+    // 🔥 性能优化：批量查询所有群组的设置，避免N+1查询问题
+    const chatIds = yesterdayBills.map(b => b.chatId)
+    const allSettings = await prisma.setting.findMany({
+      where: { chatId: { in: chatIds } },
+      select: { chatId: true, accountingMode: true }
+    })
+    const settingsMap = new Map(allSettings.map(s => [s.chatId, s]))
+    
     let processedCount = 0
     
     for (const bill of yesterdayBills) {
       try {
         const chatId = bill.chatId
         
-        // 检查该群组的记账模式
-        const settings = await prisma.setting.findUnique({
-          where: { chatId },
-          select: { accountingMode: true }
-        })
-        
+        // 🔥 从缓存中获取设置，避免重复查询
+        const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
         // 只有每日清零模式才需要关闭昨天的账单
@@ -324,10 +332,11 @@ export async function performAutoDailyCutoff(getChat) {
             }
           })
           
-          // 关闭所有昨天的账单
-          for (const oldBill of billsToClose) {
-            await prisma.bill.update({
-              where: { id: oldBill.id },
+          // 🔥 性能优化：批量更新账单状态，而不是逐个更新
+          if (billsToClose.length > 0) {
+            const billIds = billsToClose.map(b => b.id)
+            await prisma.bill.updateMany({
+              where: { id: { in: billIds } },
               data: {
                 status: 'CLOSED',
                 savedAt: new Date()

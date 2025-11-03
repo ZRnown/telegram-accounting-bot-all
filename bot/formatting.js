@@ -151,7 +151,15 @@ export async function formatSummary(ctx, chat, options = {}) {
         if (rate) {
           line += ` / ${rate}=${usdt}U`
         }
-        // 🔥 不显示记账人（已取消此功能）
+        if (who) {
+          const whoWithAt = who.startsWith('@') ? who : `@${who}`
+          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+          if (userId) {
+            line += ` [${who}](tg://user?id=${userId})`
+          } else {
+            line += ` *${who}*`
+          }
+        }
         return line
       }).join('\n')
     : (incCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无入款')

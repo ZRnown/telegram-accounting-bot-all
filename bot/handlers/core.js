@@ -25,58 +25,18 @@ export function registerStart(bot, ensureChat) {
       
       if (whitelistedUser) {
         // 🔥 白名单用户：显示简要信息，提供内联菜单
-        // 🔥 白名单用户：直接显示邀请按钮
-        try {
-          const { Markup } = await import('telegraf')
-          // 🔥 性能优化：使用ctx.botInfo缓存，避免重复调用getMe
-          let botUsername = ctx.botInfo?.username
-          if (!botUsername) {
-            const me = await ctx.telegram.getMe()
-            botUsername = me?.username
+        await ctx.reply(
+          `👤 您的用户信息：\n\n` +
+          `🆔 用户ID：\`${userId}\`\n` +
+          `👤 用户名：${username}\n` +
+          `📛 昵称：${fullName || '无'}\n\n` +
+          `✅ 您已在白名单中，可以邀请机器人进群自动授权。\n\n` +
+          `💡 点击下方按钮开始使用：`,
+          { 
+            parse_mode: 'Markdown',
+            ...(await buildInlineKb(ctx))
           }
-          
-          if (!botUsername) {
-            return await ctx.reply('❌ 无法获取机器人信息，请联系管理员')
-          }
-          
-          // 构建带管理员权限请求的邀请链接
-          const inviteLinkWithAdmin = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
-          
-          const keyboard = Markup.inlineKeyboard([
-            [
-              Markup.button.url('➕ 开始记账（添加为管理员）', inviteLinkWithAdmin),
-            ],
-            [
-              Markup.button.callback('📋 指令菜单', 'commands_menu')
-            ]
-          ])
-          
-          await ctx.reply(
-            `👤 您的用户信息：\n\n` +
-            `🆔 用户ID：\`${userId}\`\n` +
-            `👤 用户名：${username}\n` +
-            `📛 昵称：${fullName || '无'}\n\n` +
-            `✅ 您已在白名单中，可以邀请机器人进群自动授权。\n\n` +
-            `💡 点击下方按钮开始使用：`,
-            { 
-              parse_mode: 'Markdown',
-              ...keyboard
-            }
-          )
-        } catch (e) {
-          console.error('创建邀请按钮失败', e)
-          await ctx.reply(
-            `👤 您的用户信息：\n\n` +
-            `🆔 用户ID：\`${userId}\`\n` +
-            `👤 用户名：${username}\n` +
-            `📛 昵称：${fullName || '无'}\n\n` +
-            `✅ 您已在白名单中，可以邀请机器人进群自动授权。`,
-            { 
-              parse_mode: 'Markdown',
-              ...(await buildInlineKb(ctx))
-            }
-          )
-        }
+        )
       } else {
         // 🔥 非白名单用户：显示详细提示信息
         await ctx.reply(
@@ -268,94 +228,28 @@ export function registerViewBill(bot, ensureChat) {
 }
 
 /**
- * 🔥 注册指令菜单 action（私聊时显示指令列表）
+ * 注册 command_menu action（私聊时"指令菜单"按钮回调）
  */
-export function registerCommandsMenuAction(bot) {
-  bot.action('commands_menu', async (ctx) => {
+export function registerCommandMenuAction(bot) {
+  bot.action('command_menu', async (ctx) => {
     try { await ctx.answerCbQuery() } catch {}
     
     // 只在私聊中处理
     if (ctx.chat?.type !== 'private') {
-      return ctx.reply('此功能仅在私聊中使用')
+      return
     }
     
-    const { Markup } = await import('telegraf')
+    // 🔥 显示指令菜单，只显示 /start
+    const commandList = [
+      '📋 *可用指令*\n',
+      '/start - 开始使用机器人\n',
+      '💡 点击下方按钮查看使用说明或直接开始记账'
+    ].join('\n')
     
-    // 🔥 显示指令菜单，点击后展开显示 /start
-    const keyboard = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('▶️ /start', 'show_start_command')
-      ],
-      [
-        Markup.button.callback('🔙 返回', 'back_to_menu')
-      ]
-    ])
-    
-    await ctx.editMessageText(
-      `📋 *指令菜单*\n\n` +
-      `可用指令：\n` +
-      `• /start - 开始使用机器人\n\n` +
-      `点击下方按钮查看详细说明：`,
-      { 
-        ...keyboard,
-        parse_mode: 'Markdown'
-      }
-    )
-  })
-  
-  // 🔥 显示 /start 指令详细说明
-  bot.action('show_start_command', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
-    if (ctx.chat?.type !== 'private') return
-    
-    const { Markup } = await import('telegraf')
-    
-    const keyboard = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('🔙 返回', 'commands_menu')
-      ]
-    ])
-    
-    await ctx.editMessageText(
-      `📖 */start* 指令说明\n\n` +
-      `功能：启动机器人，查看您的用户信息\n\n` +
-      `使用方法：\n` +
-      `1. 在私聊中发送 /start\n` +
-      `2. 机器人会显示您的用户信息（ID、用户名等）\n` +
-      `3. 如果您在白名单中，可以使用"开始记账"功能\n\n` +
-      `💡 提示：机器人主要用于群组记账，需要先将机器人添加到群组中。`,
-      { 
-        ...keyboard,
-        parse_mode: 'Markdown'
-      }
-    )
-  })
-  
-  // 🔥 返回主菜单
-  bot.action('back_to_menu', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
-    if (ctx.chat?.type !== 'private') return
-    
-    await buildInlineKb(ctx).then(kb => {
-      ctx.editMessageText(
-        `👋 欢迎使用记账机器人！\n\n` +
-        `点击下方按钮开始使用：`,
-        { 
-          ...kb,
-          parse_mode: 'Markdown'
-        }
-      )
+    await ctx.reply(commandList, { 
+      parse_mode: 'Markdown',
+      ...(await buildInlineKb(ctx))
     })
   })
-}
-
-/**
- * 🔥 注册开始记账按钮（直接邀请链接，不需要跳转）
- */
-export function registerStartAccountingButton(bot) {
-  // 在 buildInlineKb 中已经处理，这里只需要确保按钮功能
-  // 实际按钮在 helpers.js 中构建，使用 URL 按钮直接跳转
 }
 
