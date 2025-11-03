@@ -62,11 +62,8 @@ export async function checkAndClearIfNewDay(chat, chatId) {
     const now = new Date()
     
     // 🔥 修复：基于当前本地日期计算今天的日切开始时间，与 getOrCreateTodayBill 保持一致
-    const year = now.getFullYear()
-    const month = String(now.getMonth() + 1).padStart(2, '0')
-    const day = String(now.getDate()).padStart(2, '0')
-    const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
-    const todayStart = new Date(todayStr + 'T00:00:00')
+    const todayStart = new Date()
+    todayStart.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
     todayStart.setHours(cutoffHour, 0, 0, 0)
     
     // 检查最后同步的日期（如果有）
@@ -107,13 +104,11 @@ export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
   
-  // 🔥 修复：基于当前本地日期计算今天的日切范围，使用本地时区而不是UTC
+  // 🔥 修复：基于当前本地日期计算今天的日切范围，直接使用Date方法避免时区问题
   // 例如：3号凌晨1点记账，应该归入3号的账单（3号2点-4号2点），而不是2号
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
-  const gte = new Date(todayStr + 'T00:00:00')
+  // 当前服务器时间是 2025-11-03 16:23:11，应该归入3号的账单（3号2点-4号2点）
+  const gte = new Date()
+  gte.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
   gte.setHours(cutoffHour, 0, 0, 0)
   const lt = new Date(gte)
   lt.setDate(lt.getDate() + 1)
