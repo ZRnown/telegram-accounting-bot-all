@@ -45,11 +45,16 @@ function endOfDay(d: Date, cutoffHour: number = 0) {
  * 用于查询指定日期的数据范围，不会因为时间判断而退到前一天
  * @param dateStr - 日期字符串，格式 YYYY-MM-DD
  * @param cutoffHour - 日切小时（0-23）
+ * 
+ * 示例：如果 dateStr = "2025-11-03", cutoffHour = 2
+ * 返回：2025/11/03 02:00:00（该日期的日切开始时间）
  */
 function startOfDateRange(dateStr: string, cutoffHour: number = 0) {
-  // 从日期字符串创建日期，然后设置日切时间
-  const d = new Date(dateStr + 'T00:00:00') // 使用 T 分隔符确保本地时间
-  d.setHours(cutoffHour, 0, 0, 0)
+  // 🔥 修复：使用本地时间创建日期，避免时区问题
+  // 从 YYYY-MM-DD 解析出年月日
+  const [year, month, day] = dateStr.split('-').map(Number)
+  // 创建本地时间日期对象（不是UTC）
+  const d = new Date(year, month - 1, day, cutoffHour, 0, 0, 0)
   return d
 }
 
@@ -57,12 +62,16 @@ function startOfDateRange(dateStr: string, cutoffHour: number = 0) {
  * 从日期字符串计算日期范围的结束时间
  * @param dateStr - 日期字符串，格式 YYYY-MM-DD
  * @param cutoffHour - 日切小时（0-23）
+ * 
+ * 示例：如果 dateStr = "2025-11-03", cutoffHour = 2
+ * 返回：2025/11/04 02:00:00（该日期的下一天日切时间）
  */
 function endOfDateRange(dateStr: string, cutoffHour: number = 0) {
-  // 从日期字符串创建日期，设置为该日期的第二天日切时间
-  const d = new Date(dateStr + 'T00:00:00')
-  d.setDate(d.getDate() + 1)
-  d.setHours(cutoffHour, 0, 0, 0)
+  // 🔥 修复：使用本地时间创建日期，避免时区问题
+  // 从 YYYY-MM-DD 解析出年月日
+  const [year, month, day] = dateStr.split('-').map(Number)
+  // 创建下一天的本地时间日期对象（不是UTC）
+  const d = new Date(year, month - 1, day + 1, cutoffHour, 0, 0, 0)
   return d
 }
 
