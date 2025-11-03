@@ -61,8 +61,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     return () => controller.abort()
   }, [currentDate, pick, chatId])
 
-  // 重置选择（已在加载数据时设定为最新一笔）
-  useEffect(() => { /* no-op: pick set on load */ }, [currentDate])
+  // 🔥 性能优化：移除无用的 effect
 
   if (!data) return null
   

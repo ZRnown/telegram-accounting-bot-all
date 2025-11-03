@@ -166,7 +166,6 @@ export default function ChatSettingsPage() {
       } else {
         const errorText = await res.text().catch(() => '保存失败')
         toast({
-          variant: "destructive",
           title: "保存失败",
           description: errorText || "请稍后重试",
         })
@@ -175,13 +174,11 @@ export default function ChatSettingsPage() {
       console.error(e)
       if (e.name === 'AbortError') {
         toast({
-          variant: "destructive",
           title: "请求超时",
           description: "保存请求超时，请检查网络连接后重试",
         })
       } else {
         toast({
-          variant: "destructive",
           title: "保存失败",
           description: e.message || "网络错误，请稍后重试",
         })

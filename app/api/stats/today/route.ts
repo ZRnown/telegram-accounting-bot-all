@@ -158,11 +158,23 @@ export async function GET(req: NextRequest) {
             usdt: true,
             replier: true,
             operator: true,
+            remark: true, // 🔥 添加备注字段
             createdAt: true,
           },
           orderBy: { createdAt: 'asc' }
         })
       : []
+    
+    // 🔥 性能优化：使用 Map 预先分组，避免多次 filter
+    const itemsByBillId = new Map<string, any[]>()
+    for (const item of billItems) {
+      const billId = item.billId
+      if (!itemsByBillId.has(billId)) {
+        itemsByBillId.set(billId, [])
+      }
+      itemsByBillId.get(billId)!.push(item)
+    }
+    
     const feePercent = settings?.feePercent ?? 0
     const fixedRate = settings?.fixedRate ?? null
     const realtimeRate = settings?.realtimeRate ?? null
@@ -171,15 +183,28 @@ export async function GET(req: NextRequest) {
     const billsRecords: { incomeRecords: any[]; dispatchRecords: any[] }[] = []
     // 🔥 使用 billsData 而不是 bills（bills 是空数组）
     for (const b of billsData) {
-      const its = billItems.filter((x: any) => x.billId === b.id)
-      const incs = its.filter((x: any) => x.type === 'INCOME')
-      const disps = its.filter((x: any) => x.type === 'DISPATCH')
+      const its = itemsByBillId.get(b.id) || []
+      // 🔥 性能优化：一次性分类，避免多次遍历
+      const incs: any[] = []
+      const disps: any[] = []
+      for (const item of its) {
+        if (item.type === 'INCOME') {
+          incs.push(item)
+        } else if (item.type === 'DISPATCH') {
+          disps.push(item)
+        }
+      }
       const tIncome = incs.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
       const tDisp = disps.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
       let rateB = fixedRate ?? realtimeRate ?? 0
       if (!rateB) {
-        const lastIncWithRate = [...incs].reverse().find((x: any) => x.rate && x.rate > 0)
-        if (lastIncWithRate?.rate) rateB = Number(lastIncWithRate.rate)
+        // 🔥 性能优化：从后往前找第一个有汇率的记录，不需要 reverse
+        for (let i = incs.length - 1; i >= 0; i--) {
+          if (incs[i].rate && Number(incs[i].rate) > 0) {
+            rateB = Number(incs[i].rate)
+            break
+          }
+        }
       }
       const feeB = (tIncome * feePercent) / 100
       // 🔥 修复：支持负数，不强制为0
@@ -198,6 +223,7 @@ export async function GET(req: NextRequest) {
           rate: (i.rate ? Number(i.rate) : null),
           replier: i.replier || '',
           operator: i.operator || '',
+          remark: i.remark || null, // 🔥 添加备注字段
         }
       })
       const dispatchRecordsSaved = disps.map((d: any) => ({
@@ -246,8 +272,14 @@ export async function GET(req: NextRequest) {
     const incomeByOperator: Record<string, number> = {}
     const incomeByRate: Record<string, number> = {}
     const selectedBillId = billsData[selIdx]?.id
-    const selItems = selectedBillId ? billItems.filter((x: any) => x.billId === selectedBillId) : []
-    const selIncs = selItems.filter((x: any) => x.type === 'INCOME')
+    const selItems = selectedBillId ? (itemsByBillId.get(selectedBillId) || []) : []
+    // 🔥 性能优化：一次性分类
+    const selIncs: any[] = []
+    for (const item of selItems) {
+      if (item.type === 'INCOME') {
+        selIncs.push(item)
+      }
+    }
     selIncs.forEach((i: any) => {
       const amount = Number(i.amount) || 0
       const rate = Number(i.rate || 0) || undefined
@@ -257,7 +289,12 @@ export async function GET(req: NextRequest) {
     })
     // 🔥 改为按操作人（operator）分类统计
     const dispatchByOperator: Record<string, number> = {}
-    const selDisps = selItems.filter((x: any) => x.type === 'DISPATCH')
+    const selDisps: any[] = []
+    for (const item of selItems) {
+      if (item.type === 'DISPATCH') {
+        selDisps.push(item)
+      }
+    }
     selDisps.forEach((d: any) => {
       const amount = Number(d.amount) || 0
       // 优先使用operator，如果没有则使用replier作为后备

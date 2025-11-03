@@ -73,18 +73,10 @@ export function registerStart(bot, ensureChat) {
 // 🔥 /myid 命令已删除，只保留中文指令
 
 /**
- * 注册 help action
+ * 获取机器人使用说明文本（统一函数，避免重复）
  */
-export function registerHelp(bot) {
-  bot.action('help', async (ctx) => {
-    try { 
-      await ctx.answerCbQuery() 
-    } catch (e) {
-      console.error('[help-action][answerCbQuery-error]', e)
-    }
-    
-    // 🔥 私聊和群聊都显示完整的使用说明
-    const help = [
+function getHelpText() {
+  return [
       ' 📖 机器人使用说明 ',
       '',
       '【💰 基础记账】',
@@ -176,6 +168,21 @@ export function registerHelp(bot) {
       '• 设置汇率 7.2 - 设置你的汇率',
       '• 设置操作人 @xxx - 添加员工权限',
     ].join('\n')
+}
+
+/**
+ * 注册 help action
+ */
+export function registerHelp(bot) {
+  bot.action('help', async (ctx) => {
+    try { 
+      await ctx.answerCbQuery() 
+    } catch (e) {
+      console.error('[help-action][answerCbQuery-error]', e)
+    }
+    
+    // 🔥 私聊和群聊都显示完整的使用说明
+    const help = getHelpText()
     await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
   })
 }
@@ -239,17 +246,9 @@ export function registerCommandMenuAction(bot) {
       return
     }
     
-    // 🔥 显示指令菜单，只显示 /start
-    const commandList = [
-      '📋 *可用指令*\n',
-      '/start - 开始使用机器人\n',
-      '💡 点击下方按钮查看使用说明或直接开始记账'
-    ].join('\n')
-    
-    await ctx.reply(commandList, { 
-      parse_mode: 'Markdown',
-      ...(await buildInlineKb(ctx))
-    })
+    // 🔥 发送完整的使用说明（与 help action 一致）
+    const help = getHelpText()
+    await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
   })
 }
 

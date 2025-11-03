@@ -58,13 +58,13 @@ export async function buildInlineKb(ctx, options = {}) {
       const botUsername = ctx.botInfo?.username
       if (botUsername) {
         const inviteLink = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
-        rows.push([Markup.button.url('➕ 开始记账（添加为管理员）', inviteLink)])
+        rows.push([Markup.button.url('➕ 开始记账', inviteLink)])
       } else {
         // 如果 botInfo 没有，才调用 API（备用方案）
         const me = await ctx.telegram.getMe()
         if (me?.username) {
           const inviteLink = `https://t.me/${me.username}?startgroup=true&admin=can_delete_messages+can_restrict_members`
-          rows.push([Markup.button.url('➕ 开始记账（添加为管理员）', inviteLink)])
+          rows.push([Markup.button.url('➕ 开始记账', inviteLink)])
         }
       }
     } catch (e) {

@@ -70,6 +70,7 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
                 <TableRow>
                   <TableHead>时间</TableHead>
                   <TableHead>金额</TableHead>
+                  <TableHead>备注</TableHead>
                   <TableHead>回复人</TableHead>
                   <TableHead>操作人</TableHead>
                 </TableRow>
@@ -80,13 +81,14 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
                     <TableRow key={index} ref={(el) => { if (el) incomeRefs.current[index] = el }}>
                       <TableCell className="text-xs">{record.time}</TableCell>
                       <TableCell className="text-xs font-medium">{record.amount}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{record.remark || '-'}</TableCell>
                       <TableCell className="text-xs">{record.replier}</TableCell>
                       <TableCell className="text-xs">{record.operator}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-slate-500">
+                    <TableCell colSpan={5} className="text-center text-slate-500">
                       暂无数据
                     </TableCell>
                   </TableRow>
