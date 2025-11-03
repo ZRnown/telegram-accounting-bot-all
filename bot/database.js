@@ -61,8 +61,11 @@ export async function checkAndClearIfNewDay(chat, chatId) {
     const cutoffHour = await getGlobalDailyCutoffHour()
     const now = new Date()
     
-    // 🔥 修复：基于当前日期计算今天的日切开始时间，与 getOrCreateTodayBill 保持一致
-    const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+    // 🔥 修复：基于当前本地日期计算今天的日切开始时间，与 getOrCreateTodayBill 保持一致
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
     const todayStart = new Date(todayStr + 'T00:00:00')
     todayStart.setHours(cutoffHour, 0, 0, 0)
     
@@ -104,9 +107,12 @@ export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
   
-  // 🔥 修复：基于当前日期计算今天的日切范围，而不是根据当前时间判断
+  // 🔥 修复：基于当前本地日期计算今天的日切范围，使用本地时区而不是UTC
   // 例如：3号凌晨1点记账，应该归入3号的账单（3号2点-4号2点），而不是2号
-  const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
   const gte = new Date(todayStr + 'T00:00:00')
   gte.setHours(cutoffHour, 0, 0, 0)
   const lt = new Date(gte)

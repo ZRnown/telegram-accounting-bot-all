@@ -38,9 +38,12 @@ export async function formatSummary(ctx, chat, options = {}) {
       needsSync ? (async () => {
         try {
           const cutoffHour = await getGlobalDailyCutoffHour()
-          // 🔥 修复：基于当前日期计算日切范围，与 getOrCreateTodayBill 保持一致
+          // 🔥 修复：基于当前本地日期计算日切范围，与 getOrCreateTodayBill 保持一致
           const now = new Date()
-          const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+          const year = now.getFullYear()
+          const month = String(now.getMonth() + 1).padStart(2, '0')
+          const day = String(now.getDate()).padStart(2, '0')
+          const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
           const gte = new Date(todayStr + 'T00:00:00')
           gte.setHours(cutoffHour, 0, 0, 0)
           const lt = new Date(gte)
@@ -104,7 +107,10 @@ export async function formatSummary(ctx, chat, options = {}) {
       // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
       const cutoffHour = await getGlobalDailyCutoffHour()
       const nowDate = new Date()
-      const todayStr = nowDate.toISOString().slice(0, 10) // YYYY-MM-DD
+      const year = nowDate.getFullYear()
+      const month = String(nowDate.getMonth() + 1).padStart(2, '0')
+      const day = String(nowDate.getDate()).padStart(2, '0')
+      const todayStr = `${year}-${month}-${day}` // 使用本地日期 YYYY-MM-DD
       const todayStart = new Date(todayStr + 'T00:00:00')
       todayStart.setHours(cutoffHour, 0, 0, 0)
       chat._lastBillDate = todayStart.getTime()
