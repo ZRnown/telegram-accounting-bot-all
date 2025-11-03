@@ -12,6 +12,7 @@ export async function GET() {
         name: true,
         description: true,
         enabled: true,
+        token: true, // 🔥 添加token字段，用于获取真实名字
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -19,7 +20,36 @@ export async function GET() {
         },
       },
     })
-    return Response.json({ items: bots })
+    
+    // 🔥 尝试从Telegram API获取机器人真实名字
+    const botsWithRealName = await Promise.all(
+      bots.map(async (bot) => {
+        if (!bot.token) {
+          return { ...bot, realName: null }
+        }
+        try {
+          const url = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getMe`
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 5000)
+          const resp = await fetch(url, { method: 'GET', signal: controller.signal })
+          clearTimeout(timeout)
+          
+          if (resp.ok) {
+            const data = await resp.json()
+            if (data?.ok && data?.result) {
+              // Telegram API返回first_name字段，这是机器人的真实显示名称
+              const realName = data.result.first_name || null
+              return { ...bot, realName, token: undefined } // 不返回token
+            }
+          }
+        } catch (e) {
+          // 静默失败，返回原始数据
+        }
+        return { ...bot, realName: null, token: undefined } // 不返回token
+      })
+    )
+    
+    return Response.json({ items: botsWithRealName })
   } catch (e) {
     console.error(e)
     return new Response('Server error', { status: 500 })

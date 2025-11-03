@@ -135,10 +135,27 @@ export async function GET(req: NextRequest) {
     })
 
     // 🔥 使用日切时间计算日期范围（优先使用群组级别，否则使用全局配置）
-    // 注意：如果 dailyCutoffHour 为 null 或 undefined，使用全局配置（这里简化处理，默认0）
-    const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
-      ? settings.dailyCutoffHour
-      : 0 // 前端暂时默认0，实际应该查询全局配置，但为简化暂时用0
+    let cutoffHour = 0 // 默认值
+    if (settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23) {
+      cutoffHour = settings.dailyCutoffHour
+    } else {
+      // 🔥 查询全局配置获取默认日切时间
+      try {
+        const globalConfig = await prisma.globalConfig.findUnique({
+          where: { key: 'daily_cutoff_hour' },
+          select: { value: true }
+        })
+        if (globalConfig?.value) {
+          const hour = parseInt(globalConfig.value, 10)
+          if (!isNaN(hour) && hour >= 0 && hour <= 23) {
+            cutoffHour = hour
+          }
+        }
+      } catch (e) {
+        // 查询失败时使用默认值0
+        console.error('[stats/today] 查询全局日切时间失败:', e)
+      }
+    }
     // 如果是从日期字符串查询，使用专门的函数；否则使用实时查询函数
     let gte: Date
     let lt: Date

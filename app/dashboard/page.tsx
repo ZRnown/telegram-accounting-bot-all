@@ -19,7 +19,7 @@ function DashboardPageInner() {
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
   const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; bot?: { name: string } }>>([])
   const [drafts, setDrafts] = useState<Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }>>({})
-  const [bots, setBots] = useState<Array<{ id: string; name: string; enabled?: boolean }>>([])
+  const [bots, setBots] = useState<Array<{ id: string; name: string; enabled?: boolean; realName?: string | null }>>([])
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [isAdmin, setIsAdmin] = useState<boolean>(false)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
@@ -232,7 +232,7 @@ function DashboardPageInner() {
                   const chatsData = await chatsRes.json()
                   const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
                   const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
-                  const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled }))
+                  const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
                   setCachedData(CACHE_KEY_BOTS, newBots)
                   setCachedData(CACHE_KEY_GROUPS, chatsItems)
                 }
@@ -563,7 +563,7 @@ function DashboardPageInner() {
                               if (botsRes2.ok) {
                                 const data2 = await botsRes2.json()
                                 const items2 = Array.isArray(data2?.items) ? data2.items : []
-                                setBots(items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled })))
+                                setBots(items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled, realName: x.realName || null })))
                               }
                             } catch {}
                             setCreateForm({ token: '', enabled: true })
@@ -611,7 +611,9 @@ function DashboardPageInner() {
                           <span>{bot.enabled ? '已启用' : '未启用'}</span>
                         </label>
                       </div>
-                      <div className="text-xs text-slate-500">{bot.name}</div>
+                      {bot.realName && (
+                        <div className="text-xs text-slate-500">{bot.realName}</div>
+                      )}
                       <div className="flex items-center gap-2">
                         <button
                           className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
