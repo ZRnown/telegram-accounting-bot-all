@@ -1863,9 +1863,9 @@ bot.launch().then(async () => {
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
   
-  // 🔥 优化：定时任务 - 每小时更新汇率（保存引用）
-  intervals.push(setInterval(updateAllRealtimeRates, 3600000))
-  console.log('[定时任务] 实时汇率自动更新已启动，每小时更新一次')
+  // 🔥 优化：定时任务 - 每半小时更新汇率（保存引用）
+  intervals.push(setInterval(updateAllRealtimeRates, 30 * 60 * 1000))
+  console.log('[定时任务] 实时汇率自动更新已启动，每半小时更新一次')
   
   // 🔥 新增：自动日切定时任务 - 每10分钟检查一次，确保日切时自动切换
   const autoDailyCutoffTask = async () => {

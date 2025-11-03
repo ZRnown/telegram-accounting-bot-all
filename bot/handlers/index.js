@@ -29,7 +29,7 @@ import {
 } from './bill.js'
 import { registerZ0, registerLZ, registerLW, registerLK } from './okx.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo } from './admin.js'
-import { registerStart, registerHelp, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
+import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
 
 /**
  * 注册所有命令处理器
@@ -38,6 +38,7 @@ export function registerAllHandlers(bot, ensureChat) {
   // 核心命令
   registerStart(bot, ensureChat)
   registerHelp(bot)
+  registerHelpCommand(bot, ensureChat) // 🔥 使用说明命令
   registerDashboard(bot)
   registerCommandMenuAction(bot)
   registerViewBill(bot, ensureChat)

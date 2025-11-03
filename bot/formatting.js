@@ -242,7 +242,7 @@ export async function formatSummary(ctx, chat, options = {}) {
     incPart,
     `\n已下发（${disCount}笔）：`,
     disPart,
-    `\n总入款金额：${formatMoney(s.totalIncome)}`,
+    `\n总入款金额：${formatMoney(s.totalIncome)}${s.effectiveRate ? ` | ${formatMoney(s.totalIncome / s.effectiveRate)}U` : ''}`, // 🔥 显示总入款的U
     `费率：${s.feePercent}%`,
     `${rateLabel}：${rateVal || '未设置'}`,
     historicalInfo,

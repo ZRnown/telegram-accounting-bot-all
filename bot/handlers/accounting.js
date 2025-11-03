@@ -6,6 +6,7 @@ import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEf
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
 import { getUsername } from '../helpers.js'
+import { isAccountingEnabled } from '../middleware.js'
 
 /**
  * 开始记账（激活机器人并开始记录）
@@ -43,11 +44,17 @@ export function registerStopAccounting(bot, ensureChat) {
 /**
  * 🔥 备注入账：李四+10000
  * 注意：不能匹配@用户名+金额格式（那个由registerIncomeWithTarget处理）
+ * 🔥 排除数字开头的情况（如32132+21应该计算，不是备注）
  */
 export function registerIncomeWithRemark(bot, ensureChat) {
-  bot.hears(/^([^@\s][^@]*?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
+  bot.hears(/^([^@\s\d][^@]*?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
+
+    // 🔥 检查记账是否启用
+    if (!(await isAccountingEnabled(ctx))) {
+      return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+    }
 
     if (!(await hasOperatorPermission(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
@@ -127,6 +134,11 @@ export function registerIncomeWithTarget(bot, ensureChat) {
   bot.hears(/^@(\w+)\s*\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
+
+    // 🔥 检查记账是否启用
+    if (!(await isAccountingEnabled(ctx))) {
+      return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+    }
 
     if (!(await hasOperatorPermission(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。')
@@ -280,6 +292,11 @@ export function registerIncome(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
 
+    // 🔥 检查记账是否启用
+    if (!(await isAccountingEnabled(ctx))) {
+      return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+    }
+
     if (!(await hasOperatorPermission(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
     }
@@ -421,6 +438,11 @@ export function registerDispatchWithTarget(bot, ensureChat) {
   bot.hears(/^@(\w+)\s*下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
+
+    // 🔥 检查记账是否启用
+    if (!(await isAccountingEnabled(ctx))) {
+      return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+    }
     
     if (!(await hasOperatorPermission(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。')
@@ -493,6 +515,17 @@ export function registerDispatchWithTarget(bot, ensureChat) {
   bot.on('text', async (ctx, next) => {
     const chat = ensureChat(ctx)
     if (!chat) return next()
+
+    // 🔥 检查记账是否启用
+    const accountingOk = await isAccountingEnabled(ctx)
+    if (!accountingOk) {
+      // 如果记账已停止，不处理下发命令
+      const text = ctx.message.text?.trim()
+      if (/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i.test(text)) {
+        return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+      }
+      return next()
+    }
     
     const text = ctx.message.text?.trim()
     const replyTo = ctx.message.reply_to_message
@@ -575,6 +608,11 @@ export function registerDispatch(bot, ensureChat) {
   bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
+
+    // 🔥 检查记账是否启用
+    if (!(await isAccountingEnabled(ctx))) {
+      return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+    }
     
     if (!(await hasOperatorPermission(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')

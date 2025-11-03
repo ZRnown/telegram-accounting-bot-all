@@ -201,6 +201,19 @@ export function registerHelp(bot) {
 }
 
 /**
+ * 注册使用说明命令
+ */
+export function registerHelpCommand(bot, ensureChat) {
+  bot.hears(/^使用说明$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    const help = getHelpText()
+    await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
+  })
+}
+
+/**
  * 注册 open_dashboard action
  */
 export function registerDashboard(bot) {

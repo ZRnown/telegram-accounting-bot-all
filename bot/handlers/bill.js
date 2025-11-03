@@ -476,8 +476,13 @@ export function registerMyBill(bot, ensureChat) {
         }
       })
       
+      // 🔥 计算总入款的USDT
+      const { getEffectiveRate } = await import('../helpers.js')
+      const effectiveRate = await getEffectiveRate(chatId, chat)
+      const totalIncomeUSDT = effectiveRate ? (totalIncome / effectiveRate).toFixed(1) : '0'
+      
       lines.push(`\n📊 汇总：`)
-      lines.push(`入款：${totalIncome.toFixed(2)}`)
+      lines.push(`入款：${totalIncome.toFixed(2)} (${totalIncomeUSDT}U)`) // 🔥 显示入款的U
       if (totalDispatch > 0 || totalUSDT > 0) {
         lines.push(`下发：${totalDispatch.toFixed(2)} (${totalUSDT.toFixed(1)}U)`)
       }

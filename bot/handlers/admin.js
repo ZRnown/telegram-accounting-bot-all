@@ -124,10 +124,10 @@ export function registerQueryRate(bot, ensureChat) {
 }
 
 /**
- * 群内管理员信息
+ * 群内管理员信息（显示所有管理员和操作员）
  */
 export function registerAdminInfo(bot) {
-  bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
+  bot.hears(/^(管理员|权限人|显示操作员|显示操作人)$/i, async (ctx) => {
     if (ctx.chat?.type === 'private') {
       return ctx.reply('此命令仅在群组中使用')
     }
