@@ -194,6 +194,7 @@ export async function updateSettings(chatId, data) {
 /**
  * 同步设置和操作人到内存
  * 🔥 修复：确保实时汇率从数据库同步到内存
+ * 🔥 新增：如果数据库中没有汇率，自动获取实时汇率并保存
  */
 export async function syncSettingsToMemory(ctx, chat, chatId) {
   try {
@@ -225,6 +226,26 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
       } else if (settings.realtimeRate != null) {
         chat.realtimeRate = settings.realtimeRate
         chat.fixedRate = null // 使用实时汇率时清空固定汇率
+      } else {
+        // 🔥 新增：如果数据库中没有汇率（既没有fixedRate也没有realtimeRate），自动获取实时汇率并保存
+        try {
+          const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
+          const rate = await fetchRealtimeRateUSDTtoCNY()
+          if (rate) {
+            chat.realtimeRate = rate
+            chat.fixedRate = null
+            // 保存到数据库
+            await prisma.setting.update({
+              where: { chatId },
+              data: { realtimeRate: rate, fixedRate: null }
+            })
+            if (process.env.DEBUG_BOT === 'true') {
+              console.log(`[syncSettingsToMemory] 自动获取并保存实时汇率: ${rate} (chatId: ${chatId})`)
+            }
+          }
+        } catch (e) {
+          console.error('[syncSettingsToMemory] 自动获取实时汇率失败:', e)
+        }
       }
       if (settings.headerText != null) chat.headerText = settings.headerText
       if (typeof settings.everyoneAllowed === 'boolean') chat.everyoneAllowed = settings.everyoneAllowed

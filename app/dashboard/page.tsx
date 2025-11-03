@@ -14,6 +14,7 @@ function DashboardPageInner() {
   const searchParams = useSearchParams()
   const [mounted, setMounted] = useState(false)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [dateInitialized, setDateInitialized] = useState(false)
   const chatId = (searchParams?.get("chatId") || "").trim()
   const [chatTitle, setChatTitle] = useState<string>("")
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
@@ -56,6 +57,35 @@ function DashboardPageInner() {
       loadWhitelistedUsers()
     }
   }, [router, chatId])
+
+  // 🔥 初始化时根据日切时间获取当前应该查看的日期
+  useEffect(() => {
+    if (!chatId || dateInitialized) return
+    
+    const fetchCurrentDate = async () => {
+      try {
+        const params = new URLSearchParams()
+        params.set('chatId', chatId)
+        const res = await fetch(`/api/stats/current-date?${params.toString()}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.date) {
+            // 解析日期字符串 YYYY-MM-DD
+            const [year, month, day] = data.date.split('-').map(Number)
+            const targetDate = new Date(year, month - 1, day)
+            setCurrentDate(targetDate)
+            setDateInitialized(true)
+          }
+        }
+      } catch (e) {
+        console.error('获取当前日期失败', e)
+        // 失败时标记为已初始化，使用默认的当前日期
+        setDateInitialized(true)
+      }
+    }
+    
+    fetchCurrentDate()
+  }, [chatId, dateInitialized])
   
   // 加载白名单用户
   const loadWhitelistedUsers = async () => {
