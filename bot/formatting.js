@@ -38,12 +38,29 @@ export async function formatSummary(ctx, chat, options = {}) {
       needsSync ? (async () => {
         try {
           const cutoffHour = await getGlobalDailyCutoffHour()
+          // 🔥 修复：使用与 getOrCreateTodayBill 相同的日切逻辑
           const now = new Date()
           
-          // 🔥 使用统一的日期计算函数（与 getOrCreateTodayBill 保持一致）
-          // 导入计算函数
-          const { calculateBillDateRange } = await import('./database.js')
-          const { gte, lt } = calculateBillDateRange(now, cutoffHour)
+          // 计算今天的日切开始时间
+          const todayCutoff = new Date()
+          todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+          todayCutoff.setHours(cutoffHour, 0, 0, 0)
+          
+          // 判断当前时间是否已经过了今天的日切点
+          let gte
+          let lt
+          
+          if (now >= todayCutoff) {
+            // 当前时间 >= 今天的日切时间，查询今天的账单
+            gte = new Date(todayCutoff)
+            lt = new Date(todayCutoff)
+            lt.setDate(lt.getDate() + 1)
+          } else {
+            // 当前时间 < 今天的日切时间，查询昨天的账单
+            gte = new Date(todayCutoff)
+            gte.setDate(gte.getDate() - 1)
+            lt = new Date(todayCutoff)
+          }
           
           return await prisma.bill.findFirst({ 
             where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
@@ -104,10 +121,16 @@ export async function formatSummary(ctx, chat, options = {}) {
       // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
       const cutoffHour = await getGlobalDailyCutoffHour()
       const nowDate = new Date()
-      const todayStart = new Date()
-      todayStart.setFullYear(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate())
-      todayStart.setHours(cutoffHour, 0, 0, 0)
-      chat._lastBillDate = todayStart.getTime()
+      const todayCutoff = new Date()
+      todayCutoff.setFullYear(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate())
+      todayCutoff.setHours(cutoffHour, 0, 0, 0)
+      // 判断当前时间应该归入哪个账单周期
+      const currentBillStart = nowDate >= todayCutoff ? new Date(todayCutoff) : (() => {
+        const yesterday = new Date(todayCutoff)
+        yesterday.setDate(yesterday.getDate() - 1)
+        return yesterday
+      })()
+      chat._lastBillDate = currentBillStart.getTime()
     } else if (needsSync) {
       chat._billLastSync = now
     }

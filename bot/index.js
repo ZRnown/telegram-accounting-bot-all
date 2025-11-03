@@ -483,38 +483,17 @@ async function ensureDbChatWithSync(ctx) {
   const chat = ensureChat(ctx)
   const chatId = await ensureDbChat(ctx, chat)
   
-  // 🔥 修复：确保实时汇率从数据库同步到内存（优先从数据库加载）
-  // syncSettingsToMemory 已经会同步实时汇率，这里做兜底检查
+  // 如果没有设置汇率，自动设置实时汇率
   if (chat && !chat.fixedRate && !chat.realtimeRate) {
     try {
-      // 从数据库读取实时汇率（启动时的更新任务已经更新了数据库）
-      const setting = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { fixedRate: true, realtimeRate: true }
-      })
-      
-      if (setting?.realtimeRate && !setting?.fixedRate) {
-        chat.realtimeRate = setting.realtimeRate
-        if (process.env.DEBUG_BOT === 'true') {
-          console.log('[ensureDbChatWithSync] 实时汇率已加载', { chatId, rate: setting.realtimeRate })
-        }
-      } else if (!setting?.fixedRate) {
-        // 数据库也没有，主动获取并保存
-        const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
+      const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
         const rate = await fetchRealtimeRateUSDTtoCNY()
         if (rate) {
           chat.realtimeRate = rate
           await updateSettings(chatId, { realtimeRate: rate })
-          if (process.env.DEBUG_BOT === 'true') {
-            console.log('[ensureDbChatWithSync] 实时汇率已获取并保存', { chatId, rate })
-          }
-        }
       }
     } catch (e) {
       // 静默失败
-      if (process.env.DEBUG_BOT === 'true') {
-        console.error('[ensureDbChatWithSync] 汇率同步失败', e)
-      }
     }
   }
   
@@ -2709,8 +2688,7 @@ async function updateAllRealtimeRates() {
         data: { realtimeRate: rate }
       })
       
-      // 🔥 批量更新内存中的汇率（包括未创建的chat对象）
-      // 注意：这里只能更新已经存在的chat对象，未创建的会在首次使用时通过syncSettingsToMemory加载
+      // 🔥 批量更新内存中的汇率
       for (const setting of allSettings) {
         if (!setting.fixedRate) {
           const chat = getChat(botId, setting.chatId)
@@ -2718,10 +2696,6 @@ async function updateAllRealtimeRates() {
             chat.realtimeRate = rate
           }
         }
-      }
-      
-      if (process.env.DEBUG_BOT === 'true') {
-        console.log(`[updateAllRealtimeRates] 已更新 ${chatIdsToUpdate.length} 个群组的实时汇率: ${rate}`)
       }
     }
     
@@ -2758,28 +2732,25 @@ bot.launch().then(async () => {
   intervals.push(setInterval(updateAllRealtimeRates, 3600000))
   console.log('[定时任务] 实时汇率自动更新已启动，每小时更新一次')
   
-  // 🔥 重写：自动日切定时任务 - 每5分钟检查一次，确保及时检测到日切并自动保存订单
+  // 🔥 新增：自动日切定时任务 - 每10分钟检查一次，确保日切时自动切换
   const autoDailyCutoffTask = async () => {
     try {
+      // 直接导入getChat函数，避免动态导入的性能问题
       const { getChat } = await import('./state.js')
-      const botId = await ensureCurrentBotId()
-      const processed = await performAutoDailyCutoff((_, chatId) => {
-        return getChat(botId, chatId)
+      await performAutoDailyCutoff((botId, chatId) => {
+        return getChat(botId || process.env.BOT_TOKEN, chatId)
       })
-      if (processed > 0 && process.env.DEBUG_BOT === 'true') {
-        console.log(`[定时任务] 自动日切：处理了 ${processed} 个群组`)
-      }
     } catch (e) {
-      console.error('[定时任务] ❌ 自动日切检查失败:', e)
+      console.error('[定时任务] 自动日切检查失败:', e)
     }
   }
   
-  // 立即执行一次（启动时检查并关闭昨天的账单）
+  // 立即执行一次
   await autoDailyCutoffTask()
   
-  // 每5分钟检查一次（确保能及时检测到日切，在日切点后5分钟内完成切换）
-  intervals.push(setInterval(autoDailyCutoffTask, 5 * 60 * 1000))
-  console.log('[定时任务] ✅ 自动日切检查已启动，每5分钟检查一次')
+  // 每10分钟检查一次（确保能及时检测到日切）
+  intervals.push(setInterval(autoDailyCutoffTask, 10 * 60 * 1000))
+  console.log('[定时任务] 自动日切检查已启动，每10分钟检查一次')
   
   // 🔥 新增：内存优化定时任务
   // 1. 每小时清理不活跃的聊天（保存引用）

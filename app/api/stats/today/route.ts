@@ -3,31 +3,41 @@ import { prisma } from '@/lib/db'
 
 /**
  * 日切时间函数 - 支持自定义小时
- * 用于实时查询：根据当前时间判断今天的开始时间
+ * 🔥 修复：统一日切逻辑，与后端保持一致
+ * 用于实时查询：根据当前时间判断应该归入的账单周期的开始时间
+ * 
+ * 逻辑说明：
+ * - 如果当前时间是3号上午10点，日切是2点，返回3号02:00（今天账单的开始）
+ * - 如果当前时间是3号凌晨1点，日切是2点，返回2号02:00（昨天账单的开始）
  */
 function startOfDay(d: Date, cutoffHour: number = 0) {
-  const x = new Date(d)
-  x.setHours(cutoffHour, 0, 0, 0)
+  const now = new Date(d)
   
-  // 如果当前时间在日切点之前，需要退到前一天的日切点
-  if (d.getHours() < cutoffHour) {
-    x.setDate(x.getDate() - 1)
+  // 计算今天的日切开始时间
+  const todayCutoff = new Date()
+  todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+  todayCutoff.setHours(cutoffHour, 0, 0, 0)
+  
+  // 判断当前时间是否已经过了今天的日切点
+  if (now >= todayCutoff) {
+    // 当前时间 >= 今天的日切时间，返回今天账单的开始时间
+    return new Date(todayCutoff)
+  } else {
+    // 当前时间 < 今天的日切时间，返回昨天账单的开始时间
+    const yesterdayCutoff = new Date(todayCutoff)
+    yesterdayCutoff.setDate(yesterdayCutoff.getDate() - 1)
+    return yesterdayCutoff
   }
-  
-  return x
 }
 
+/**
+ * 日切时间函数 - 计算当前应该归入的账单周期的结束时间
+ */
 function endOfDay(d: Date, cutoffHour: number = 0) {
-  const x = new Date(d)
-  x.setDate(x.getDate() + 1)
-  x.setHours(cutoffHour, 0, 0, 0)
-  
-  // 如果当前时间在日切点之前，endOfDay 也要相应调整
-  if (d.getHours() < cutoffHour) {
-    x.setDate(x.getDate() - 1)
-  }
-  
-  return x
+  const start = startOfDay(d, cutoffHour)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return end
 }
 
 /**
