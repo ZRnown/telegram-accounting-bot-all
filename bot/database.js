@@ -97,22 +97,41 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 
 /**
  * 获取或创建当天的OPEN账单
- * 🔥 修复：使用当前日期的日切时间范围，正确计算当天账单范围
- * 逻辑：当前日期N的账单范围 = N号日切点 到 (N+1)号日切点
- * 例如：3号任意时间记账，应该归入 3号02:00 - 4号02:00 的账单
+ * 🔥 修复：正确处理日切点前后的日期判断
+ * 逻辑：
+ * - 如果当前时间 >= 今天日切点：账单范围 = 今天日切点 到 明天日切点
+ * - 如果当前时间 < 今天日切点：账单范围 = 昨天日切点 到 今天日切点
+ * 例如：日切是2点
+ *   - 3号10:00记账 → 归入 3号02:00 - 4号02:00
+ *   - 3号01:00记账 → 归入 2号02:00 - 3号02:00
  */
 export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
+  const currentHour = now.getHours()
   
-  // 🔥 修复：正确计算当天账单的开始时间（今天日期的日切点）
-  // 无论当前时间是在日切点之前还是之后，都使用今天日期的日切点作为开始
-  // 例如：当前是3号16:00，日切是2点，账单范围应该是 3号02:00 - 4号02:00
+  // 🔥 修复：根据当前时间是否超过日切点，判断应该使用的日期
+  let billDate = new Date(now)
+  
+  // 如果当前时间在日切点之前，使用昨天的日期
+  if (currentHour < cutoffHour) {
+    billDate.setDate(billDate.getDate() - 1)
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[getOrCreateTodayBill] 当前时间在日切点之前，使用昨天日期', {
+        now: now.toISOString(),
+        currentHour,
+        cutoffHour,
+        billDate: billDate.toISOString()
+      })
+    }
+  }
+  
+  // 计算账单开始时间：账单日期的日切点
   const gte = new Date()
-  gte.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+  gte.setFullYear(billDate.getFullYear(), billDate.getMonth(), billDate.getDate())
   gte.setHours(cutoffHour, 0, 0, 0)
   
-  // 结束时间是明天同一日切点
+  // 结束时间是账单日期的下一天的日切点
   const lt = new Date(gte)
   lt.setDate(lt.getDate() + 1)
   
@@ -120,7 +139,9 @@ export async function getOrCreateTodayBill(chatId) {
     console.log('[getOrCreateTodayBill]', {
       chatId,
       now: now.toISOString(),
+      currentHour,
       cutoffHour,
+      billDate: billDate.toISOString(),
       gte: gte.toISOString(),
       lt: lt.toISOString(),
       '账单范围': `${gte.toLocaleString('zh-CN')} - ${lt.toLocaleString('zh-CN')}`
@@ -181,13 +202,19 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
     
     if (settings && chat) {
       if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
-      if (settings.fixedRate != null) chat.fixedRate = settings.fixedRate
-      // 🔥 修复：确保实时汇率从数据库同步到内存（重启后恢复）
-      if (settings.realtimeRate != null) {
+      if (settings.fixedRate != null) {
+        chat.fixedRate = settings.fixedRate
+        // 如果有固定汇率，清空实时汇率
+        if (settings.fixedRate) {
+          chat.realtimeRate = null
+        }
+      }
+      // 🔥 修复：优先同步数据库中的实时汇率（启动时已更新）
+      if (settings.realtimeRate != null && !settings.fixedRate) {
         chat.realtimeRate = settings.realtimeRate
-      } else if (!chat.fixedRate && !chat.realtimeRate) {
-        // 🔥 如果没有设置汇率，尝试从数据库获取或获取实时汇率
-        // 这里不主动获取，因为启动时会有全局更新任务
+        if (process.env.DEBUG_BOT === 'true') {
+          console.log('[syncSettingsToMemory] 实时汇率已同步', { chatId, rate: settings.realtimeRate })
+        }
       }
       if (settings.headerText != null) chat.headerText = settings.headerText
       if (typeof settings.everyoneAllowed === 'boolean') chat.everyoneAllowed = settings.everyoneAllowed
