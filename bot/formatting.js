@@ -38,8 +38,13 @@ export async function formatSummary(ctx, chat, options = {}) {
       needsSync ? (async () => {
         try {
           const cutoffHour = await getGlobalDailyCutoffHour()
-          const gte = startOfDay(new Date(), cutoffHour)
-          const lt = endOfDay(new Date(), cutoffHour)
+          // 🔥 修复：基于当前日期计算日切范围，与 getOrCreateTodayBill 保持一致
+          const now = new Date()
+          const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+          const gte = new Date(todayStr + 'T00:00:00')
+          gte.setHours(cutoffHour, 0, 0, 0)
+          const lt = new Date(gte)
+          lt.setDate(lt.getDate() + 1)
           return await prisma.bill.findFirst({ 
             where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
             include: { 
@@ -96,9 +101,12 @@ export async function formatSummary(ctx, chat, options = {}) {
         chat.current.dispatches = dbDispatches
       }
       chat._billLastSync = now
-      // 🔥 记录当前账单的日期，用于跨日检测
+      // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
       const cutoffHour = await getGlobalDailyCutoffHour()
-      const todayStart = startOfDay(new Date(), cutoffHour)
+      const nowDate = new Date()
+      const todayStr = nowDate.toISOString().slice(0, 10) // YYYY-MM-DD
+      const todayStart = new Date(todayStr + 'T00:00:00')
+      todayStart.setHours(cutoffHour, 0, 0, 0)
       chat._lastBillDate = todayStart.getTime()
     } else if (needsSync) {
       chat._billLastSync = now

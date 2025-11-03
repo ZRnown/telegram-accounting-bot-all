@@ -60,7 +60,11 @@ export async function checkAndClearIfNewDay(chat, chatId) {
     
     const cutoffHour = await getGlobalDailyCutoffHour()
     const now = new Date()
-    const todayStart = startOfDay(now, cutoffHour)
+    
+    // 🔥 修复：基于当前日期计算今天的日切开始时间，与 getOrCreateTodayBill 保持一致
+    const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+    const todayStart = new Date(todayStr + 'T00:00:00')
+    todayStart.setHours(cutoffHour, 0, 0, 0)
     
     // 检查最后同步的日期（如果有）
     const lastBillDate = chat._lastBillDate
@@ -93,12 +97,20 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 
 /**
  * 获取或创建当天的OPEN账单
+ * 🔥 修复：使用当前日期的日切时间范围，而不是根据当前时间判断
+ * 这样即使在日切点之前记账，也会归入当天的账单
  */
 export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
-  const gte = startOfDay(now, cutoffHour)
-  const lt = endOfDay(now, cutoffHour)
+  
+  // 🔥 修复：基于当前日期计算今天的日切范围，而不是根据当前时间判断
+  // 例如：3号凌晨1点记账，应该归入3号的账单（3号2点-4号2点），而不是2号
+  const todayStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
+  const gte = new Date(todayStr + 'T00:00:00')
+  gte.setHours(cutoffHour, 0, 0, 0)
+  const lt = new Date(gte)
+  lt.setDate(lt.getDate() + 1)
   
   let bill = await prisma.bill.findFirst({ 
     where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
