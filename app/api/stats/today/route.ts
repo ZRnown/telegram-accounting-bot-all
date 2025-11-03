@@ -54,7 +54,10 @@ function startOfDateRange(dateStr: string, cutoffHour: number = 0) {
   // 从 YYYY-MM-DD 解析出年月日
   const [year, month, day] = dateStr.split('-').map(Number)
   // 创建本地时间日期对象（不是UTC）
+  // 使用 Date.UTC 然后转换回本地时间，或者直接用本地时间构造函数
+  // 这里直接使用本地时间构造函数，确保时间就是本地时间的 02:00:00
   const d = new Date(year, month - 1, day, cutoffHour, 0, 0, 0)
+  // 🔥 确保返回的是本地时间的日期对象
   return d
 }
 
@@ -72,6 +75,7 @@ function endOfDateRange(dateStr: string, cutoffHour: number = 0) {
   const [year, month, day] = dateStr.split('-').map(Number)
   // 创建下一天的本地时间日期对象（不是UTC）
   const d = new Date(year, month - 1, day + 1, cutoffHour, 0, 0, 0)
+  // 🔥 确保返回的是本地时间的日期对象
   return d
 }
 
@@ -100,7 +104,8 @@ export async function GET(req: NextRequest) {
     const dateStr = searchParams.get('date') // YYYY-MM-DD
     const chatIdParam = searchParams.get('chatId')
     const billIndexParam = searchParams.get('bill')
-    const now = dateStr ? new Date(dateStr) : new Date()
+    // 🔥 修复：如果提供了dateStr，直接使用它，不要转换为Date再转换（避免时区问题）
+    const now = dateStr ? new Date() : new Date() // now只用于实时查询，不用于日期字符串查询
 
     // pick chatId: prefer latest bill if not explicitly provided
     let chatId = chatIdParam || ''
@@ -405,8 +410,9 @@ export async function GET(req: NextRequest) {
       incomeByRate,
       dispatchByOperator, // 🔥 改为按操作人分类
       // 🔥 返回实际的日期范围（考虑日切时间）
-      dateRangeStart: gte,
-      dateRangeEnd: lt,
+      // 注意：Date对象会被JSON序列化为ISO字符串（UTC），前端解析时会自动转换为本地时间
+      dateRangeStart: gte.toISOString(),
+      dateRangeEnd: lt.toISOString(),
       dailyCutoffHour: cutoffHour,
     })
   } catch (e) {
