@@ -1,5 +1,12 @@
 // 统一注册所有命令处理器
-import { registerStartAccounting, registerIncome, registerDispatch } from './accounting.js'
+import { 
+  registerStartAccounting, 
+  registerIncome, 
+  registerDispatch,
+  registerIncomeWithRemark,
+  registerIncomeWithTarget,
+  registerDispatchWithTarget
+} from './accounting.js'
 import { 
   registerSetFee, 
   registerSetRate, 
@@ -16,7 +23,8 @@ import {
   registerShowHistory,
   registerUndoIncome,
   registerUndoDispatch,
-  registerMyBill
+  registerMyBill,
+  registerAllBill
 } from './bill.js'
 import { registerZ0 } from './okx.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo } from './admin.js'
@@ -35,8 +43,13 @@ export function registerAllHandlers(bot, ensureChat) {
   
   // 记账相关
   registerStartAccounting(bot, ensureChat)
-  registerIncome(bot, ensureChat)
-  registerDispatch(bot, ensureChat)
+  // 🔥 先注册备注入账和指定入账（这些需要更严格的匹配）
+  registerIncomeWithRemark(bot, ensureChat)
+  registerIncomeWithTarget(bot, ensureChat)
+  registerIncome(bot, ensureChat) // 最后注册普通入账（匹配范围更广）
+  // 🔥 先注册指定下发
+  registerDispatchWithTarget(bot, ensureChat)
+  registerDispatch(bot, ensureChat) // 最后注册普通下发
   
   // 账单相关
   registerShowBill(bot, ensureChat)
@@ -47,6 +60,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerUndoIncome(bot, ensureChat)
   registerUndoDispatch(bot, ensureChat)
   registerMyBill(bot, ensureChat)
+  registerAllBill(bot, ensureChat) // 🔥 全部账单：总
   
   // 设置相关
   registerSetFee(bot, ensureChat)

@@ -30,7 +30,7 @@ function createInitialChatState() {
     everyoneAllowed: false,
     headerText: '',
     fixedRate: null, // number | null
-    realtimeRate: 7.15, // number | null
+    realtimeRate: null, // 🔥 修改：不再默认7.15，启动时获取最新汇率
     feePercent: 0, // 0-100
     displayMode: 1, // 1 | 2 | 3
     rmbMode: false,
@@ -127,48 +127,81 @@ function safeCalculate(expr) {
   }
 }
 
+/**
+ * 🔥 增强版解析函数：支持单独汇率、单独费率、组合格式
+ * 支持的格式：
+ * - +1000（简单数字）
+ * - +1000+500（加法计算）
+ * - +1000-500（减法计算）
+ * - +1000u/7（单独汇率）
+ * - +1000u*0.95（单独费率）
+ * - +1000/7*0.95（组合：汇率和费率）
+ * - +1000u/7*0.95（组合：USDT + 汇率 + 费率）
+ * 
+ * 🔥 重要：+1000*2 和 +1000/2 不再作为计算，而是作为费率/汇率
+ * 只有 +1000+1000 和 +1000-500 这种加减法才计算
+ */
 function parseAmountAndRate(text) {
-  // Supports: +1000, +50000/7.2（带汇率）, +100-50, +100*2, +11/21（除法）
-  // 
-  // 汇率格式规则：只有当格式为 "+纯数字/汇率数字" 且汇率在合理范围（6-10）时才识别为汇率
-  // 其他带 / 的都当作除法运算
-  
-  let expressionPart = text
   let rate = null
+  let feeRate = null
+  let amount = null
   
-  // 检查是否为汇率格式：+纯数字/汇率
-  // 只有符合 "+数字/6~10范围的数字" 才当作汇率
+  // 🔥 处理组合格式：+1000/7*0.95 或 +1000u/7*0.95
+  const comboMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/)
+  if (comboMatch) {
+    amount = Number(comboMatch[1])
+    rate = Number(comboMatch[2])
+    feeRate = Number(comboMatch[3])
+    if (Number.isFinite(amount) && Number.isFinite(rate) && Number.isFinite(feeRate)) {
+      return { amount, rate, feeRate }
+    }
+  }
+  
+  // 🔥 单独费率格式：+1000u*0.95 或 +1000*0.95
+  const feeMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/)
+  if (feeMatch) {
+    amount = Number(feeMatch[1])
+    feeRate = Number(feeMatch[2])
+    if (Number.isFinite(amount) && Number.isFinite(feeRate)) {
+      return { amount, rate, feeRate }
+    }
+  }
+  
+  // 🔥 单独汇率格式：+1000u/7 或 +1000/7（汇率范围6-10）
   const rateMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
   if (rateMatch) {
     const potentialRate = Number(rateMatch[2])
-    // 只有当后面的数字在合理汇率范围内（6-10）才当作汇率
+    // 只有当后面的数字在合理汇率范围内（6-10）或费率范围（0.01-1）才当作汇率/费率
     if (potentialRate >= 6 && potentialRate <= 10) {
-      expressionPart = rateMatch[1]
+      amount = Number(rateMatch[1])
       rate = potentialRate
+      if (Number.isFinite(amount) && Number.isFinite(rate)) {
+        return { amount, rate, feeRate }
+      }
     }
     // 否则整个当作除法表达式（如 +11/21）
   }
   
-  // 处理开头的符号
-  const firstChar = expressionPart.trim()[0]
+  // 🔥 处理加减法计算：+1000+500, +1000-500（只有加减才是计算）
+  const expr = text.trim()
+  const firstChar = expr[0]
   const hasLeadingSign = firstChar === '+' || firstChar === '-'
   const sign = firstChar === '-' ? '-' : ''
+  const cleanExpr = hasLeadingSign ? expr.slice(1) : expr
   
-  // 移除开头的 +/-
-  const expr = hasLeadingSign ? expressionPart.trim().slice(1) : expressionPart.trim()
-  
-  // 如果表达式包含运算符，计算结果
-  if (/[+\-*/]/.test(expr)) {
-    const calculated = safeCalculate(sign + expr)
-    if (calculated === null) return null
-    return { amount: calculated, rate }
+  // 检查是否包含加减运算符（不包括乘除）
+  if (/[+\-]/.test(cleanExpr)) {
+    const calculated = safeCalculate(sign + cleanExpr)
+    if (calculated !== null && Number.isFinite(calculated)) {
+      return { amount: calculated, rate, feeRate }
+    }
   }
   
-  // 简单数字
-  const amount = Number(sign + expr)
+  // 🔥 简单数字：+1000 或 -1000
+  amount = Number(sign + cleanExpr)
   if (!Number.isFinite(amount)) return null
   
-  return { amount, rate }
+  return { amount, rate, feeRate }
 }
 
 function calcUSDT(amountRMB, rate) {

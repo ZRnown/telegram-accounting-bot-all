@@ -18,6 +18,7 @@ interface ChatSettings {
     dailyCutoffHour?: number
     hideHelpButton?: boolean
     hideOrderButton?: boolean
+    deleteBillConfirm?: boolean // 🔥 删除账单确认功能
   }
 }
 
@@ -45,6 +46,7 @@ export default function ChatSettingsPage() {
   const [dailyCutoffHour, setDailyCutoffHour] = useState<number>(0)
   const [hideHelpButton, setHideHelpButton] = useState<boolean>(false)
   const [hideOrderButton, setHideOrderButton] = useState<boolean>(false)
+  const [deleteBillConfirm, setDeleteBillConfirm] = useState<boolean>(false) // 🔥 删除账单确认功能
   
   // 操作人管理状态
   const [newOperator, setNewOperator] = useState('')
@@ -73,6 +75,7 @@ export default function ChatSettingsPage() {
         setDailyCutoffHour(data.settings.dailyCutoffHour ?? 0)
         setHideHelpButton(data.settings.hideHelpButton ?? false)
         setHideOrderButton(data.settings.hideOrderButton ?? false)
+        setDeleteBillConfirm(data.settings.deleteBillConfirm ?? false)
       } else {
         toast({
           variant: "destructive",
@@ -116,6 +119,7 @@ export default function ChatSettingsPage() {
         dailyCutoffHour,
         hideHelpButton,
         hideOrderButton,
+        deleteBillConfirm,
       }
 
       // 🔥 添加超时控制，避免长时间等待
@@ -459,6 +463,30 @@ export default function ChatSettingsPage() {
                   type="checkbox"
                   checked={hideOrderButton}
                   onChange={(e) => setHideOrderButton(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+          
+          {/* 🔥 安全设置 */}
+          <div className="bg-white border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold">🔒 安全设置</h3>
+            </div>
+            
+            {/* 删除账单确认 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-gray-700">删除账单确认</div>
+                <p className="text-xs text-gray-500 mt-1">发送"删除账单"后需要二次确认，防止误删除</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deleteBillConfirm}
+                  onChange={(e) => setDeleteBillConfirm(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>

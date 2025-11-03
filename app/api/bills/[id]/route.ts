@@ -84,6 +84,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         amount: true,
         rate: true,
         usdt: true,
+        feeRate: true, // 🔥 添加费率字段
+        remark: true, // 🔥 添加备注字段
         replier: true,
         operator: true,
         createdAt: true,

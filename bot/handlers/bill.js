@@ -61,6 +61,7 @@ export function registerSaveBill(bot, ensureChat) {
 
 /**
  * 删除账单（清空当前，不保存）
+ * 🔥 支持删除确认功能（如果后台设置了deleteBillConfirm）
  */
 export function registerDeleteBill(bot, ensureChat) {
   bot.hears(/^删除账单$/i, async (ctx) => {
@@ -74,6 +75,36 @@ export function registerDeleteBill(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx, chat)
     
     try {
+      // 🔥 检查是否需要确认
+      const setting = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { deleteBillConfirm: true }
+      })
+      
+      if (setting?.deleteBillConfirm) {
+        // 需要二次确认，先提示用户
+        const { Markup } = await import('telegraf')
+        const keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback('✅ 确认删除', 'confirm_delete_bill')],
+          [Markup.button.callback('❌ 取消', 'cancel_delete_bill')]
+        ])
+        
+        // 🔥 使用临时存储（Map）来存储待删除的chatId，避免session问题
+        // 格式：userId_chatId -> true
+        const deletePendingKey = `${ctx.from?.id}_${chatId}`
+        if (!global.pendingDeleteBills) {
+          global.pendingDeleteBills = new Map()
+        }
+        global.pendingDeleteBills.set(deletePendingKey, { chatId, userId: ctx.from?.id, timestamp: Date.now() })
+        
+        await ctx.reply(
+          '⚠️ *删除确认*\n\n确定要删除当前账单吗？此操作不可恢复！\n\n点击下方按钮确认或取消：',
+          { ...keyboard, parse_mode: 'Markdown' }
+        )
+        return
+      }
+      
+      // 不需要确认，直接删除
       const { bill } = await getOrCreateTodayBill(chatId)
       await prisma.billItem.deleteMany({ where: { billId: bill.id } })
       
@@ -85,6 +116,71 @@ export function registerDeleteBill(bot, ensureChat) {
       console.error('删除账单失败', e)
       await ctx.reply('❌ 删除账单失败，请稍后重试')
     }
+  })
+  
+  // 🔥 确认删除按钮
+  bot.action('confirm_delete_bill', async (ctx) => {
+    try { await ctx.answerCbQuery() } catch {}
+    
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。')
+    }
+    
+    // 🔥 从临时存储中获取chatId
+    const chatId = String(ctx.chat?.id || '')
+    const userId = ctx.from?.id
+    const deletePendingKey = `${userId}_${chatId}`
+    
+    if (!global.pendingDeleteBills) {
+      return ctx.reply('❌ 操作已过期，请重新发送"删除账单"')
+    }
+    
+    const pendingInfo = global.pendingDeleteBills.get(deletePendingKey)
+    if (!pendingInfo || (Date.now() - pendingInfo.timestamp > 5 * 60 * 1000)) {
+      // 超过5分钟，清除过期记录
+      global.pendingDeleteBills.delete(deletePendingKey)
+      return ctx.reply('❌ 操作已过期，请重新发送"删除账单"')
+    }
+    
+    // 🔥 使用pendingInfo中的chatId（更可靠）
+    const finalChatId = pendingInfo.chatId || chatId
+    
+    try {
+      const { bill } = await getOrCreateTodayBill(finalChatId)
+      await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+      
+      chat.current.incomes = []
+      chat.current.dispatches = []
+      
+      // 🔥 清除待删除标记
+      if (global.pendingDeleteBills) {
+        global.pendingDeleteBills.delete(deletePendingKey)
+      }
+      
+      await ctx.reply('✅ 当前账单已清空', { ...(await buildInlineKb(ctx)) })
+      await ctx.deleteMessage().catch(() => {})
+    } catch (e) {
+      console.error('删除账单失败', e)
+      await ctx.reply('❌ 删除账单失败，请稍后重试')
+    }
+  })
+  
+  // 🔥 取消删除按钮
+  bot.action('cancel_delete_bill', async (ctx) => {
+    try { await ctx.answerCbQuery() } catch {}
+    
+    // 🔥 清除待删除标记
+    const chatId = String(ctx.chat?.id || '')
+    const userId = ctx.from?.id
+    if (global.pendingDeleteBills && userId) {
+      global.pendingDeleteBills.delete(`${userId}_${chatId}`)
+    }
+    
+    await ctx.reply('已取消删除操作', { ...(await buildInlineKb(ctx)) })
+    await ctx.deleteMessage().catch(() => {})
   })
 }
 
@@ -196,6 +292,117 @@ export function registerUndoDispatch(bot, ensureChat) {
     }
     
     await ctx.reply(`✅ 已撤销最后一条下发：${result.usdt}U`, { ...(await buildInlineKb(ctx)) })
+  })
+}
+
+/**
+ * 🔥 全部账单：总
+ */
+export function registerAllBill(bot, ensureChat) {
+  bot.hears(/^总$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    const chatId = await ensureDbChat(ctx, chat)
+    
+    try {
+      // 获取所有账单（包括OPEN和CLOSED）
+      const allBills = await prisma.bill.findMany({
+        where: { chatId },
+        include: {
+          items: {
+            select: {
+              type: true,
+              amount: true,
+              rate: true,
+              usdt: true,
+              feeRate: true,
+              remark: true,
+              replier: true,
+              operator: true,
+              createdAt: true
+            },
+            orderBy: { createdAt: 'asc' }
+          }
+        },
+        orderBy: { openedAt: 'asc' }
+      })
+      
+      if (allBills.length === 0) {
+        return ctx.reply('暂无账单记录', { ...(await buildInlineKb(ctx)) })
+      }
+      
+      // 汇总所有账单
+      let totalIncome = 0
+      let totalDispatch = 0
+      let totalIncomeUSDT = 0
+      let totalDispatchUSDT = 0
+      const allIncomes = []
+      const allDispatches = []
+      
+      for (const bill of allBills) {
+        for (const item of bill.items) {
+          const amount = Number(item.amount || 0)
+          const usdt = Number(item.usdt || 0)
+          
+          if (item.type === 'INCOME') {
+            totalIncome += amount
+            totalIncomeUSDT += usdt
+            allIncomes.push(item)
+          } else {
+            totalDispatch += amount
+            totalDispatchUSDT += usdt
+            allDispatches.push(item)
+          }
+        }
+      }
+      
+      // 获取设置
+      const settings = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { feePercent: true, fixedRate: true, realtimeRate: true }
+      })
+      
+      const feePercent = settings?.feePercent ?? 0
+      const rate = settings?.fixedRate ?? settings?.realtimeRate ?? 0
+      const fee = (totalIncome * feePercent) / 100
+      const shouldDispatch = totalIncome - fee
+      const shouldDispatchUSDT = rate ? Number((shouldDispatch / rate).toFixed(1)) : 0
+      
+      const lines = []
+      lines.push('📊 *全部账单汇总*\n')
+      lines.push(`入款（${allIncomes.length}笔）：${totalIncome.toFixed(2)} 元`)
+      if (totalIncomeUSDT > 0) {
+        lines.push(`入款USDT：${totalIncomeUSDT.toFixed(1)} U`)
+      }
+      lines.push(`下发（${allDispatches.length}笔）：${totalDispatch.toFixed(2)} 元`)
+      if (totalDispatchUSDT > 0) {
+        lines.push(`下发USDT：${totalDispatchUSDT.toFixed(1)} U`)
+      }
+      if (feePercent > 0) {
+        lines.push(`手续费：${fee.toFixed(2)} 元（${feePercent}%）`)
+      }
+      lines.push(`应下发：${shouldDispatch.toFixed(2)} 元`)
+      if (shouldDispatchUSDT > 0) {
+        lines.push(`应下发USDT：${shouldDispatchUSDT.toFixed(1)} U`)
+      }
+      lines.push(`已下发：${totalDispatch.toFixed(2)} 元`)
+      if (totalDispatchUSDT > 0) {
+        lines.push(`已下发USDT：${totalDispatchUSDT.toFixed(1)} U`)
+      }
+      lines.push(`未下发：${(shouldDispatch - totalDispatch).toFixed(2)} 元`)
+      if (shouldDispatchUSDT > 0) {
+        lines.push(`未下发USDT：${(shouldDispatchUSDT - totalDispatchUSDT).toFixed(1)} U`)
+      }
+      
+      await ctx.reply(lines.join('\n'), { 
+        ...(await buildInlineKb(ctx)), 
+        parse_mode: 'Markdown' 
+      })
+    } catch (e) {
+      console.error('查询全部账单失败', e)
+      await ctx.reply('❌ 查询失败，请稍后重试')
+    }
   })
 }
 

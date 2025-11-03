@@ -145,11 +145,29 @@ export async function formatSummary(ctx, chat, options = {}) {
         const rate = i.rate ?? rateVal
         const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
         const amount = Math.abs(i.amount)
+        const who = (i.operator || i.replier || '')
+        const remark = i.remark // 🔥 获取备注
         
-        // 🔥 移除用户名显示，只显示时间和金额信息
         let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
         if (rate) {
           line += ` / ${rate}=${usdt}U`
+        }
+        // 🔥 显示费率（如果有）
+        if (i.feeRate) {
+          line += ` *${(i.feeRate * 100).toFixed(0)}%`
+        }
+        // 🔥 显示备注（如果有）
+        if (remark) {
+          line += ` [${remark}]`
+        }
+        if (who) {
+          const whoWithAt = who.startsWith('@') ? who : `@${who}`
+          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+          if (userId) {
+            line += ` [${who}](tg://user?id=${userId})`
+          } else {
+            line += ` *${who}*`
+          }
         }
         return line
       }).join('\n')

@@ -21,10 +21,254 @@ export function registerStartAccounting(bot, ensureChat) {
 }
 
 /**
- * 入款命令处理器
+ * 🔥 备注入账：李四+10000
+ * 注意：不能匹配@用户名+金额格式（那个由registerIncomeWithTarget处理）
+ */
+export function registerIncomeWithRemark(bot, ensureChat) {
+  bot.hears(/^([^@\s][^@]*?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
+    }
+
+    const chatId = await ensureDbChat(ctx)
+    await checkAndClearIfNewDay(chat, chatId)
+    
+    const text = ctx.message.text.trim()
+    const match = text.match(/^(.+?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
+    if (!match) return
+    
+    const remark = match[1].trim() // 备注（如"李四"）
+    const amountStr = match[2]
+    const isUSDT = /[uU]/.test(text)
+    
+    // 获取当前汇率
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    
+    const amount = Number(amountStr)
+    if (!Number.isFinite(amount) || amount === 0) return
+    
+    let amountRMB, usdt
+    if (isUSDT) {
+      usdt = Math.abs(amount)
+      amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
+      if (amount < 0) amountRMB = -amountRMB
+    } else {
+      amountRMB = amount
+      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
+    }
+    
+    const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    const replierUsername = getUsername(ctx)
+    
+    chat.current.incomes.push({
+      amount: amountRMB,
+      rate: rate || undefined,
+      createdAt: new Date(),
+      replier: replierUsername,
+      operator: operatorUsername || replierUsername,
+    })
+
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      await prisma.billItem.create({ 
+        data: {
+          billId: bill.id,
+          type: 'INCOME',
+          amount: Number(amountRMB),
+          rate: rate ? Number(rate) : null,
+          usdt: usdt ? Number(usdt) : null,
+          remark: remark || null, // 🔥 保存备注
+          replier: replierUsername || null,
+          operator: operatorUsername || replierUsername || null,
+          createdAt: new Date(),
+        } 
+      })
+    } catch (e) {
+      console.error('写入 BillItem(INCOME) 失败', e)
+    }
+
+    try {
+      const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+      await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[备注入账] 发送回复失败', e)
+    }
+  })
+}
+
+/**
+ * 🔥 指定入账：@张三+1000 或回复+1000
+ */
+export function registerIncomeWithTarget(bot, ensureChat) {
+  // 处理 @用户名+金额 格式
+  bot.hears(/^@(\w+)\s*\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。')
+    }
+
+    const chatId = await ensureDbChat(ctx)
+    await checkAndClearIfNewDay(chat, chatId)
+    
+    const text = ctx.message.text.trim()
+    const match = text.match(/^@(\w+)\s*\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
+    if (!match) return
+    
+    const targetUsername = `@${match[1]}` // 目标用户
+    const amountStr = match[2]
+    const isUSDT = /[uU]/.test(text)
+    
+    // 获取当前汇率
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    
+    const amount = Number(amountStr)
+    if (!Number.isFinite(amount) || amount === 0) return
+    
+    let amountRMB, usdt
+    if (isUSDT) {
+      usdt = Math.abs(amount)
+      amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
+    } else {
+      amountRMB = amount
+      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
+    }
+    
+    const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    
+    chat.current.incomes.push({
+      amount: amountRMB,
+      rate: rate || undefined,
+      createdAt: new Date(),
+      replier: targetUsername.replace('@', ''),
+      operator: operatorUsername || targetUsername,
+    })
+
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      await prisma.billItem.create({ 
+        data: {
+          billId: bill.id,
+          type: 'INCOME',
+          amount: Number(amountRMB),
+          rate: rate ? Number(rate) : null,
+          usdt: usdt ? Number(usdt) : null,
+          replier: targetUsername.replace('@', '') || null,
+          operator: operatorUsername || targetUsername || null,
+          createdAt: new Date(),
+        } 
+      })
+    } catch (e) {
+      console.error('写入 BillItem(INCOME) 失败', e)
+    }
+
+    try {
+      const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+      await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[指定入账] 发送回复失败', e)
+    }
+  })
+  
+  // 处理回复消息的 +金额
+  bot.on('text', async (ctx, next) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return next()
+    
+    const text = ctx.message.text?.trim()
+    const replyTo = ctx.message.reply_to_message
+    if (!replyTo || !replyTo.from) return next()
+    
+    // 匹配 +金额 格式（在回复消息时）
+    const match = text.match(/^\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
+    if (!match) return next()
+    
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。')
+    }
+
+    const chatId = await ensureDbChat(ctx)
+    await checkAndClearIfNewDay(chat, chatId)
+    
+    const amountStr = match[1]
+    const isUSDT = /[uU]/.test(text)
+    
+    // 获取目标用户
+    const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : `@user_${replyTo.from.id}`
+    
+    // 获取当前汇率
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    
+    const amount = Number(amountStr)
+    if (!Number.isFinite(amount) || amount === 0) return next()
+    
+    let amountRMB, usdt
+    if (isUSDT) {
+      usdt = Math.abs(amount)
+      amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
+    } else {
+      amountRMB = amount
+      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
+    }
+    
+    const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    
+    chat.current.incomes.push({
+      amount: amountRMB,
+      rate: rate || undefined,
+      createdAt: new Date(),
+      replier: targetUsername.replace('@', ''),
+      operator: operatorUsername || targetUsername,
+    })
+
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      await prisma.billItem.create({ 
+        data: {
+          billId: bill.id,
+          type: 'INCOME',
+          amount: Number(amountRMB),
+          rate: rate ? Number(rate) : null,
+          usdt: usdt ? Number(usdt) : null,
+          replier: targetUsername.replace('@', '') || null,
+          operator: operatorUsername || targetUsername || null,
+          createdAt: new Date(),
+        } 
+      })
+    } catch (e) {
+      console.error('写入 BillItem(INCOME) 失败', e)
+    }
+
+    try {
+      const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+      await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[指定入账(回复)] 发送回复失败', e)
+    }
+  })
+}
+
+/**
+ * 入款命令处理器（增强版：支持汇率、费率、组合格式）
  */
 export function registerIncome(bot, ensureChat) {
-  bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
+  bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
@@ -56,9 +300,12 @@ export function registerIncome(bot, ensureChat) {
       return ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
     }
 
+    // 🔥 使用解析出的汇率，如果没有则使用群组设置
     const rate = parsed.rate ?? chat.fixedRate ?? chat.realtimeRate
+    const feeRate = parsed.feeRate // 单独费率（如0.95表示95%）
     
-    let amountRMB, usdt
+    let amountRMB, usdt, finalAmountRMB
+    
     if (isUSDT) {
       usdt = Math.abs(parsed.amount)
       amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
@@ -68,11 +315,22 @@ export function registerIncome(bot, ensureChat) {
       usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
     }
     
+    // 🔥 如果指定了费率，应用费率（如0.95表示扣除5%手续费）
+    if (feeRate && feeRate > 0 && feeRate <= 1) {
+      finalAmountRMB = Number((amountRMB * feeRate).toFixed(2))
+      // 如果输入的是USDT，也相应调整
+      if (isUSDT && rate) {
+        usdt = Number((Math.abs(finalAmountRMB) / rate).toFixed(1))
+      }
+    } else {
+      finalAmountRMB = amountRMB
+    }
+    
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
     
     chat.current.incomes.push({
-      amount: amountRMB,
+      amount: finalAmountRMB,
       rate: parsed.rate || undefined,
       createdAt: new Date(),
       replier: replierUsername,
@@ -85,8 +343,9 @@ export function registerIncome(bot, ensureChat) {
         data: {
           billId: bill.id,
           type: 'INCOME',
-          amount: Number(amountRMB),
+          amount: Number(finalAmountRMB),
           rate: rate ? Number(rate) : null,
+          feeRate: feeRate ? Number(feeRate) : null, // 🔥 保存费率
           usdt: usdt ? Number(usdt) : null,
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
@@ -98,7 +357,7 @@ export function registerIncome(bot, ensureChat) {
     }
 
     // 超押提醒检查
-    if (amountRMB > 0) {
+    if (finalAmountRMB > 0) {
       try {
         const setting = await prisma.setting.findUnique({
           where: { chatId },
@@ -147,7 +406,170 @@ export function registerIncome(bot, ensureChat) {
 }
 
 /**
- * 下发命令处理器
+ * 🔥 指定下发：@张三下发1000 或回复下发1000u
+ */
+export function registerDispatchWithTarget(bot, ensureChat) {
+  // 处理 @用户名下发金额 格式
+  bot.hears(/^@(\w+)\s*下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。')
+    }
+    
+    const chatId = await ensureDbChat(ctx)
+    await checkAndClearIfNewDay(chat, chatId)
+    
+    const text = ctx.message.text.trim()
+    const match = text.match(/^@(\w+)\s*下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i)
+    if (!match) return
+    
+    const targetUsername = `@${match[1]}`
+    const amountStr = match[2].replace(/\s+/g, '')
+    const isUSDT = /[uU]/.test(text)
+    
+    const inputValue = Number(amountStr)
+    if (!Number.isFinite(inputValue)) return
+    
+    // 🔥 获取当前使用的汇率（从数据库获取最新）
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    
+    let amountRMB, usdtValue
+    if (isUSDT) {
+      usdtValue = inputValue
+      amountRMB = rate ? Number((Math.abs(usdtValue) * rate).toFixed(2)) : 0
+      if (usdtValue < 0) amountRMB = -amountRMB
+    } else {
+      amountRMB = inputValue
+      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
+      if (amountRMB < 0) usdtValue = -usdtValue
+    }
+    
+    const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    
+    chat.current.dispatches.push({
+      amount: amountRMB,
+      usdt: Math.abs(usdtValue),
+      createdAt: new Date(),
+      replier: targetUsername.replace('@', ''),
+      operator: operatorUsername || targetUsername,
+    })
+
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      await prisma.billItem.create({ 
+        data: {
+          billId: bill.id,
+          type: 'DISPATCH',
+          amount: Number(amountRMB),
+          usdt: Number(usdtValue),
+          replier: targetUsername.replace('@', '') || null,
+          operator: operatorUsername || targetUsername || null,
+          createdAt: new Date(),
+        } 
+      })
+    } catch (e) {
+      console.error('写入 BillItem(DISPATCH) 失败', e)
+    }
+
+    try {
+      const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+      await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[指定下发] 发送回复失败', e)
+    }
+  })
+  
+  // 处理回复消息的 下发金额
+  bot.on('text', async (ctx, next) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return next()
+    
+    const text = ctx.message.text?.trim()
+    const replyTo = ctx.message.reply_to_message
+    if (!replyTo || !replyTo.from) return next()
+    
+    // 匹配 下发金额 格式（在回复消息时）
+    const match = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i)
+    if (!match) return next()
+    
+    if (!(await hasOperatorPermission(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。')
+    }
+    
+    const chatId = await ensureDbChat(ctx)
+    await checkAndClearIfNewDay(chat, chatId)
+    
+    const amountStr = match[1].replace(/\s+/g, '')
+    const isUSDT = /[uU]/.test(text)
+    
+    const inputValue = Number(amountStr)
+    if (!Number.isFinite(inputValue)) return next()
+    
+    // 获取目标用户
+    const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : `@user_${replyTo.from.id}`
+    
+    // 🔥 获取当前使用的汇率（从数据库获取最新）
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    
+    let amountRMB, usdtValue
+    if (isUSDT) {
+      usdtValue = inputValue
+      amountRMB = rate ? Number((Math.abs(usdtValue) * rate).toFixed(2)) : 0
+      if (usdtValue < 0) amountRMB = -amountRMB
+    } else {
+      amountRMB = inputValue
+      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
+      if (amountRMB < 0) usdtValue = -usdtValue
+    }
+    
+    const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    
+    chat.current.dispatches.push({
+      amount: amountRMB,
+      usdt: Math.abs(usdtValue),
+      createdAt: new Date(),
+      replier: targetUsername.replace('@', ''),
+      operator: operatorUsername || targetUsername,
+    })
+
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      await prisma.billItem.create({ 
+        data: {
+          billId: bill.id,
+          type: 'DISPATCH',
+          amount: Number(amountRMB),
+          usdt: Number(usdtValue),
+          replier: targetUsername.replace('@', '') || null,
+          operator: operatorUsername || targetUsername || null,
+          createdAt: new Date(),
+        } 
+      })
+    } catch (e) {
+      console.error('写入 BillItem(DISPATCH) 失败', e)
+    }
+
+    try {
+      const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+      await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[指定下发(回复)] 发送回复失败', e)
+    }
+  })
+}
+
+/**
+ * 下发命令处理器（增强版：使用当前汇率）
  */
 export function registerDispatch(bot, ensureChat) {
   bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
@@ -170,9 +592,14 @@ export function registerDispatch(bot, ensureChat) {
     const inputValue = Number(m[1].replace(/\s+/g, ''))
     if (!Number.isFinite(inputValue)) return
     
-    const rate = chat.fixedRate ?? chat.realtimeRate
-    let amountRMB, usdtValue
+    // 🔥 获取当前使用的汇率（从数据库获取最新，确保使用实时汇率）
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
     
+    let amountRMB, usdtValue
     if (isUSDT) {
       usdtValue = inputValue
       amountRMB = rate ? Number((Math.abs(usdtValue) * rate).toFixed(2)) : 0
@@ -220,4 +647,3 @@ export function registerDispatch(bot, ensureChat) {
     }
   })
 }
-

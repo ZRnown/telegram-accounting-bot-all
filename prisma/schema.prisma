@@ -74,6 +74,7 @@ model Setting {
   hideOrderButton            Boolean        @default(false) // 隐藏查看完整订单按钮
   overDepositLimit           Float          @default(0) // 超押提醒额度，0表示关闭提醒
   lastOverDepositWarning     DateTime? // 上次超押提醒时间
+  deleteBillConfirm          Boolean        @default(false) // 🔥 删除账单确认功能（发送删除账单后会有二次确认）
   chat                       Chat           @relation(fields: [chatId], references: [id])
 }
 
@@ -104,6 +105,8 @@ model BillItem {
   amount    Float
   usdt      Float?
   rate      Float?
+  feeRate   Float?   // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
+  remark    String?  // 🔥 新增：备注（用于备注入账）
   replier   String?
   operator  String?
   createdAt DateTime @default(now())

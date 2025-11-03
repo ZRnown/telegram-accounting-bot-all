@@ -21,6 +21,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         dailyCutoffHour: setting?.dailyCutoffHour ?? 0,
         hideHelpButton: setting?.hideHelpButton ?? false,
         hideOrderButton: setting?.hideOrderButton ?? false,
+        deleteBillConfirm: setting?.deleteBillConfirm ?? false, // 🔥 删除账单确认功能
       },
     })
   } catch (e) {
@@ -44,6 +45,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       dailyCutoffHour?: number
       hideHelpButton?: boolean
       hideOrderButton?: boolean
+      deleteBillConfirm?: boolean // 🔥 删除账单确认功能
     }
 
     // Update Chat.title if provided
@@ -73,6 +75,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.dailyCutoffHour === 'number' && body.dailyCutoffHour >= 0 && body.dailyCutoffHour <= 23) patchData.dailyCutoffHour = body.dailyCutoffHour
     if (typeof body.hideHelpButton === 'boolean') patchData.hideHelpButton = body.hideHelpButton
     if (typeof body.hideOrderButton === 'boolean') patchData.hideOrderButton = body.hideOrderButton
+    if (typeof body.deleteBillConfirm === 'boolean') patchData.deleteBillConfirm = body.deleteBillConfirm // 🔥 删除账单确认功能
 
     // 🔥 优化：只要有传入任何设置字段就允许保存（即使值为默认值）
     // 如果patchData为空但传入了设置字段，仍然允许保存（可能是保存默认值）
@@ -83,6 +86,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       'dailyCutoffHour',
       'hideHelpButton',
       'hideOrderButton',
+      'deleteBillConfirm',
       'feePercent',
       'fixedRate',
       'realtimeRate',

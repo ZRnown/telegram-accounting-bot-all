@@ -2572,10 +2572,10 @@ bot.hears(/^设置额度\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
   // 权限检查：管理员或白名单用户
   if (!(await hasOperatorPermission(ctx))) {
     const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId }
-    })
-    
+  const whitelistedUser = await prisma.whitelistedUser.findUnique({
+    where: { userId }
+  })
+  
     if (!whitelistedUser) {
       return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
@@ -2595,8 +2595,8 @@ bot.hears(/^设置额度\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
       await ctx.reply('✅ 已关闭超押提醒', { ...(await buildInlineKb(ctx)) })
     } else {
       await ctx.reply(`✅ 已设置超押提醒额度为 ${formatMoney(limit)} 元`, { ...(await buildInlineKb(ctx)) })
-    }
-  } catch (e) {
+        }
+      } catch (e) {
     console.error('[设置额度]', e)
     await ctx.reply('❌ 设置失败，请稍后重试')
   }
@@ -2664,42 +2664,43 @@ async function updateAllRealtimeRates() {
     // 🔥 优化：提前获取 botId，避免在循环中重复查询
     const botId = await ensureCurrentBotId()
     
-    // 获取所有启用实时汇率的设置
-    const settings = await prisma.setting.findMany({
-      where: { realtimeRate: { not: null } },
-      select: { chatId: true }
-    })
-    
-    if (settings.length === 0) {
-      return // 🔥 移除不必要的日志输出
-    }
-    
     // 获取最新实时汇率
     const rate = await fetchRealtimeRateUSDTtoCNY()
     if (!rate) {
-      return // 🔥 移除不必要的日志输出
+      return
     }
     
-    // 🔥 批量更新所有群组的汇率（使用 updateMany 优化）
-    const chatIds = settings.map(s => s.chatId)
-    await prisma.setting.updateMany({
-      where: { 
-        chatId: { in: chatIds },
-        realtimeRate: { not: null }
-      },
-      data: { realtimeRate: rate }
+    // 🔥 获取所有群组（包括没有设置实时汇率的）
+    const allSettings = await prisma.setting.findMany({
+      select: { chatId: true, fixedRate: true, realtimeRate: true }
     })
     
-    // 🔥 批量更新内存中的汇率
-    for (const setting of settings) {
-      const chat = getChat(botId, setting.chatId)
-      if (chat) {
-        chat.realtimeRate = rate
+    // 🔥 更新所有使用实时汇率的群组（fixedRate为null的）
+    const chatIdsToUpdate = allSettings
+      .filter(s => !s.fixedRate) // 只有没有固定汇率的才更新
+      .map(s => s.chatId)
+    
+    if (chatIdsToUpdate.length > 0) {
+      await prisma.setting.updateMany({
+        where: { 
+          chatId: { in: chatIdsToUpdate }
+        },
+        data: { realtimeRate: rate }
+      })
+      
+      // 🔥 批量更新内存中的汇率
+      for (const setting of allSettings) {
+        if (!setting.fixedRate) {
+          const chat = getChat(botId, setting.chatId)
+          if (chat) {
+            chat.realtimeRate = rate
+          }
+        }
       }
     }
     
     if (process.env.DEBUG_BOT === 'true') {
-      console.log(`[定时任务] 汇率更新完成，新汇率: ${rate}，更新了 ${settings.length} 个群组`)
+      console.log(`[定时任务] 汇率更新完成，新汇率: ${rate}，更新了 ${chatIdsToUpdate.length} 个群组`)
     }
   } catch (e) {
     console.error('[定时任务] 更新汇率失败:', e)

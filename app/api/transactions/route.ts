@@ -80,6 +80,8 @@ export async function GET(req: NextRequest) {
           amount: Number(item.amount),
           usdt: item.usdt ? Number(item.usdt) : null,
           rate: item.rate ? Number(item.rate) : null,
+          feeRate: item.feeRate ? Number(item.feeRate) : null, // 🔥 添加费率
+          remark: item.remark || null, // 🔥 添加备注
           replier: item.replier || null,
           operator: item.operator || null,
           createdAt: item.createdAt,
@@ -91,6 +93,8 @@ export async function GET(req: NextRequest) {
           amount: Number(item.amount),
           usdt: item.usdt ? Number(item.usdt) : null,
           rate: item.rate ? Number(item.rate) : null,
+          feeRate: item.feeRate ? Number(item.feeRate) : null, // 🔥 添加费率
+          remark: item.remark || null, // 🔥 添加备注
           replier: item.replier || null,
           operator: item.operator || null,
           createdAt: item.createdAt,

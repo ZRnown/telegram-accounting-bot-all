@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 
 /**
  * 日切时间函数 - 支持自定义小时
+ * 用于实时查询：根据当前时间判断今天的开始时间
  */
 function startOfDay(d: Date, cutoffHour: number = 0) {
   const x = new Date(d)
@@ -27,6 +28,32 @@ function endOfDay(d: Date, cutoffHour: number = 0) {
   }
   
   return x
+}
+
+/**
+ * 从日期字符串计算日期范围的起始时间
+ * 用于查询指定日期的数据范围，不会因为时间判断而退到前一天
+ * @param dateStr - 日期字符串，格式 YYYY-MM-DD
+ * @param cutoffHour - 日切小时（0-23）
+ */
+function startOfDateRange(dateStr: string, cutoffHour: number = 0) {
+  // 从日期字符串创建日期，然后设置日切时间
+  const d = new Date(dateStr + 'T00:00:00') // 使用 T 分隔符确保本地时间
+  d.setHours(cutoffHour, 0, 0, 0)
+  return d
+}
+
+/**
+ * 从日期字符串计算日期范围的结束时间
+ * @param dateStr - 日期字符串，格式 YYYY-MM-DD
+ * @param cutoffHour - 日切小时（0-23）
+ */
+function endOfDateRange(dateStr: string, cutoffHour: number = 0) {
+  // 从日期字符串创建日期，设置为该日期的第二天日切时间
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + 1)
+  d.setHours(cutoffHour, 0, 0, 0)
+  return d
 }
 
 function addDays(d: Date, n: number) {
@@ -99,8 +126,18 @@ export async function GET(req: NextRequest) {
 
     // 🔥 使用日切时间计算日期范围
     const cutoffHour = settings?.dailyCutoffHour ?? 0
-    const gte = startOfDay(now, cutoffHour)
-    const lt = endOfDay(now, cutoffHour)
+    // 如果是从日期字符串查询，使用专门的函数；否则使用实时查询函数
+    let gte: Date
+    let lt: Date
+    if (dateStr) {
+      // 从日期字符串查询：直接使用该日期的日切时间范围
+      gte = startOfDateRange(dateStr, cutoffHour)
+      lt = endOfDateRange(dateStr, cutoffHour)
+    } else {
+      // 实时查询：根据当前时间判断今天的范围
+      gte = startOfDay(now, cutoffHour)
+      lt = endOfDay(now, cutoffHour)
+    }
 
     // 🔥 重新查询账单（使用正确的日切时间）
     const billsData = await prisma.bill.findMany({
@@ -234,8 +271,19 @@ export async function GET(req: NextRequest) {
     let carryOver = 0
     if (settings?.accountingMode === 'CARRY_OVER') {
       try {
-        const yGte = startOfDay(addDays(gte, -1))
-        const yLt = startOfDay(gte)
+        // 计算昨天的日期范围
+        let yGte: Date
+        if (dateStr) {
+          // 从日期字符串查询：计算昨天
+          const todayStart = startOfDateRange(dateStr, cutoffHour)
+          yGte = new Date(todayStart)
+          yGte.setDate(yGte.getDate() - 1) // 退到昨天
+        } else {
+          // 实时查询：昨天就是今天的前一天
+          yGte = new Date(gte)
+          yGte.setDate(yGte.getDate() - 1)
+        }
+        const yLt = new Date(gte) // 今天的开始就是昨天的结束
         // 🔥 内存优化：只选择必要的字段
         const yBills = await prisma.bill.findMany({
           where: { chatId, openedAt: { gte: yGte, lt: yLt } },
