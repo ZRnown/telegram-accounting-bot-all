@@ -37,6 +37,32 @@ export async function fetchRealtimeRateUSDTtoCNY() {
 }
 
 /**
+ * 🔥 优化：获取群组的有效汇率（优先使用内存，避免重复查询）
+ * @param {string} chatId - 群组ID
+ * @param {object} chat - 内存中的聊天对象（可选）
+ * @returns {Promise<number|null>} 有效汇率，如果没有返回null
+ */
+export async function getEffectiveRate(chatId, chat = null) {
+  // 🔥 优先使用内存中的汇率（避免不必要的数据库查询）
+  if (chat) {
+    if (chat.fixedRate != null) return chat.fixedRate
+    if (chat.realtimeRate != null) return chat.realtimeRate
+  }
+  
+  // 🔥 如果内存中没有，从数据库获取（只查询汇率字段）
+  try {
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { fixedRate: true, realtimeRate: true }
+    })
+    return settings?.fixedRate ?? settings?.realtimeRate ?? null
+  } catch (e) {
+    console.error('[getEffectiveRate] 查询失败', e)
+    return null
+  }
+}
+
+/**
  * 构建内联键盘
  */
 export async function buildInlineKb(ctx, options = {}) {
@@ -148,6 +174,30 @@ export async function hasOperatorPermission(ctx, chat) {
 }
 
 /**
+ * 🔥 优化：检查权限（包括白名单用户检查）
+ * @param {object} ctx - Telegraf 上下文
+ * @param {object} chat - 内存中的聊天对象
+ * @returns {Promise<boolean>} 是否有权限
+ */
+export async function hasPermissionWithWhitelist(ctx, chat) {
+  if (await hasOperatorPermission(ctx, chat)) return true
+  
+  // 检查白名单
+  const userId = String(ctx.from?.id || '')
+  if (userId) {
+    try {
+      const whitelistedUser = await prisma.whitelistedUser.findUnique({
+        where: { userId }
+      })
+      return !!whitelistedUser
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+/**
  * 获取用户名（简化版本）
  */
 export function getUsername(ctx) {
@@ -157,4 +207,3 @@ export function getUsername(ctx) {
   const lastName = ctx.from?.last_name || ''
   return [firstName, lastName].filter(Boolean).join(' ') || '未知用户'
 }
-

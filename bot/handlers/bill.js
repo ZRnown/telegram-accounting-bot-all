@@ -357,14 +357,18 @@ export function registerAllBill(bot, ensureChat) {
         }
       }
       
-      // 获取设置
-      const settings = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { feePercent: true, fixedRate: true, realtimeRate: true }
-      })
+      // 🔥 优化：合并查询，减少数据库访问
+      const { getEffectiveRate } = await import('../helpers.js')
+      const [settings, effectiveRate] = await Promise.all([
+        prisma.setting.findUnique({
+          where: { chatId },
+          select: { feePercent: true }
+        }),
+        getEffectiveRate(chatId, chat).then(r => r ?? 0)
+      ])
       
       const feePercent = settings?.feePercent ?? 0
-      const rate = settings?.fixedRate ?? settings?.realtimeRate ?? 0
+      const rate = effectiveRate
       const fee = (totalIncome * feePercent) / 100
       const shouldDispatch = totalIncome - fee
       const shouldDispatchUSDT = rate ? Number((shouldDispatch / rate).toFixed(1)) : 0

@@ -1,7 +1,7 @@
 // 设置相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { ensureDbChat, updateSettings } from '../database.js'
-import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, isAdmin } from '../helpers.js'
+import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, isAdmin, hasPermissionWithWhitelist, getEffectiveRate } from '../helpers.js'
 import { formatMoney } from '../utils.js'
 
 /**
@@ -12,12 +12,9 @@ export function registerSetFee(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-      }
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -41,12 +38,9 @@ export function registerSetRate(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-      }
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -74,12 +68,9 @@ export function registerSetRealtimeRate(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-      }
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -124,9 +115,10 @@ export function registerShowRate(bot, ensureChat) {
     if (!chat) return
     
     const chatId = await ensureDbChat(ctx, chat)
-    const settings = await prisma.setting.findUnique({ where: { chatId } })
-    const fixedRate = settings?.fixedRate ?? chat.fixedRate ?? null
-    const realtimeRate = settings?.realtimeRate ?? chat.realtimeRate ?? null
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
+    const fixedRate = chat.fixedRate ?? (rate && chat.realtimeRate === null ? rate : null)
+    const realtimeRate = chat.realtimeRate ?? (rate && chat.fixedRate === null ? rate : null)
     
     if (fixedRate) {
       await ctx.reply(`当前汇率：${fixedRate}（固定汇率）`, { ...(await buildInlineKb(ctx)) })
@@ -148,12 +140,9 @@ export function registerOverDepositLimit(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-      }
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
     
     const limit = parseFloat(ctx.match[1])

@@ -17,9 +17,9 @@ import {
   formatDuration
 } from './utils.js'
 // 新模块导入
-import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff } from './database.js'
+import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff, deleteLastIncome, deleteLastDispatch } from './database.js'
 import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
-import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, hasOperatorPermission, getUsername, isAdmin } from './helpers.js'
+import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, hasOperatorPermission, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
 
@@ -993,739 +993,19 @@ bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
   })
 })
 
-// +金额 或 +金额/汇率 或 +金额u（USDT）；-金额 表示撤销/负向入款
-// 支持数学表达式：+100-50, +100*2, +80/21+30
-bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
-  console.log('[记账命令] 开始处理', { text: ctx.message.text, chatId: ctx.chat?.id })
-  
-  const chat = ensureChat(ctx)
-  if (!chat) {
-    console.log('[记账命令] ensureChat失败')
-    return
-  }
-  
-  // 权限检查：默认只有管理员可以记账，其他人需要添加到操作人列表
-  const hasPermission = await hasOperatorPermission(ctx)
-  console.log('[记账命令] 操作权限检查', { hasPermission, chatId: ctx.chat?.id })
-  if (!hasPermission) {
-    return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。\n请联系管理员使用"设置操作人 @你的用户名"添加权限。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  
-  // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
-  await checkAndClearIfNewDay(chat, chatId)
-  
-  const text = ctx.message.text.trim()
-  console.log('[记账命令] 开始解析', { text, chatId })
-  
-  // 🔥 保存用户ID映射（用于显示时链接到用户主页）
-  if (ctx.from?.id && ctx.from?.username) {
-    const uname = `@${ctx.from.username}`
-    chat.userIdByUsername.set(uname, ctx.from.id)
-    chat.userIdByUsername.set(ctx.from.username, ctx.from.id) // 同时保存不带@的版本
-  }
-  
-  // 解析金额格式：+100 (人民币) 或 +100u (USDT) 或 +100/7.2
-  // 支持表达式：+100-50, +100*2, +80/21
-  const isUSDT = /[uU]/.test(text)
-  const cleanText = text.replace(/[uU]/g, '').replace(/\s+/g, '')
-  const parsed = parseAmountAndRate(cleanText)
-  if (!parsed) {
-    return ctx.reply('❌ 无效的金额格式。\n支持格式：\n• +100（简单数字）\n• +100-50（加减）\n• +100*2（乘法）\n• +80/21（除法）\n• +100-50u（USDT）\n• +100*2/7.2（带汇率）')
-  }
+// 🔥 所有记账、下发、账单、设置相关命令已移至 handlers 模块，通过 registerAllHandlers 统一注册
+// 这里只保留一些特殊的或全局的处理器
 
-  // If amount is zero, treat as a request to show the summary rather than recording
-  if (!Number(parsed.amount)) {
-    const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-    return ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
-  }
-
-  const rate = parsed.rate ?? chat.fixedRate ?? chat.realtimeRate
-  
-  // 根据输入格式计算金额和USDT
-  let amountRMB, usdt
-  if (isUSDT) {
-    // 输入的是USDT，需要转换成人民币
-    usdt = Math.abs(parsed.amount)
-    amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
-    // 保持符号
-    if (parsed.amount < 0) {
-      amountRMB = -amountRMB
-    }
-  } else {
-    // 输入的是人民币
-    amountRMB = parsed.amount
-    usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
-  }
-  
-  // 🔥 获取操作人用户名（带@），用于保存到数据库
-  const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
-  const replierUsername = getUsername(ctx) // 不带@，用于显示
-  
-  chat.current.incomes.push({
-    amount: amountRMB,
-    rate: parsed.rate || undefined,
-    createdAt: new Date(),
-    replier: replierUsername,
-    operator: operatorUsername || replierUsername, // 🔥 优先使用带@的用户名
-  })
-  
-  // 将入款写入当天 OPEN 账单的 BillItem
-  try {
-    const { bill } = await getOrCreateTodayBill(chatId)
-    const billItem = await prisma.billItem.create({ data: {
-      billId: bill.id,
-      type: 'INCOME',
-      amount: Number(amountRMB), // 🔥 Float 类型，使用 Number
-      rate: rate ? Number(rate) : null,
-      usdt: usdt ? Number(usdt) : null,
-      replier: replierUsername || null,
-      operator: operatorUsername || replierUsername || null, // 🔥 优先保存带@的用户名，用于操作人分类统计
-      createdAt: new Date(),
-    } })
-    
-    console.log('[记账][入款已保存]', { 
-      chatId, 
-      billId: bill.id, 
-      billItemId: billItem.id,
-      amount: amountRMB, 
-      usdt,
-      operator: operatorUsername || replierUsername,
-      openedAt: bill.openedAt
-    })
-  } catch (e) {
-    console.error('写入 BillItem(INCOME) 失败', e)
-    console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
-    // 🔥 即使保存失败，也继续执行（避免影响用户体验）
-  }
-  
-  // 🔥 超押提醒检查（仅在入款时检查，且金额为正数）
-  if (amountRMB > 0) {
-    try {
-      const setting = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { overDepositLimit: true, lastOverDepositWarning: true }
-      })
-      
-      if (setting?.overDepositLimit && setting.overDepositLimit > 0) {
-        // 计算当前总入款（包括本次）
-        const { bill } = await getOrCreateTodayBill(chatId)
-        const totalIncome = await prisma.billItem.aggregate({
-          where: {
-            billId: bill.id,
-            type: 'INCOME'
-          },
-          _sum: {
-            amount: true
-          }
-        })
-        
-        const currentTotal = (totalIncome._sum.amount || 0)
-        const limit = setting.overDepositLimit
-        
-        // 检查是否需要提醒（超过或即将超过额度）
-        const shouldWarn = currentTotal >= limit || (currentTotal >= limit * 0.9 && currentTotal < limit)
-        
-        // 避免频繁提醒：如果已经提醒过，且距离上次提醒不超过1小时，则不重复提醒
-        const lastWarning = setting.lastOverDepositWarning
-        const shouldSendWarning = shouldWarn && (!lastWarning || Date.now() - lastWarning.getTime() > 60 * 60 * 1000)
-        
-        if (shouldSendWarning) {
-          let warningText = ''
-          if (currentTotal >= limit) {
-            warningText = `⚠️ *超押提醒*\n\n` +
-              `当前入款总额：${formatMoney(currentTotal)} 元\n` +
-              `设置额度：${formatMoney(limit)} 元\n` +
-              `已超过额度：${formatMoney(currentTotal - limit)} 元`
-          } else {
-            warningText = `⚠️ *超押提醒*\n\n` +
-              `当前入款总额：${formatMoney(currentTotal)} 元\n` +
-              `设置额度：${formatMoney(limit)} 元\n` +
-              `即将超过额度，还差：${formatMoney(limit - currentTotal)} 元`
-          }
-          
-          await ctx.reply(warningText, { parse_mode: 'Markdown' })
-          
-          // 更新最后提醒时间
-          await prisma.setting.update({
-            where: { chatId },
-            data: { lastOverDepositWarning: new Date() }
-          })
-        }
-      }
-    } catch (e) {
-      console.error('[超押提醒]', e)
-      // 不影响正常流程
-    }
-  }
-  
-  // 发送完整账单（不发送确认消息）
-  try {
-    console.log('[记账命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
-  const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-    console.log('[记账命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
-    
-    const inlineKb = await buildInlineKb(ctx)
-    console.log('[记账命令] 内联键盘生成完成', { chatId: ctx.chat?.id })
-    
-    await ctx.reply(summary, { ...inlineKb, parse_mode: 'Markdown' })
-    console.log('[记账命令] 回复消息已发送', { chatId: ctx.chat?.id })
-  } catch (e) {
-    console.error('[记账命令] 发送回复失败', { error: e.message, stack: e.stack, chatId: ctx.chat?.id })
-    // 即使发送失败，也尝试发送一个简单回复
-    try {
-      await ctx.reply('✅ 记账已保存（账单显示失败，请稍后查看）')
-    } catch (e2) {
-      console.error('[记账命令] 发送备用回复也失败', { error: e2.message })
-    }
-  }
-})
-
-// 下发xxxx 或 下发10u（USDT）或 下发-xxxx （支持负数）
-bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  
-  // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
-  await checkAndClearIfNewDay(chat, chatId)
-  const text = ctx.message.text.trim()
-  
-  // 检查是否带u后缀（表示USDT）
-  const isUSDT = /[uU]/.test(text)
-  const m = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)/i)
-  if (!m) return
-  
-  const inputValue = Number(m[1].replace(/\s+/g, ''))
-  if (!Number.isFinite(inputValue)) return
-  
-  const rate = chat.fixedRate ?? chat.realtimeRate
-  let amountRMB, usdtValue
-  
-  if (isUSDT) {
-    // 输入的是USDT（下发500u），直接保存为USDT，人民币根据汇率计算
-    usdtValue = inputValue
-    amountRMB = rate ? Number((Math.abs(usdtValue) * rate).toFixed(2)) : 0
-    // 保持符号
-    if (usdtValue < 0) {
-      amountRMB = -amountRMB
-    }
-  } else {
-    // 输入的是人民币（下发500），直接保存为人民币，USDT根据汇率计算
-    amountRMB = inputValue
-    usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
-    // 保持符号
-    if (amountRMB < 0) {
-      usdtValue = -usdtValue
-    }
-  }
-  
-  // 🔥 获取操作人用户名（带@），用于保存到数据库
-  const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
-  const replierUsername = getUsername(ctx) // 不带@，用于显示
-  
-  chat.current.dispatches.push({ 
-    amount: amountRMB, 
-    usdt: usdtValue, 
-    createdAt: new Date(), 
-    replier: replierUsername,
-    operator: operatorUsername || replierUsername, // 🔥 优先使用带@的用户名
-  })
-  
-  // 将下发写入当天 OPEN 账单的 BillItem
-  try {
-    const { bill } = await getOrCreateTodayBill(chatId)
-    const billItem = await prisma.billItem.create({ data: {
-      billId: bill.id,
-      type: 'DISPATCH',
-      amount: Number(amountRMB), // 🔥 Float 类型，使用 Number
-      rate: rate ? Number(rate) : null,
-      usdt: Number(usdtValue), // 🔥 Float 类型，使用 Number
-      replier: replierUsername || null,
-      operator: operatorUsername || replierUsername || null, // 🔥 优先保存带@的用户名，用于操作人分类统计
-      createdAt: new Date(),
-    } })
-    
-    console.log('[记账][下发已保存]', { 
-      chatId, 
-      billId: bill.id, 
-      billItemId: billItem.id,
-      amount: amountRMB, 
-      usdt: usdtValue,
-      operator: operatorUsername || replierUsername,
-      openedAt: bill.openedAt
-    })
-  } catch (e) {
-    console.error('写入 BillItem(DISPATCH) 失败', e)
-    console.error('[错误详情]', { chatId, error: e.message, stack: e.stack })
-    // 🔥 即使保存失败，也继续执行（避免影响用户体验）
-  }
-  try {
-    console.log('[下发命令] 开始生成账单摘要', { chatId: ctx.chat?.id })
-  const summary = await formatSummary(ctx, chat, { title: '下发已记录' })
-    console.log('[下发命令] 账单摘要生成完成', { summaryLength: summary?.length, chatId: ctx.chat?.id })
-    
-    const inlineKb = await buildInlineKb(ctx)
-    console.log('[下发命令] 内联键盘生成完成', { chatId: ctx.chat?.id })
-    
-    await ctx.reply(summary, { ...inlineKb, parse_mode: 'Markdown' })
-    console.log('[下发命令] 回复消息已发送', { chatId: ctx.chat?.id })
-  } catch (e) {
-    console.error('[下发命令] 发送回复失败', { error: e.message, stack: e.stack, chatId: ctx.chat?.id })
-    // 即使发送失败，也尝试发送一个简单回复
-    try {
-      await ctx.reply('✅ 下发已记录（账单显示失败，请稍后查看）')
-    } catch (e2) {
-      console.error('[下发命令] 发送备用回复也失败', { error: e2.message })
-    }
-  }
-})
-
-// 保存账单：把 current 推入 history，并清空 current
-bot.hears(/^保存账单$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    return ctx.reply('⚠️ 您没有权限保存账单。只有管理员或已添加的操作人可以操作。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  // 关闭当天 OPEN 账单
-  try {
-    const { bill } = await getOrCreateTodayBill(chatId)
-    if (bill && bill.status === 'OPEN') {
-      await prisma.bill.update({ where: { id: bill.id }, data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() } })
-    }
-  } catch (e) {
-    console.error('关闭 OPEN 账单失败', e)
-  }
-  // 本地内存历史（保留原行为用于消息展示）
-  chat.history.push({ savedAt: new Date(), data: JSON.parse(JSON.stringify(chat.current)) })
-  // 清空当前账单
-  chat.current = { incomes: [], dispatches: [] }
-  await ctx.reply('当前账单已保存并清空。')
-})
-
-// 删除账单：清空当前记录
-bot.hears(/^删除账单$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    return ctx.reply('⚠️ 您没有权限删除账单。只有管理员或已添加的操作人可以操作。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  
-  // 获取当前记账模式（在 try 块外部，用于回复消息）
-  let isCarryOver = false
-  try {
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { accountingMode: true }
-    })
-    isCarryOver = settings?.accountingMode === 'CARRY_OVER'
-  } catch (e) {
-    console.error('获取记账模式失败', e)
-  }
-  
-  // 🔥 不仅清空内存，还要删除数据库中当天的记录
-  try {
-    const { bill, gte } = await getOrCreateTodayBill(chatId)
-    
-    if (bill) {
-      // 删除该账单的所有明细
-      await prisma.billItem.deleteMany({ where: { billId: bill.id } })
-      // 删除账单本身
-      await prisma.bill.delete({ where: { id: bill.id } })
-    }
-    
-    // 🔥 累计模式下，删除所有历史账单（累计是单次账单的累计）
-    if (isCarryOver) {
-      // 删除今天之前的所有账单（包括CLOSED状态）
-      const historicalBills = await prisma.bill.findMany({
-        where: { 
-          chatId, 
-          openedAt: { lt: gte }  // 今天之前的所有账单
-        },
-        select: { id: true }
-      })
-      
-      if (historicalBills.length > 0) {
-        const billIds = historicalBills.map(b => b.id)
-        // 删除所有历史账单的明细
-        await prisma.billItem.deleteMany({ where: { billId: { in: billIds } } })
-        // 删除所有历史账单
-        await prisma.bill.deleteMany({ where: { id: { in: billIds } } })
-        if (process.env.DEBUG_BOT === 'true') {
-          console.log('[删除账单][累计模式] 已删除历史账单', { chatId, count: historicalBills.length })
-        }
-      }
-    }
-  } catch (e) {
-    console.error('删除数据库账单失败', e)
-  }
-  
-  chat.current = { incomes: [], dispatches: [] }
-  await ctx.reply('当前账单已清空（包括内存和数据库）。' + (isCarryOver ? '\n累计模式：历史未下发数据已清零。' : ''))
-})
-
-// 🔥 删除全部账单：清除全部账单（请谨慎使用）
-bot.hears(/^(删除全部账单|清除全部账单)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    return ctx.reply('⚠️ 您没有权限删除全部账单。只有管理员或已添加的操作人可以操作。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  
-  try {
-    // 🔥 删除该群组的所有账单和明细
-    const allBills = await prisma.bill.findMany({
-      where: { chatId },
-      select: { id: true }
-    })
-    
-    if (allBills.length === 0) {
-      return ctx.reply('❌ 没有找到任何账单记录')
-    }
-    
-    const billIds = allBills.map(b => b.id)
-    
-    // 删除所有账单的明细
-    await prisma.billItem.deleteMany({ where: { billId: { in: billIds } } })
-    
-    // 删除所有账单
-    await prisma.bill.deleteMany({ where: { id: { in: billIds } } })
-    
-    // 清空内存
-    chat.current = { incomes: [], dispatches: [] }
-    chat.history = []
-    
-    await ctx.reply(`⚠️ 已删除全部账单（共 ${allBills.length} 条账单记录）\n\n请谨慎使用此功能！`)
-  } catch (e) {
-    console.error('删除全部账单失败', e)
-    await ctx.reply('❌ 删除全部账单失败，请稍后重试')
-  }
-})
-
-// 显示账单 或 +0
-bot.hears(/^(显示账单|\+0)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const summary = await formatSummary(ctx, chat, { title: '当前账单' })
-  await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
-})
-
-// 显示历史账单（简要）
-bot.hears(/^显示历史账单$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  if (chat.history.length === 0) return ctx.reply('暂无历史账单')
-  const lines = chat.history.slice(-5).map((h, i) => {
-    const incomes = h.data.incomes.length
-    const dispatches = h.data.dispatches.length
-    return `#${chat.history.length - (chat.history.length - i - 1)} 保存时间: ${new Date(h.savedAt).toLocaleString()} 入款:${incomes} 下发:${dispatches}`
-  })
-  await ctx.reply(['最近历史账单（最多5条）：', ...lines].join('\n'))
-})
-
-// 🔥 我的账单：查看当前用户在群内的所有记账记录
-bot.hears(/^(我的账单|\/我)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  const chatId = await ensureDbChat(ctx)
-  const userId = String(ctx.from?.id || '')
-  const username = ctx.from?.username ? `@${ctx.from.username}` : null
-  
-  // 🔥 查询当前用户在群内的所有记录
-  try {
-    const { bill } = await getOrCreateTodayBill(chatId)
-    
-    if (!bill) {
-      return ctx.reply('❌ 您在本群暂无记账记录')
-    }
-    
-    // 查询该用户在账单中的记录
-    const items = await prisma.billItem.findMany({
-      where: {
-        billId: bill.id,
-        OR: [
-          username ? { operator: username } : undefined,
-          username ? { replier: username.replace('@', '') } : undefined,
-          { operator: { contains: userId } },
-          { replier: { contains: userId } }
-        ].filter(Boolean)
-      },
-      orderBy: { createdAt: 'desc' }
-    })
-    
-    if (items.length === 0) {
-      return ctx.reply('❌ 您在本群暂无记账记录')
-    }
-    
-    // 🔥 格式化显示
-    const lines = []
-    lines.push(`📋 您的账单记录（共 ${items.length} 条）：\n`)
-    
-    let totalIncome = 0
-    let totalDispatch = 0
-    let totalUSDT = 0
-    
-    items.forEach(item => {
-      const amount = Number(item.amount || 0)
-      const usdt = Number(item.usdt || 0)
-      const isIncome = item.type === 'INCOME'
-      
-      if (isIncome) {
-        totalIncome += amount
-        if (item.rate) {
-          lines.push(`💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`)
-        } else {
-          lines.push(`💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`)
-        }
-      } else {
-        totalDispatch += amount
-        totalUSDT += usdt
-        lines.push(`📤 下发 ${usdt.toFixed(1)}U (${amount})`)
-      }
-    })
-    
-    lines.push(`\n📊 汇总：`)
-    lines.push(`入款：${totalIncome.toFixed(2)}`)
-    if (totalDispatch > 0 || totalUSDT > 0) {
-      lines.push(`下发：${totalDispatch.toFixed(2)} (${totalUSDT.toFixed(1)}U)`)
-    }
-    
-    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
-  } catch (e) {
-    console.error('查询我的账单失败', e)
-    await ctx.reply('❌ 查询账单失败，请稍后重试')
-  }
-})
-
-
-// 删除群组：按钮点击 -> 二次确认 -> 执行删除/取消
-
-// 设置费率xx
-// 设置费率：支持百分比（如 5）或小数（-1 到 1 之间，如 0.05 表示 5%）
-bot.hears(/^设置费率\s*(-?\d+(?:\.\d+)?)%?$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const chatId = await ensureDbChat(ctx)
-  const m = ctx.message.text.match(/(-?\d+(?:\.\d+)?)/)
-  if (!m) return
-  let v = Number(m[1])
-  if (Math.abs(v) <= 1) {
-    // interpret as fraction
-    v = v * 100
-  }
-  chat.feePercent = Math.max(-100, Math.min(100, v))
-  await updateSettings(chatId, { feePercent: chat.feePercent })
-  await ctx.reply(`费率已设置为 ${chat.feePercent}%`)
-})
-
-// 设置汇率（可带数值，也可不带数值查看当前，支持不加空格：设置汇率7.2）
-bot.hears(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const chatId = await ensureDbChat(ctx)
-  const m = ctx.message.text.match(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i)
-  const val = m && m[1] ? Number(m[1]) : null
-  if (val == null) {
-    const settings = await prisma.setting.findUnique({ where: { chatId } })
-    const current = settings?.fixedRate ?? settings?.realtimeRate ?? null
-    return ctx.reply(`当前汇率：${current ?? '未设置'}\n用法：设置汇率7.2 或 设置汇率 7.2`)
-  }
-  chat.fixedRate = val
-  chat.realtimeRate = null
-  await updateSettings(chatId, { fixedRate: val, realtimeRate: null })
-  await ctx.reply(`已设置固定汇率为 ${val}，并关闭实时汇率。`)
-})
-
-bot.hears(/^设置实时汇率$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const chatId = await ensureDbChat(ctx)
-  const rate = await fetchRealtimeRateUSDTtoCNY()
-  if (rate) {
-    chat.realtimeRate = rate
-    chat.fixedRate = null
-    await updateSettings(chatId, { realtimeRate: rate, fixedRate: null })
-    await ctx.reply(`已启用实时汇率，当前实时汇率为 ${rate.toFixed(2)}`)
-  } else {
-    await ctx.reply('获取实时汇率失败，请稍后重试。')
-  }
-})
-
-// 刷新实时汇率
-bot.hears(/^刷新实时汇率$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const chatId = await ensureDbChat(ctx)
-  const rate = await fetchRealtimeRateUSDTtoCNY()
-  if (rate) {
-    chat.realtimeRate = rate
-    chat.fixedRate = null
-    await updateSettings(chatId, { realtimeRate: rate, fixedRate: null })
-    await ctx.reply(`实时汇率已刷新为 ${rate.toFixed(2)}`)
-  } else {
-    await ctx.reply('获取实时汇率失败，请稍后重试。')
-  }
-})
-
-bot.hears(/^显示实时汇率$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const rate = chat.realtimeRate ?? chat.fixedRate
-  await ctx.reply(`当前汇率：${rate ?? '未设置'}`)
-})
-
-// 🔥 OKX C2C价格查询（z0命令）
-bot.hears(/^(z0|Z0)$/i, async (ctx) => {
-  try {
-    // 默认获取所有支付方式的数据
-    const sellers = await getOKXC2CSellers('all')
-    
-    if (sellers.length === 0) {
-      return ctx.reply('❌ 无法获取OKX实时U价数据，请稍后重试。')
-    }
-    
-    // 格式化价格排行榜
-    const topSellers = sellers.slice(0, 10)
-    const now = new Date()
-    const timeStr = now.toLocaleString('zh-CN', { 
-      year: 'numeric', 
-      month: '2-digit', 
-      day: '2-digit', 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit'
-    })
-    
-    let priceText = ' 💰 OKX实时U价 TOP 10 \n\n'
-    
-    topSellers.forEach((seller, index) => {
-      const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
-      priceText += `${emoji}    ${seller.price.toFixed(2)}    ${seller.nickName}\n`
-    })
-    
-    priceText += `\n获取时间：${timeStr}`
-    
-    // 创建内联菜单按钮（所有、银行卡、支付宝、微信）
-    const inlineKb = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('所有', 'okx_c2c_all'),
-        Markup.button.callback('银行卡', 'okx_c2c_bank')
-      ],
-      [
-        Markup.button.callback('支付宝', 'okx_c2c_alipay'),
-        Markup.button.callback('微信', 'okx_c2c_wxpay')
-      ]
-    ])
-    
-    await ctx.reply(priceText, { ...inlineKb })
-  } catch (e) {
-    console.error('[OKX C2C价格查询失败]', e)
-    await ctx.reply('❌ 查询OKX实时U价失败，请稍后重试。')
-  }
-})
-
-// 🔥 处理OKX C2C内联菜单按钮回调
-bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
-  try {
-    await ctx.answerCbQuery()
-    
-    const paymentMethod = ctx.match[1]
-    
-    // 映射支付方式
-    const methodMap = {
-      'all': 'all',
-      'bank': 'bank',
-      'alipay': 'alipay',
-      'wxpay': 'wxPay'
-    }
-    
-    const okxMethod = methodMap[paymentMethod] || 'all'
-    const sellers = await getOKXC2CSellers(okxMethod)
-    
-    if (sellers.length === 0) {
-      return ctx.reply('❌ 无法获取该支付方式的数据，请稍后重试。')
-    }
-    
-    // 格式化价格排行榜
-    const topSellers = sellers.slice(0, 10)
-    const now = new Date()
-    const timeStr = now.toLocaleString('zh-CN', { 
-      year: 'numeric', 
-      month: '2-digit', 
-      day: '2-digit', 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit'
-    })
-    
-    const methodName = {
-      'all': '所有',
-      'bank': '银行卡',
-      'alipay': '支付宝',
-      'wxpay': '微信'
-    }[paymentMethod]
-    
-    let priceText = ` 💰 OKX实时U价 ${methodName} TOP 10 \n\n`
-    
-    topSellers.forEach((seller, index) => {
-      const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || '•'
-      priceText += `${emoji}    ${seller.price.toFixed(2)}    ${seller.nickName}\n`
-    })
-    
-    priceText += `\n获取时间：${timeStr}`
-    
-    // 创建内联菜单按钮
-    const inlineKb = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('所有', 'okx_c2c_all'),
-        Markup.button.callback('银行卡', 'okx_c2c_bank')
-      ],
-      [
-        Markup.button.callback('支付宝', 'okx_c2c_alipay'),
-        Markup.button.callback('微信', 'okx_c2c_wxpay')
-      ]
-    ])
-    
-    await ctx.editMessageText(priceText, { ...inlineKb })
-  } catch (e) {
-    console.error('[OKX C2C内联菜单处理失败]', e)
-    await ctx.answerCbQuery('❌ 获取数据失败，请稍后重试。', { show_alert: true })
-  }
-})
+// 🔥 OKX C2C价格查询已移至 handlers/okx.js
 
 // 🔥 添加操作员方式一：添加操作员 @AAA @BBB（支持多个用户名）
 bot.hears(/^添加操作员\s+/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const text = ctx.message.text || ''
@@ -1768,13 +1048,9 @@ bot.on('text', async (ctx, next) => {
   const replyTo = ctx.message.reply_to_message
   if (!replyTo || !replyTo.from) return next()
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
@@ -1803,13 +1079,9 @@ bot.hears(/^添加操作员\s+@所有人$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1823,13 +1095,9 @@ bot.hears(/^删除操作员\s+/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const text = ctx.message.text || ''
@@ -1872,13 +1140,9 @@ bot.on('text', async (ctx, next) => {
   const replyTo = ctx.message.reply_to_message
   if (!replyTo || !replyTo.from) return next()
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
@@ -1960,8 +1224,8 @@ bot.hears(/^撤销入款$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
     return ctx.reply('⚠️ 您没有撤销权限。只有管理员或已添加的操作人可以操作。')
   }
   
@@ -1983,8 +1247,8 @@ bot.hears(/^撤销下发$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查
-  if (!(await hasOperatorPermission(ctx))) {
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
     return ctx.reply('⚠️ 您没有撤销权限。只有管理员或已添加的操作人可以操作。')
   }
   
@@ -2101,8 +1365,8 @@ bot.use(async (ctx, next) => {
   
   // 🔥 处理"删除"命令（删除指定记录）
   if (isDelete) {
-    // 权限检查
-    if (!(await hasOperatorPermission(ctx))) {
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有删除权限。只有管理员或已添加的操作人可以操作。')
     }
   
@@ -2290,17 +1554,9 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    // 检查是否是白名单用户
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId }
-    })
-    
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -2328,17 +1584,9 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    // 检查是否是白名单用户
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId }
-    })
-    
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -2363,17 +1611,9 @@ bot.hears(/^开启地址验证$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    // 检查是否是白名单用户
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId }
-    })
-    
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -2394,17 +1634,9 @@ bot.hears(/^关闭地址验证$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
   
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    // 检查是否是白名单用户
-    const userId = String(ctx.from?.id || '')
-    const whitelistedUser = await prisma.whitelistedUser.findUnique({
-      where: { userId }
-    })
-    
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -2495,166 +1727,7 @@ bot.hears(/^机器人退群$/i, async (ctx) => {
   }
 })
 
-// 🔥 查询汇率/映射表（显示点位汇率映射关系）
-bot.hears(/^(查询汇率|查询映射表)(?:\s+(.+))?$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  const query = ctx.match[2]?.trim() || ''
-  const chatId = await ensureDbChat(ctx)
-  
-  try {
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: {
-        fixedRate: true,
-        realtimeRate: true,
-        feePercent: true
-      }
-    })
-    
-    let rateText = ''
-    if (query) {
-      // 自定义查询：支持查询固定汇率或实时汇率
-      const rate = parseFloat(query)
-      if (!isNaN(rate) && rate > 0) {
-        rateText = `查询汇率 ${rate} 的映射关系：\n` +
-          `• 1 USDT = ${rate} CNY\n` +
-          `• 1 CNY = ${(1 / rate).toFixed(6)} USDT\n` +
-          `• 100 CNY = ${(100 / rate).toFixed(2)} USDT\n` +
-          `• 100 USDT = ${(100 * rate).toFixed(2)} CNY`
-      } else {
-        rateText = `❌ 无效的汇率值：${query}`
-      }
-    } else {
-      // 显示当前群组的汇率映射
-      const fixedRate = setting?.fixedRate
-      const realtimeRate = setting?.realtimeRate
-      const feePercent = setting?.feePercent || 0
-      
-      rateText = ' 💱 汇率映射表 \n\n'
-      
-      if (fixedRate) {
-        rateText += `【固定汇率】\n` +
-          `• 1 USDT = ${fixedRate} CNY\n` +
-          `• 1 CNY = ${(1 / fixedRate).toFixed(6)} USDT\n` +
-          `• 100 CNY = ${(100 / fixedRate).toFixed(2)} USDT\n` +
-          `• 100 USDT = ${(100 * fixedRate).toFixed(2)} CNY\n\n`
-      } else if (realtimeRate) {
-        rateText += `【实时汇率】\n` +
-          `• 1 USDT = ${realtimeRate} CNY\n` +
-          `• 1 CNY = ${(1 / realtimeRate).toFixed(6)} USDT\n` +
-          `• 100 CNY = ${(100 / realtimeRate).toFixed(2)} USDT\n` +
-          `• 100 USDT = ${(100 * realtimeRate).toFixed(2)} CNY\n\n`
-      } else {
-        rateText += `⚠️ 未设置汇率\n\n`
-      }
-      
-      if (feePercent > 0) {
-        rateText += `【费率】${feePercent}%\n`
-      }
-      
-      rateText += `\n💡 提示：使用"查询汇率 7.2"可以查询指定汇率的映射关系`
-    }
-    
-    await ctx.reply(rateText, { ...(await buildInlineKb(ctx)) })
-  } catch (e) {
-    console.error('[查询汇率]', e)
-    await ctx.reply('❌ 查询失败，请稍后重试')
-  }
-})
-
-// 🔥 设置超押提醒额度
-bot.hears(/^设置额度\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 权限检查：管理员或白名单用户
-  if (!(await hasOperatorPermission(ctx))) {
-    const userId = String(ctx.from?.id || '')
-  const whitelistedUser = await prisma.whitelistedUser.findUnique({
-    where: { userId }
-  })
-  
-    if (!whitelistedUser) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-    }
-  }
-  
-  const limit = parseFloat(ctx.match[1])
-  const chatId = await ensureDbChat(ctx)
-  
-  try {
-    await prisma.setting.upsert({
-      where: { chatId },
-      update: { overDepositLimit: limit },
-      create: { chatId, overDepositLimit: limit }
-    })
-    
-    if (limit === 0) {
-      await ctx.reply('✅ 已关闭超押提醒', { ...(await buildInlineKb(ctx)) })
-    } else {
-      await ctx.reply(`✅ 已设置超押提醒额度为 ${formatMoney(limit)} 元`, { ...(await buildInlineKb(ctx)) })
-        }
-      } catch (e) {
-    console.error('[设置额度]', e)
-    await ctx.reply('❌ 设置失败，请稍后重试')
-  }
-})
-
-// 🔥 群内管理员：显示管理员、权限人、操作员信息
-bot.hears(/^(管理员|权限人|显示操作员)$/i, async (ctx) => {
-  if (ctx.chat?.type === 'private') {
-    return ctx.reply('此命令仅在群组中使用')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  
-  try {
-    // 获取管理员列表
-    const admins = await ctx.getChatAdministrators()
-    const adminList = admins
-      .filter(a => !a.user.is_bot)
-      .map(a => {
-        const name = a.user.username 
-          ? `@${a.user.username}` 
-          : `${a.user.first_name || ''} ${a.user.last_name || ''}`.trim() || `用户${a.user.id}`
-        const status = a.status === 'creator' ? '👑 群主' : '👤 管理员'
-        return `• ${name} (${status})`
-      })
-    
-    // 获取操作员列表
-    const operators = await prisma.operator.findMany({
-      where: { chatId },
-      select: { username: true }
-    })
-    
-    // 获取设置
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { everyoneAllowed: true }
-    })
-    
-    let text = ' 👥 群组权限信息 \n\n'
-    
-    if (adminList.length > 0) {
-      text += `【👑 群主/管理员】\n${adminList.join('\n')}\n\n`
-    }
-    
-    if (setting?.everyoneAllowed) {
-      text += `【✅ 权限设置】\n• 所有人可操作\n\n`
-    } else if (operators.length > 0) {
-      text += `【👤 操作员】\n${operators.map(op => `• ${op.username}`).join('\n')}\n\n`
-    } else {
-      text += `【👤 操作员】\n• 仅管理员可操作\n\n`
-    }
-    
-    await ctx.reply(text, { ...(await buildInlineKb(ctx)) })
-  } catch (e) {
-    console.error('[群内管理员]', e)
-    await ctx.reply('❌ 获取信息失败，请稍后重试')
-  }
-})
+// 🔥 查询汇率、设置额度、管理员信息已移至 handlers/admin.js
 
 // 🔥 action 处理器已移至 handlers/core.js
 

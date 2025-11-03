@@ -2,7 +2,7 @@
 import { prisma } from '../../lib/db.ts'
 import { parseAmountAndRate } from '../state.js'
 import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay } from '../database.js'
-import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY } from '../helpers.js'
+import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEffectiveRate } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
 import { getUsername } from '../helpers.js'
@@ -44,12 +44,8 @@ export function registerIncomeWithRemark(bot, ensureChat) {
     const amountStr = match[2]
     const isUSDT = /[uU]/.test(text)
     
-    // 获取当前汇率
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     const amount = Number(amountStr)
     if (!Number.isFinite(amount) || amount === 0) return
@@ -127,12 +123,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     const amountStr = match[2]
     const isUSDT = /[uU]/.test(text)
     
-    // 获取当前汇率
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     const amount = Number(amountStr)
     if (!Number.isFinite(amount) || amount === 0) return
@@ -208,12 +200,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     // 获取目标用户
     const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : `@user_${replyTo.from.id}`
     
-    // 获取当前汇率
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     const amount = Number(amountStr)
     if (!Number.isFinite(amount) || amount === 0) return next()
@@ -432,12 +420,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     const inputValue = Number(amountStr)
     if (!Number.isFinite(inputValue)) return
     
-    // 🔥 获取当前使用的汇率（从数据库获取最新）
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     let amountRMB, usdtValue
     if (isUSDT) {
@@ -514,12 +498,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     // 获取目标用户
     const targetUsername = replyTo.from.username ? `@${replyTo.from.username}` : `@user_${replyTo.from.id}`
     
-    // 🔥 获取当前使用的汇率（从数据库获取最新）
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     let amountRMB, usdtValue
     if (isUSDT) {
@@ -592,12 +572,8 @@ export function registerDispatch(bot, ensureChat) {
     const inputValue = Number(m[1].replace(/\s+/g, ''))
     if (!Number.isFinite(inputValue)) return
     
-    // 🔥 获取当前使用的汇率（从数据库获取最新，确保使用实时汇率）
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { fixedRate: true, realtimeRate: true }
-    })
-    const rate = settings?.fixedRate ?? settings?.realtimeRate ?? chat.fixedRate ?? chat.realtimeRate
+    // 🔥 优化：使用统一的汇率获取函数
+    const rate = await getEffectiveRate(chatId, chat)
     
     let amountRMB, usdtValue
     if (isUSDT) {

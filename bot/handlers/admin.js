@@ -1,8 +1,9 @@
 // 管理员相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { ensureDbChat } from '../database.js'
-import { buildInlineKb, isAdmin } from '../helpers.js'
+import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, getEffectiveRate } from '../helpers.js'
 import { setGlobalDailyCutoffHour } from '../utils.js'
+import { getChat } from '../state.js'
 
 /**
  * 机器人退群
@@ -13,13 +14,10 @@ export function registerBotLeave(bot) {
       return ctx.reply('此命令仅在群组中使用')
     }
     
-    const isAdminUser = await isAdmin(ctx)
-    if (!isAdminUser) {
-      const userId = String(ctx.from?.id || '')
-      const whitelistedUser = await prisma.whitelistedUser.findUnique({ where: { userId } })
-      if (!whitelistedUser) {
-        return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
-      }
+    // 🔥 优化：使用统一的权限检查
+    const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
     }
     
     const chatId = String(ctx.chat?.id || '')
@@ -58,10 +56,14 @@ export function registerQueryRate(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx, chat)
     
     try {
-      const setting = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { fixedRate: true, realtimeRate: true, feePercent: true }
-      })
+      // 🔥 优化：使用统一的汇率获取函数
+      const [setting, effectiveRate] = await Promise.all([
+        prisma.setting.findUnique({
+          where: { chatId },
+          select: { feePercent: true }
+        }),
+        getEffectiveRate(chatId, ensureChat(ctx))
+      ])
       
       let rateText = ''
       if (query) {
@@ -76,24 +78,32 @@ export function registerQueryRate(bot, ensureChat) {
           rateText = `❌ 无效的汇率值：${query}`
         }
       } else {
-        const fixedRate = setting?.fixedRate
-        const realtimeRate = setting?.realtimeRate
+        const chat = ensureChat(ctx)
+        const fixedRate = chat?.fixedRate ?? null
+        const realtimeRate = chat?.realtimeRate ?? null
         const feePercent = setting?.feePercent || 0
+        const displayRate = effectiveRate ?? null
         
         rateText = ' 💱 汇率映射表 \n\n'
         
-        if (fixedRate) {
+        if (fixedRate && displayRate) {
           rateText += `【固定汇率】\n` +
-            `• 1 USDT = ${fixedRate} CNY\n` +
-            `• 1 CNY = ${(1 / fixedRate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / fixedRate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * fixedRate).toFixed(2)} CNY\n\n`
-        } else if (realtimeRate) {
+            `• 1 USDT = ${displayRate} CNY\n` +
+            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
+        } else if (realtimeRate && displayRate) {
           rateText += `【实时汇率】\n` +
-            `• 1 USDT = ${realtimeRate} CNY\n` +
-            `• 1 CNY = ${(1 / realtimeRate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / realtimeRate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * realtimeRate).toFixed(2)} CNY\n\n`
+            `• 1 USDT = ${displayRate} CNY\n` +
+            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
+        } else if (displayRate) {
+          rateText += `【当前汇率】\n` +
+            `• 1 USDT = ${displayRate} CNY\n` +
+            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
         } else {
           rateText += `⚠️ 未设置汇率\n\n`
         }
