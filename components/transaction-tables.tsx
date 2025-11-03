@@ -14,6 +14,24 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
   const [pick, setPick] = useState<number | ''>('')
   // 🔥 删除无用的 incomeRefs，不再需要高亮功能
 
+  // 🔥 修复：监听账单选择事件，确保与 StatisticsCards 组件同步
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { type?: string; index?: number }
+      if (detail?.index && detail.index > 0) {
+        // 🔥 立即更新 pick 状态，触发数据重新加载
+        setPick(detail.index)
+      }
+    }
+    window.addEventListener('goto-bill', handler as any)
+    return () => window.removeEventListener('goto-bill', handler as any)
+  }, [])
+  
+  // 🔥 修复：当日期变化时，重置 pick 状态，避免使用旧的账单索引
+  useEffect(() => {
+    setPick('')
+  }, [currentDate, chatId])
+
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
@@ -26,7 +44,10 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
         if (!res.ok) throw new Error('failed')
         const json = await res.json()
         setData(json)
-        if (!pick && json?.selectedBillIndex) setPick(json.selectedBillIndex)
+        // 🔥 修复：只在没有主动选择账单时才设置默认值
+        if (!pick && json?.selectedBillIndex) {
+          setPick(json.selectedBillIndex)
+        }
       } catch (e) {
         if ((e as any).name !== 'AbortError') console.error(e)
       }
