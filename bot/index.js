@@ -2758,25 +2758,28 @@ bot.launch().then(async () => {
   intervals.push(setInterval(updateAllRealtimeRates, 3600000))
   console.log('[定时任务] 实时汇率自动更新已启动，每小时更新一次')
   
-  // 🔥 新增：自动日切定时任务 - 每10分钟检查一次，确保日切时自动切换
+  // 🔥 重写：自动日切定时任务 - 每5分钟检查一次，确保及时检测到日切并自动保存订单
   const autoDailyCutoffTask = async () => {
     try {
-      // 直接导入getChat函数，避免动态导入的性能问题
       const { getChat } = await import('./state.js')
-      await performAutoDailyCutoff((botId, chatId) => {
-        return getChat(botId || process.env.BOT_TOKEN, chatId)
+      const botId = await ensureCurrentBotId()
+      const processed = await performAutoDailyCutoff((_, chatId) => {
+        return getChat(botId, chatId)
       })
+      if (processed > 0 && process.env.DEBUG_BOT === 'true') {
+        console.log(`[定时任务] 自动日切：处理了 ${processed} 个群组`)
+      }
     } catch (e) {
-      console.error('[定时任务] 自动日切检查失败:', e)
+      console.error('[定时任务] ❌ 自动日切检查失败:', e)
     }
   }
   
-  // 立即执行一次
+  // 立即执行一次（启动时检查并关闭昨天的账单）
   await autoDailyCutoffTask()
   
-  // 每10分钟检查一次（确保能及时检测到日切）
-  intervals.push(setInterval(autoDailyCutoffTask, 10 * 60 * 1000))
-  console.log('[定时任务] 自动日切检查已启动，每10分钟检查一次')
+  // 每5分钟检查一次（确保能及时检测到日切，在日切点后5分钟内完成切换）
+  intervals.push(setInterval(autoDailyCutoffTask, 5 * 60 * 1000))
+  console.log('[定时任务] ✅ 自动日切检查已启动，每5分钟检查一次')
   
   // 🔥 新增：内存优化定时任务
   // 1. 每小时清理不活跃的聊天（保存引用）

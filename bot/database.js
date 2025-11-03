@@ -3,6 +3,27 @@ import { prisma } from '../lib/db.ts'
 import { getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
 
 /**
+ * 🔥 统一的日期计算函数（导出供其他模块使用）
+ */
+export function calculateBillDateRange(now, cutoffHour) {
+  const currentDate = new Date(now)
+  const currentHour = currentDate.getHours()
+  
+  const billDate = new Date(currentDate)
+  if (currentHour < cutoffHour) {
+    billDate.setDate(billDate.getDate() - 1)
+  }
+  
+  const gte = new Date(billDate)
+  gte.setHours(cutoffHour, 0, 0, 0, 0)
+  
+  const lt = new Date(gte)
+  lt.setDate(lt.getDate() + 1)
+  
+  return { gte, lt, billDate }
+}
+
+/**
  * 确保数据库中的聊天记录存在（简化版本）
  */
 export async function ensureDbChat(ctx, chat = null) {
@@ -96,50 +117,19 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 }
 
 /**
- * 获取或创建当天的OPEN账单
- * 🔥 修复：正确处理日切点前后的日期判断
- * 逻辑：
- * - 如果当前时间 >= 今天日切点：账单范围 = 今天日切点 到 明天日切点
- * - 如果当前时间 < 今天日切点：账单范围 = 昨天日切点 到 今天日切点
- * 例如：日切是2点
- *   - 3号10:00记账 → 归入 3号02:00 - 4号02:00
- *   - 3号01:00记账 → 归入 2号02:00 - 3号02:00
+ * 🔥 重写：获取或创建当前账单
+ * 确保记账到正确的日期范围，自动处理日切
  */
 export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
-  const currentHour = now.getHours()
-  
-  // 🔥 修复：根据当前时间是否超过日切点，判断应该使用的日期
-  let billDate = new Date(now)
-  
-  // 如果当前时间在日切点之前，使用昨天的日期
-  if (currentHour < cutoffHour) {
-    billDate.setDate(billDate.getDate() - 1)
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[getOrCreateTodayBill] 当前时间在日切点之前，使用昨天日期', {
-        now: now.toISOString(),
-        currentHour,
-        cutoffHour,
-        billDate: billDate.toISOString()
-      })
-    }
-  }
-  
-  // 计算账单开始时间：账单日期的日切点
-  const gte = new Date()
-  gte.setFullYear(billDate.getFullYear(), billDate.getMonth(), billDate.getDate())
-  gte.setHours(cutoffHour, 0, 0, 0)
-  
-  // 结束时间是账单日期的下一天的日切点
-  const lt = new Date(gte)
-  lt.setDate(lt.getDate() + 1)
+  const { gte, lt, billDate } = calculateBillDateRange(now, cutoffHour)
   
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[getOrCreateTodayBill]', {
       chatId,
       now: now.toISOString(),
-      currentHour,
+      currentHour: now.getHours(),
       cutoffHour,
       billDate: billDate.toISOString(),
       gte: gte.toISOString(),
@@ -148,12 +138,18 @@ export async function getOrCreateTodayBill(chatId) {
     })
   }
   
+  // 查找当前日期范围内的OPEN账单
   let bill = await prisma.bill.findFirst({ 
-    where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
+    where: { 
+      chatId, 
+      status: 'OPEN', 
+      openedAt: { gte, lt } 
+    }, 
     orderBy: { openedAt: 'asc' } 
   })
   
   if (!bill) {
+    // 如果当前日期范围内没有OPEN账单，创建新的
     bill = await prisma.bill.create({ 
       data: { 
         chatId, 
@@ -163,11 +159,15 @@ export async function getOrCreateTodayBill(chatId) {
       } 
     })
     if (process.env.DEBUG_BOT === 'true') {
-      console.log('[getOrCreateTodayBill] 创建新账单', { billId: bill.id, openedAt: bill.openedAt.toISOString() })
+      console.log('[getOrCreateTodayBill] 创建新账单', { 
+        billId: bill.id, 
+        openedAt: bill.openedAt.toISOString(),
+        billDate: billDate.toISOString()
+      })
     }
   }
   
-  return { bill, gte, lt }
+  return { bill, gte, lt, billDate }
 }
 
 /**
@@ -178,7 +178,8 @@ export async function updateSettings(chatId, data) {
 }
 
 /**
- * 同步设置和操作人到内存
+ * 🔥 重写：同步设置和操作人到内存
+ * 确保实时汇率优先从数据库加载（启动时已更新）
  */
 export async function syncSettingsToMemory(ctx, chat, chatId) {
   try {
@@ -201,27 +202,38 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
     ])
     
     if (settings && chat) {
+      // 同步费率
       if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
+      
+      // 同步汇率：固定汇率优先
       if (settings.fixedRate != null) {
         chat.fixedRate = settings.fixedRate
-        // 如果有固定汇率，清空实时汇率
-        if (settings.fixedRate) {
-          chat.realtimeRate = null
+        chat.realtimeRate = null // 有固定汇率时清空实时汇率
+      } else {
+        // 🔥 重点：如果没有固定汇率，优先从数据库加载实时汇率
+        if (settings.realtimeRate != null) {
+          chat.realtimeRate = settings.realtimeRate
+          chat.fixedRate = null
+          if (process.env.DEBUG_BOT === 'true') {
+            console.log('[syncSettingsToMemory] ✅ 实时汇率已同步到内存', { 
+              chatId, 
+              rate: settings.realtimeRate 
+            })
+          }
         }
       }
-      // 🔥 修复：优先同步数据库中的实时汇率（启动时已更新）
-      if (settings.realtimeRate != null && !settings.fixedRate) {
-        chat.realtimeRate = settings.realtimeRate
-        if (process.env.DEBUG_BOT === 'true') {
-          console.log('[syncSettingsToMemory] 实时汇率已同步', { chatId, rate: settings.realtimeRate })
-        }
-      }
+      
+      // 同步其他设置
       if (settings.headerText != null) chat.headerText = settings.headerText
       if (typeof settings.everyoneAllowed === 'boolean') chat.everyoneAllowed = settings.everyoneAllowed
     }
     
+    // 同步操作员列表
     if (chat && needOperators) {
-      const operators = await prisma.operator.findMany({ where: { chatId }, select: { username: true } })
+      const operators = await prisma.operator.findMany({ 
+        where: { chatId }, 
+        select: { username: true } 
+      })
       chat.operators.clear()
       for (const op of operators) {
         chat.operators.add(op.username)
@@ -229,7 +241,7 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
       chat._operatorsLastSync = Date.now()
     }
   } catch (e) {
-    console.error('同步设置到内存失败', e)
+    console.error('[syncSettingsToMemory] ❌ 同步失败', e)
   }
 }
 
@@ -334,8 +346,8 @@ export async function deleteLastDispatch(chatId) {
 }
 
 /**
- * 🔥 自动日切检查：检查并关闭昨天的账单，确保数据正确保存
- * 这个函数会检查所有有OPEN账单的群组，如果检测到跨日，则关闭昨天的账单
+ * 🔥 重写：自动日切检查
+ * 检查所有群组，关闭昨天的账单，清空内存数据，为今天的新账单做准备
  * @param {function} getChat - 获取聊天对象的函数 (botId, chatId) => chat
  * @returns {Promise<number>} - 处理的群组数量
  */
@@ -343,11 +355,16 @@ export async function performAutoDailyCutoff(getChat) {
   try {
     const cutoffHour = await getGlobalDailyCutoffHour()
     const now = new Date()
-    const todayStart = startOfDay(now, cutoffHour)
-    const yesterdayEnd = new Date(todayStart)
-    yesterdayEnd.setTime(yesterdayEnd.getTime() - 1) // 昨天的最后一刻
     
-    // 查找所有昨天还有OPEN账单的群组（使用groupBy获取唯一的chatId）
+    // 计算今天的开始时间（今天的日切点）
+    const todayStart = new Date(now)
+    todayStart.setHours(cutoffHour, 0, 0, 0, 0)
+    // 如果当前时间在日切点之前，todayStart应该是昨天的日切点
+    if (now.getHours() < cutoffHour) {
+      todayStart.setDate(todayStart.getDate() - 1)
+    }
+    
+    // 查找所有在todayStart之前还有OPEN账单的群组
     const yesterdayBillsGrouped = await prisma.bill.groupBy({
       by: ['chatId'],
       where: {
@@ -359,15 +376,12 @@ export async function performAutoDailyCutoff(getChat) {
       }
     })
     
-    // 转换为简单数组格式
-    const yesterdayBills = yesterdayBillsGrouped.map(g => ({ chatId: g.chatId }))
-    
-    if (yesterdayBills.length === 0) {
+    if (yesterdayBillsGrouped.length === 0) {
       return 0
     }
     
-    // 🔥 性能优化：批量查询所有群组的设置，避免N+1查询问题
-    const chatIds = yesterdayBills.map(b => b.chatId)
+    // 批量查询所有群组的设置
+    const chatIds = yesterdayBillsGrouped.map(g => g.chatId)
     const allSettings = await prisma.setting.findMany({
       where: { chatId: { in: chatIds } },
       select: { chatId: true, accountingMode: true }
@@ -376,73 +390,71 @@ export async function performAutoDailyCutoff(getChat) {
     
     let processedCount = 0
     
-    for (const bill of yesterdayBills) {
+    for (const group of yesterdayBillsGrouped) {
       try {
-        const chatId = bill.chatId
-        
-        // 🔥 从缓存中获取设置，避免重复查询
+        const chatId = group.chatId
         const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
         // 只有每日清零模式才需要关闭昨天的账单
         if (accountingMode === 'DAILY_RESET') {
-          // 查找所有昨天的OPEN账单并关闭它们
+          // 查找所有需要关闭的账单
           const billsToClose = await prisma.bill.findMany({
             where: {
               chatId,
               status: 'OPEN',
               openedAt: { lt: todayStart }
-            }
+            },
+            select: { id: true }
           })
           
-          // 🔥 性能优化：批量更新账单状态，而不是逐个更新
           if (billsToClose.length > 0) {
             const billIds = billsToClose.map(b => b.id)
+            
+            // 批量关闭账单
             await prisma.bill.updateMany({
               where: { id: { in: billIds } },
               data: {
                 status: 'CLOSED',
-                savedAt: new Date()
+                savedAt: new Date(),
+                closedAt: new Date()
               }
             })
-          }
-          
-          // 如果有内存中的聊天对象，清空其内存数据
-          // 注意：这里无法直接访问state，需要通过回调函数
-          if (getChat && typeof getChat === 'function') {
-            try {
-              // getChat 函数的签名是 (botId, chatId) => chat
-              // 这里需要传入botId，但我们在定时任务中无法直接获取，所以先尝试用 BOT_TOKEN
-              const botId = process.env.BOT_TOKEN
-              if (botId) {
-                const chat = getChat(botId, chatId)
-                if (chat) {
-                  chat.current.incomes = []
-                  chat.current.dispatches = []
-                  chat._billLastSync = 0
-                  chat._lastBillDate = todayStart.getTime()
+            
+            // 清空内存中的数据
+            if (getChat && typeof getChat === 'function') {
+              try {
+                const botId = process.env.BOT_TOKEN
+                if (botId) {
+                  const chat = getChat(botId, chatId)
+                  if (chat) {
+                    chat.current.incomes = []
+                    chat.current.dispatches = []
+                    chat._billLastSync = 0
+                    chat._lastBillDate = todayStart.getTime()
+                  }
                 }
+              } catch (e) {
+                // 忽略内存清理失败
               }
-            } catch (e) {
-              // 如果获取失败，忽略（可能是群组不在内存中）
             }
+            
+            processedCount++
+            console.log(`[自动日切] ✅ 群组 ${chatId}：已关闭 ${billsToClose.length} 个昨日账单`)
           }
-          
-          processedCount++
-          console.log(`[自动日切] 已关闭群组 ${chatId} 的昨日账单，共 ${billsToClose.length} 个账单`)
         }
       } catch (e) {
-        console.error(`[自动日切] 处理群组 ${bill.chatId} 失败:`, e)
+        console.error(`[自动日切] ❌ 处理群组 ${group.chatId} 失败:`, e)
       }
     }
     
     if (processedCount > 0) {
-      console.log(`[自动日切] 完成，共处理 ${processedCount} 个群组的日切`)
+      console.log(`[自动日切] 📊 完成，共处理 ${processedCount} 个群组`)
     }
     
     return processedCount
   } catch (e) {
-    console.error('[自动日切] 执行失败:', e)
+    console.error('[自动日切] ❌ 执行失败:', e)
     return 0
   }
 }

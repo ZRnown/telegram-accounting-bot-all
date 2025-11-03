@@ -38,24 +38,12 @@ export async function formatSummary(ctx, chat, options = {}) {
       needsSync ? (async () => {
         try {
           const cutoffHour = await getGlobalDailyCutoffHour()
-          // 🔥 修复：与 getOrCreateTodayBill 保持一致的日期计算逻辑
           const now = new Date()
-          const currentHour = now.getHours()
           
-          // 根据当前时间是否超过日切点，判断应该使用的日期
-          let billDate = new Date(now)
-          if (currentHour < cutoffHour) {
-            billDate.setDate(billDate.getDate() - 1)
-          }
-          
-          // 计算账单开始时间：账单日期的日切点
-          const gte = new Date()
-          gte.setFullYear(billDate.getFullYear(), billDate.getMonth(), billDate.getDate())
-          gte.setHours(cutoffHour, 0, 0, 0)
-          
-          // 结束时间是账单日期的下一天的日切点
-          const lt = new Date(gte)
-          lt.setDate(lt.getDate() + 1)
+          // 🔥 使用统一的日期计算函数（与 getOrCreateTodayBill 保持一致）
+          // 导入计算函数
+          const { calculateBillDateRange } = await import('./database.js')
+          const { gte, lt } = calculateBillDateRange(now, cutoffHour)
           
           return await prisma.bill.findFirst({ 
             where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
