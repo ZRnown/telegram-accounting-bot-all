@@ -483,17 +483,31 @@ async function ensureDbChatWithSync(ctx) {
   const chat = ensureChat(ctx)
   const chatId = await ensureDbChat(ctx, chat)
   
-  // 如果没有设置汇率，自动设置实时汇率
+  // 🔥 修复：确保实时汇率从数据库同步到内存（优先从数据库加载，如果数据库也没有再获取）
   if (chat && !chat.fixedRate && !chat.realtimeRate) {
     try {
-      const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
+      // 先从数据库读取，可能启动时的更新任务已经更新了
+      const setting = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { realtimeRate: true }
+      })
+      
+      if (setting?.realtimeRate) {
+        chat.realtimeRate = setting.realtimeRate
+      } else {
+        // 数据库也没有，主动获取
+        const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
         const rate = await fetchRealtimeRateUSDTtoCNY()
         if (rate) {
           chat.realtimeRate = rate
           await updateSettings(chatId, { realtimeRate: rate })
+        }
       }
     } catch (e) {
       // 静默失败
+      if (process.env.DEBUG_BOT === 'true') {
+        console.error('[ensureDbChatWithSync] 汇率同步失败', e)
+      }
     }
   }
   

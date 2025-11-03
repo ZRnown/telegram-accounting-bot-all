@@ -97,21 +97,35 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 
 /**
  * 获取或创建当天的OPEN账单
- * 🔥 修复：使用当前日期的日切时间范围，而不是根据当前时间判断
- * 这样即使在日切点之前记账，也会归入当天的账单
+ * 🔥 修复：使用当前日期的日切时间范围，正确计算当天账单范围
+ * 逻辑：当前日期N的账单范围 = N号日切点 到 (N+1)号日切点
+ * 例如：3号任意时间记账，应该归入 3号02:00 - 4号02:00 的账单
  */
 export async function getOrCreateTodayBill(chatId) {
   const cutoffHour = await getGlobalDailyCutoffHour()
   const now = new Date()
   
-  // 🔥 修复：基于当前本地日期计算今天的日切范围，直接使用Date方法避免时区问题
-  // 例如：3号凌晨1点记账，应该归入3号的账单（3号2点-4号2点），而不是2号
-  // 当前服务器时间是 2025-11-03 16:23:11，应该归入3号的账单（3号2点-4号2点）
+  // 🔥 修复：正确计算当天账单的开始时间（今天日期的日切点）
+  // 无论当前时间是在日切点之前还是之后，都使用今天日期的日切点作为开始
+  // 例如：当前是3号16:00，日切是2点，账单范围应该是 3号02:00 - 4号02:00
   const gte = new Date()
   gte.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
   gte.setHours(cutoffHour, 0, 0, 0)
+  
+  // 结束时间是明天同一日切点
   const lt = new Date(gte)
   lt.setDate(lt.getDate() + 1)
+  
+  if (process.env.DEBUG_BOT === 'true') {
+    console.log('[getOrCreateTodayBill]', {
+      chatId,
+      now: now.toISOString(),
+      cutoffHour,
+      gte: gte.toISOString(),
+      lt: lt.toISOString(),
+      '账单范围': `${gte.toLocaleString('zh-CN')} - ${lt.toLocaleString('zh-CN')}`
+    })
+  }
   
   let bill = await prisma.bill.findFirst({ 
     where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
@@ -127,6 +141,9 @@ export async function getOrCreateTodayBill(chatId) {
         savedAt: new Date() 
       } 
     })
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[getOrCreateTodayBill] 创建新账单', { billId: bill.id, openedAt: bill.openedAt.toISOString() })
+    }
   }
   
   return { bill, gte, lt }
@@ -165,7 +182,13 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
     if (settings && chat) {
       if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
       if (settings.fixedRate != null) chat.fixedRate = settings.fixedRate
-      if (settings.realtimeRate != null) chat.realtimeRate = settings.realtimeRate
+      // 🔥 修复：确保实时汇率从数据库同步到内存（重启后恢复）
+      if (settings.realtimeRate != null) {
+        chat.realtimeRate = settings.realtimeRate
+      } else if (!chat.fixedRate && !chat.realtimeRate) {
+        // 🔥 如果没有设置汇率，尝试从数据库获取或获取实时汇率
+        // 这里不主动获取，因为启动时会有全局更新任务
+      }
       if (settings.headerText != null) chat.headerText = settings.headerText
       if (typeof settings.everyoneAllowed === 'boolean') chat.everyoneAllowed = settings.everyoneAllowed
     }
