@@ -18,6 +18,7 @@ interface ChatSettings {
     dailyCutoffHour?: number
     hideHelpButton?: boolean
     hideOrderButton?: boolean
+    showOperator?: boolean
   }
 }
 
@@ -45,6 +46,7 @@ export default function ChatSettingsPage() {
   const [dailyCutoffHour, setDailyCutoffHour] = useState<number>(0)
   const [hideHelpButton, setHideHelpButton] = useState<boolean>(false)
   const [hideOrderButton, setHideOrderButton] = useState<boolean>(false)
+  const [showOperator, setShowOperator] = useState<boolean>(true)
   
   // 操作人管理状态
   const [newOperator, setNewOperator] = useState('')
@@ -73,6 +75,7 @@ export default function ChatSettingsPage() {
         setDailyCutoffHour(data.settings.dailyCutoffHour ?? 0)
         setHideHelpButton(data.settings.hideHelpButton ?? false)
         setHideOrderButton(data.settings.hideOrderButton ?? false)
+        setShowOperator(data.settings.showOperator ?? true)
       } else {
         toast({
           variant: "destructive",
@@ -116,6 +119,7 @@ export default function ChatSettingsPage() {
         dailyCutoffHour,
         hideHelpButton,
         hideOrderButton,
+        showOperator,
       }
 
       // 🔥 添加超时控制，避免长时间等待
@@ -459,6 +463,23 @@ export default function ChatSettingsPage() {
                   type="checkbox"
                   checked={hideOrderButton}
                   onChange={(e) => setHideOrderButton(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+            
+            {/* 显示记账人 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-gray-700">显示记账人</div>
+                <p className="text-xs text-gray-500 mt-1">是否在账单中显示操作人/记账人信息</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showOperator}
+                  onChange={(e) => setShowOperator(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>

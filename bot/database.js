@@ -270,3 +270,108 @@ export async function deleteLastDispatch(chatId) {
   return { amount: Number(lastItem.amount), usdt: lastItem.usdt ? Number(lastItem.usdt) : 0 }
 }
 
+/**
+ * 🔥 自动日切检查：检查并关闭昨天的账单，确保数据正确保存
+ * 这个函数会检查所有有OPEN账单的群组，如果检测到跨日，则关闭昨天的账单
+ * @param {function} getChat - 获取聊天对象的函数 (botId, chatId) => chat
+ * @returns {Promise<number>} - 处理的群组数量
+ */
+export async function performAutoDailyCutoff(getChat) {
+  try {
+    const cutoffHour = await getGlobalDailyCutoffHour()
+    const now = new Date()
+    const todayStart = startOfDay(now, cutoffHour)
+    const yesterdayEnd = new Date(todayStart)
+    yesterdayEnd.setTime(yesterdayEnd.getTime() - 1) // 昨天的最后一刻
+    
+    // 查找所有昨天还有OPEN账单的群组（使用groupBy获取唯一的chatId）
+    const yesterdayBillsGrouped = await prisma.bill.groupBy({
+      by: ['chatId'],
+      where: {
+        status: 'OPEN',
+        openedAt: { lt: todayStart }
+      },
+      _count: {
+        id: true
+      }
+    })
+    
+    // 转换为简单数组格式
+    const yesterdayBills = yesterdayBillsGrouped.map(g => ({ chatId: g.chatId }))
+    
+    let processedCount = 0
+    
+    for (const bill of yesterdayBills) {
+      try {
+        const chatId = bill.chatId
+        
+        // 检查该群组的记账模式
+        const settings = await prisma.setting.findUnique({
+          where: { chatId },
+          select: { accountingMode: true }
+        })
+        
+        const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+        
+        // 只有每日清零模式才需要关闭昨天的账单
+        if (accountingMode === 'DAILY_RESET') {
+          // 查找所有昨天的OPEN账单并关闭它们
+          const billsToClose = await prisma.bill.findMany({
+            where: {
+              chatId,
+              status: 'OPEN',
+              openedAt: { lt: todayStart }
+            }
+          })
+          
+          // 关闭所有昨天的账单
+          for (const oldBill of billsToClose) {
+            await prisma.bill.update({
+              where: { id: oldBill.id },
+              data: {
+                status: 'CLOSED',
+                savedAt: new Date()
+              }
+            })
+          }
+          
+          // 如果有内存中的聊天对象，清空其内存数据
+          // 注意：这里无法直接访问state，需要通过回调函数
+          if (getChat && typeof getChat === 'function') {
+            try {
+              // getChat 函数的签名是 (botId, chatId) => chat
+              // 这里需要传入botId，但我们在定时任务中无法直接获取，所以先尝试用 BOT_TOKEN
+              const botId = process.env.BOT_TOKEN
+              if (botId) {
+                const chat = getChat(botId, chatId)
+                if (chat) {
+                  chat.current.incomes = []
+                  chat.current.dispatches = []
+                  chat._billLastSync = 0
+                  chat._lastBillDate = todayStart.getTime()
+                }
+              }
+            } catch (e) {
+              // 如果获取失败，忽略（可能是群组不在内存中）
+            }
+          }
+          
+          processedCount++
+          console.log(`[自动日切] 已关闭群组 ${chatId} 的昨日账单，共 ${billsToClose.length} 个账单`)
+        }
+      } catch (e) {
+        console.error(`[自动日切] 处理群组 ${bill.chatId} 失败:`, e)
+      }
+    }
+    
+    if (processedCount > 0) {
+      console.log(`[自动日切] 完成，共处理 ${processedCount} 个群组的日切`)
+    }
+    
+    return processedCount
+  } catch (e) {
+    console.error('[自动日切] 执行失败:', e)
+    return 0
+  }
+}
+

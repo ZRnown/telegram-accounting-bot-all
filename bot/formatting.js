@@ -34,7 +34,8 @@ export async function formatSummary(ctx, chat, options = {}) {
           accountingMode: true,
           feePercent: true,
           fixedRate: true,
-          realtimeRate: true
+          realtimeRate: true,
+          showOperator: true
         }
       }),
       needsSync ? (async () => {
@@ -151,7 +152,8 @@ export async function formatSummary(ctx, chat, options = {}) {
         if (rate) {
           line += ` / ${rate}=${usdt}U`
         }
-        if (who) {
+        // 🔥 根据设置决定是否显示记账人
+        if (who && settings?.showOperator !== false) {
           const whoWithAt = who.startsWith('@') ? who : `@${who}`
           const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
           if (userId) {

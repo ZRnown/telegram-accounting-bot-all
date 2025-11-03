@@ -49,9 +49,29 @@ export async function buildInlineKb(ctx, options = {}) {
   }
   
   if (ctx.chat?.type === 'private') {
+    // 🔥 私聊菜单：直接邀请按钮和指令菜单
+    try {
+      // 🔥 性能优化：使用ctx.botInfo缓存，避免重复调用getMe
+      let botUsername = ctx.botInfo?.username
+      if (!botUsername) {
+        const me = await ctx.telegram.getMe()
+        botUsername = me?.username
+      }
+      
+      if (botUsername) {
+        // 构建带管理员权限请求的邀请链接
+        const inviteLinkWithAdmin = `https://t.me/${botUsername}?startgroup=true&admin=can_delete_messages+can_restrict_members`
+        
+        rows.push([
+          Markup.button.url('➕ 开始记账', inviteLinkWithAdmin)
+        ])
+      }
+    } catch (e) {
+      console.error('获取机器人信息失败', e)
+    }
+    
     rows.push([
-      Markup.button.callback('使用说明', 'help'),
-      Markup.button.callback('开始记账', 'start_accounting')
+      Markup.button.callback('📋 指令菜单', 'commands_menu')
     ])
     return Markup.inlineKeyboard(rows)
   }
