@@ -43,6 +43,14 @@ export function DashboardHeader({
   const router = useRouter()
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
 
+  // 🔥 格式化本地日期字符串（避免时区问题）
+  const formatDateString = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
   // 🔥 从统计API获取实际的日期范围（考虑日切时间）
   useEffect(() => {
     if (!chatId) return
@@ -50,7 +58,7 @@ export function DashboardHeader({
     const fetchDateRange = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', currentDate.toISOString().slice(0, 10))
+        params.set('date', formatDateString(currentDate))
         params.set('chatId', chatId)
         
         const res = await fetch(`/api/stats/today?${params.toString()}`)

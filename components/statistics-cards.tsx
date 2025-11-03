@@ -31,12 +31,20 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     load()
   }, [chatId])
 
+  // 🔥 格式化本地日期字符串（避免时区问题）
+  const formatDateString = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', currentDate.toISOString().slice(0, 10))
+        params.set('date', formatDateString(currentDate))
         if (pick) params.set('bill', String(pick))
         if (chatId) params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`, { signal: controller.signal })

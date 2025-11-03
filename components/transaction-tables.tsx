@@ -14,6 +14,20 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
   const [pick, setPick] = useState<number | ''>('')
   // 🔥 删除无用的 incomeRefs，不再需要高亮功能
 
+  // 🔥 格式化本地日期字符串（避免时区问题）
+  const formatDateString = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  // 🔥 判断是否是今天（使用本地日期比较）
+  const isToday = (date: Date) => {
+    const today = new Date()
+    return formatDateString(date) === formatDateString(today)
+  }
+
   // 🔥 修复：监听账单选择事件，确保与 StatisticsCards 组件同步
   useEffect(() => {
     const handler = (ev: Event) => {
@@ -37,7 +51,7 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
     const load = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', currentDate.toISOString().slice(0, 10))
+        params.set('date', formatDateString(currentDate))
         if (pick) params.set('bill', String(pick))
         if (chatId) params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`, { signal: controller.signal })
@@ -55,9 +69,9 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
     load()
     
     // 🔥 优化：添加轮询机制，每5秒自动刷新数据（仅当日期是今天时）
-    const isToday = currentDate.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+    const isTodayDate = isToday(currentDate)
     let intervalId: NodeJS.Timeout | null = null
-    if (isToday) {
+    if (isTodayDate) {
       intervalId = setInterval(() => {
         if (!controller.signal.aborted) {
           load().catch((e) => {
