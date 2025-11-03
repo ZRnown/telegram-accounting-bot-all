@@ -68,13 +68,24 @@ export function isAccountingCommand(text) {
   return false
 }
 
+// 🔥 记账开关缓存（减少数据库查询）
+const accountingEnabledCache = new LRUCache(500)
+const ACCOUNTING_CACHE_TTL_MS = 5 * 60 * 1000 // 5分钟
+
 /**
- * 检查记账是否启用
+ * 检查记账是否启用（带缓存优化）
  */
 export async function isAccountingEnabled(ctx) {
   try {
     const chatId = await ensureDbChat(ctx)
     if (!chatId) return true // 默认开启
+    
+    // 🔥 性能优化：使用缓存减少数据库查询
+    const now = Date.now()
+    const cached = accountingEnabledCache.get(chatId)
+    if (cached && cached.expires > now) {
+      return cached.enabled
+    }
     
     const setting = await prisma.setting.findUnique({
       where: { chatId },
@@ -82,11 +93,20 @@ export async function isAccountingEnabled(ctx) {
     })
     
     // 🔥 默认开启记账（如果字段不存在，视为开启）
-    return setting?.accountingEnabled !== false
+    const enabled = setting?.accountingEnabled !== false
+    accountingEnabledCache.set(chatId, { expires: now + ACCOUNTING_CACHE_TTL_MS, enabled })
+    return enabled
   } catch (e) {
     console.error('[isAccountingEnabled] 异常', e)
     return true // 出错时默认开启
   }
+}
+
+/**
+ * 清除记账开关缓存（用于更新后立即生效）
+ */
+export function clearAccountingCache(chatId) {
+  accountingEnabledCache.delete(chatId)
 }
 
 /**
@@ -103,7 +123,57 @@ export function createPermissionMiddleware() {
       // 🔥 检查记账是否启用
       const accountingOk = await isAccountingEnabled(ctx)
       if (!accountingOk) {
-        return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+        try {
+          const chatId = await ensureDbChat(ctx)
+          const setting = await prisma.setting.findUnique({ 
+            where: { chatId },
+            select: { featureWarningMode: true }
+          })
+          
+          const warningMode = setting?.featureWarningMode || 'always'
+          let shouldWarn = false
+          
+          if (warningMode === 'always') {
+            shouldWarn = true
+          } else if (warningMode === 'once') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_disabled' } }
+            })
+            if (!existingLog) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_disabled' } },
+                create: { chatId, feature: 'accounting_disabled' },
+                update: { warnedAt: new Date() }
+              }).catch(() => {})
+            }
+          } else if (warningMode === 'daily') {
+            const existingLog = await prisma.featureWarningLog.findUnique({
+              where: { chatId_feature: { chatId, feature: 'accounting_disabled' } }
+            })
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            
+            if (!existingLog || existingLog.warnedAt < today) {
+              shouldWarn = true
+              await prisma.featureWarningLog.upsert({
+                where: { chatId_feature: { chatId, feature: 'accounting_disabled' } },
+                create: { chatId, feature: 'accounting_disabled' },
+                update: { warnedAt: now }
+              }).catch(() => {})
+            }
+          }
+          // warningMode === 'silent' 时不提醒
+          
+          if (shouldWarn) {
+            return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+          }
+        } catch (e) {
+          console.error('[记账暂停检查][错误]', e)
+          // 出错时默认提醒
+          return ctx.reply('⏸️ 记账功能已暂停，发送"开始"可重新激活记账。')
+        }
+        return // 不提醒，直接返回
       }
       
       const ok = await isFeatureEnabled(ctx, 'accounting_basic')

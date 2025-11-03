@@ -128,18 +128,21 @@ function safeCalculate(expr) {
 }
 
 /**
- * 🔥 增强版解析函数：支持单独汇率、单独费率、组合格式
+ * 🔥 增强版解析函数：支持单独汇率、单独费率、组合格式、数学表达式
  * 支持的格式：
  * - +1000（简单数字）
- * - +1000+500（加法计算）
- * - +1000-500（减法计算）
- * - +1000u/7（单独汇率）
- * - +1000u*0.95（单独费率）
+ * - +3232+321（加法计算，结果+3553）
+ * - +100-20（减法计算，结果+80）
+ * - +1000*0.95（单独费率，结果+950）
+ * - +100/2（单独汇率，100元按汇率2计算为50U，入账100元）
+ * - +1000/7（指定汇率7）
  * - +1000/7*0.95（组合：汇率和费率）
  * - +1000u/7*0.95（组合：USDT + 汇率 + 费率）
  * 
- * 🔥 重要：+1000*2 和 +1000/2 不再作为计算，而是作为费率/汇率
- * 只有 +1000+1000 和 +1000-500 这种加减法才计算
+ * 🔥 重要规则：
+ * - * 表示费率（如 +1000*0.95 = 950元）
+ * - / 表示汇率（如 +100/2 = 100元按汇率2计算）
+ * - +、- 表示数学计算（如 +100-20 = 80元）
  */
 function parseAmountAndRate(text) {
   let rate = null
@@ -157,7 +160,7 @@ function parseAmountAndRate(text) {
     }
   }
   
-  // 🔥 单独费率格式：+1000u*0.95 或 +1000*0.95
+  // 🔥 单独费率格式：+1000u*0.95 或 +1000*0.95（乘法是费率）
   const feeMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/)
   if (feeMatch) {
     amount = Number(feeMatch[1])
@@ -167,29 +170,24 @@ function parseAmountAndRate(text) {
     }
   }
   
-  // 🔥 单独汇率格式：+1000u/7 或 +1000/7（汇率范围6-10）
+  // 🔥 单独汇率格式：+1000u/7 或 +100/2（除法是汇率）
   const rateMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
   if (rateMatch) {
-    const potentialRate = Number(rateMatch[2])
-    // 只有当后面的数字在合理汇率范围内（6-10）或费率范围（0.01-1）才当作汇率/费率
-    if (potentialRate >= 6 && potentialRate <= 10) {
-      amount = Number(rateMatch[1])
-      rate = potentialRate
-      if (Number.isFinite(amount) && Number.isFinite(rate)) {
-        return { amount, rate, feeRate }
-      }
+    amount = Number(rateMatch[1])
+    rate = Number(rateMatch[2])
+    if (Number.isFinite(amount) && Number.isFinite(rate) && rate > 0) {
+      return { amount, rate, feeRate }
     }
-    // 否则整个当作除法表达式（如 +11/21）
   }
   
-  // 🔥 处理加减法计算：+1000+500, +1000-500（只有加减才是计算）
+  // 🔥 处理加减法计算：+3232+321, +100-20（加减法才是数学计算）
   const expr = text.trim()
   const firstChar = expr[0]
   const hasLeadingSign = firstChar === '+' || firstChar === '-'
   const sign = firstChar === '-' ? '-' : ''
   const cleanExpr = hasLeadingSign ? expr.slice(1) : expr
   
-  // 检查是否包含加减运算符（不包括乘除）
+  // 检查是否包含加减运算符（不包括乘除，乘除是费率/汇率）
   if (/[+\-]/.test(cleanExpr)) {
     const calculated = safeCalculate(sign + cleanExpr)
     if (calculated !== null && Number.isFinite(calculated)) {
