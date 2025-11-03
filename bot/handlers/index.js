@@ -26,7 +26,7 @@ import {
   registerMyBill,
   registerAllBill
 } from './bill.js'
-import { registerZ0 } from './okx.js'
+import { registerZ0, registerLZ, registerLW, registerLK } from './okx.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo } from './admin.js'
 import { registerStart, registerHelp, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
 
@@ -73,6 +73,9 @@ export function registerAllHandlers(bot, ensureChat) {
   
   // OKX相关
   registerZ0(bot)
+  registerLZ(bot)
+  registerLW(bot)
+  registerLK(bot)
   
   // 管理员相关
   registerBotLeave(bot)

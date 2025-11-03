@@ -44,15 +44,8 @@ const BACKEND_URL = process.env.BACKEND_URL
 const PROXY_URL = process.env.PROXY_URL || ''
 const agent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined
 
-// 🔥 配置 Telegram API 请求选项（超时和重试）
-const telegramOptions = {
-  ...(agent ? { agent } : {}),
-  // 设置请求超时时间（30秒）
-  timeout: 30000,
-}
-
 const bot = new Telegraf(process.env.BOT_TOKEN, {
-  telegram: telegramOptions,
+  telegram: agent ? { agent } : undefined,
 })
 
 // 🔥 地址验证功能：每个群只确认一个地址
@@ -462,41 +455,24 @@ async function ensureCurrentBotId() {
       // try to get bot username for friendly name
       let name = 'EnvBot'
       try {
-        // 🔥 添加重试机制和更详细的错误处理
-        const maxRetries = 3
-        let lastError = null
-        for (let i = 0; i < maxRetries; i++) {
-          try {
-            const me = await bot.telegram.getMe()
-            name = me?.username ? `@${me.username}` : (me?.first_name || 'EnvBot')
-            break // 成功则退出循环
-          } catch (err) {
-            lastError = err
-            if (i < maxRetries - 1) {
-              const delay = (i + 1) * 2000 // 2秒、4秒、6秒递增延迟
-              console.warn(`[ensureCurrentBotId] 获取机器人信息失败，${delay}ms 后重试 (${i + 1}/${maxRetries})...`, err.message)
-              await new Promise(resolve => setTimeout(resolve, delay))
-            } else {
-              // 最后一次重试也失败了
-              console.error(`[ensureCurrentBotId] 获取机器人信息失败（已重试 ${maxRetries} 次）:`, {
-                error: err.message,
-                code: err.code,
-                type: err.type,
-                proxy: PROXY_URL ? '已配置代理' : '未配置代理'
-              })
-              // 🔥 网络错误时，使用默认名称，不阻止启动
-              if (err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET' || err.code === 'ENOTFOUND') {
-                console.warn('[ensureCurrentBotId] 网络连接问题，使用默认名称继续启动。请检查：')
-                console.warn('  1. 网络连接是否正常')
-                console.warn('  2. 代理配置是否正确（PROXY_URL）')
-                console.warn('  3. 防火墙是否阻止了对 api.telegram.org 的访问')
-              }
-            }
-          }
-        }
+        // 🔥 添加30秒超时处理
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('TIMEOUT')), 30000)
+        })
+        
+        const me = await Promise.race([
+          bot.telegram.getMe(),
+          timeoutPromise
+        ])
+        
+        name = me?.username ? `@${me.username}` : (me?.first_name || 'EnvBot')
       } catch (e) {
-        // 静默失败，使用默认名称
-        console.error('[ensureCurrentBotId] 获取机器人信息异常:', e.message)
+        // 🔥 如果超时，记录错误但不阻止启动
+        if (e.message === 'TIMEOUT') {
+          console.error('⚠️ 链接Telegram API超时（30秒），请检查服务器网络连接')
+        } else {
+          console.error('[ensureCurrentBotId] 获取机器人信息失败:', e.message)
+        }
       }
       row = await prisma.bot.create({ 
         data: { name, token: process.env.BOT_TOKEN, enabled: true },
@@ -1045,7 +1021,7 @@ bot.hears(/^添加操作员\s+/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const text = ctx.message.text || ''
@@ -1090,7 +1066,7 @@ bot.on('text', async (ctx, next) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
@@ -1121,7 +1097,7 @@ bot.hears(/^添加操作员\s+@所有人$/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1137,7 +1113,7 @@ bot.hears(/^删除操作员\s+/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const text = ctx.message.text || ''
@@ -1182,7 +1158,7 @@ bot.on('text', async (ctx, next) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   // 🔥 获取被回复人的信息（优先使用用户名，没有则使用ID）
@@ -1458,8 +1434,8 @@ bot.use(async (ctx, next) => {
       }
     } else {
       // 如果没有明确金额，检查文本中是否包含金额
-      if (replyText.includes(String(Math.round(itemAmount))) || 
-          replyText.includes(String(itemAmount.toFixed(2)))) {
+    if (replyText.includes(String(Math.round(itemAmount))) || 
+        replyText.includes(String(itemAmount.toFixed(2)))) {
         matchScore += 5
       }
     }
@@ -1632,7 +1608,7 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1662,7 +1638,7 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1689,7 +1665,7 @@ bot.hears(/^开启地址验证$/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1712,7 +1688,7 @@ bot.hears(/^关闭地址验证$/i, async (ctx) => {
   
   // 🔥 优化：使用统一的权限检查函数
   if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
   }
   
   const chatId = await ensureDbChat(ctx)
@@ -1873,21 +1849,6 @@ process.once('SIGHUP', cleanup)
 
 bot.launch().then(async () => {
   console.log('Telegram 机器人已启动')
-  
-  // 🔥 启动后验证连接
-  try {
-    const me = await bot.telegram.getMe()
-    console.log(`✅ 机器人连接正常: @${me.username || me.first_name} (${me.id})`)
-  } catch (e) {
-    console.warn('⚠️ 启动后验证连接失败（但不影响运行）:', e.message)
-    if (e.code === 'ETIMEDOUT') {
-      console.warn('💡 提示：网络连接超时，可能是：')
-      console.warn('  - 网络不稳定或无法访问 api.telegram.org')
-      console.warn('  - 代理配置不正确（检查 PROXY_URL 环境变量）')
-      console.warn('  - 防火墙阻止了连接')
-      console.warn('  机器人将继续运行，但在网络恢复前可能无法正常工作')
-    }
-  }
   
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
