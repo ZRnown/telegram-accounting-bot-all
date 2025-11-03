@@ -454,14 +454,21 @@ export function registerMyBill(bot, ensureChat) {
         const amount = Number(item.amount || 0)
         const usdt = Number(item.usdt || 0)
         const isIncome = item.type === 'INCOME'
+        const remark = item.remark // 🔥 获取备注
         
         if (isIncome) {
           totalIncome += amount
+          let line = ''
           if (item.rate) {
-            lines.push(`💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`)
+            line = `💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`
           } else {
-            lines.push(`💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`)
+            line = `💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`
           }
+          // 🔥 如果有备注，在账单后面显示备注
+          if (remark) {
+            line += ` [${remark}]`
+          }
+          lines.push(line)
         } else {
           totalDispatch += amount
           totalUSDT += usdt

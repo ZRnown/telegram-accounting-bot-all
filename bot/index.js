@@ -1333,14 +1333,21 @@ bot.use(async (ctx, next) => {
         const amount = Number(item.amount || 0)
         const usdt = Number(item.usdt || 0)
         const isIncome = item.type === 'INCOME'
+        const remark = item.remark // 🔥 获取备注
         
         if (isIncome) {
           totalIncome += amount
+          let line = ''
           if (item.rate) {
-            lines.push(`💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`)
+            line = `💰 +${amount} / ${item.rate}=${usdt.toFixed(1)}U`
           } else {
-            lines.push(`💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`)
+            line = `💰 +${amount}${usdt > 0 ? ` (${usdt.toFixed(1)}U)` : ''}`
           }
+          // 🔥 如果有备注，在账单后面显示备注
+          if (remark) {
+            line += ` [${remark}]`
+          }
+          lines.push(line)
         } else {
           totalDispatch += amount
           totalUSDT += usdt
@@ -1384,28 +1391,57 @@ bot.use(async (ctx, next) => {
   const items = await prisma.billItem.findMany({
     where: { billId: bill.id },
     orderBy: { createdAt: 'desc' },
-    take: 10
+    take: 50 // 🔥 扩大查询范围，提高匹配准确性
   })
   
   if (!items.length) {
     return ctx.reply('❌ 未找到对应的记录')
   }
   
-  // 🔥 尝试匹配最近几条记录（最多匹配10条）
+  // 🔥 尝试匹配最近几条记录
+  // 优先匹配：1. 精确金额 2. 备注内容 3. 时间戳附近
   let matchedItem = null
+  
+  // 方法1: 尝试从回复文本中提取金额和备注
+  const amountMatch = replyText.match(/(\d+(?:\.\d+)?)/)
+  const remarkMatch = replyText.match(/\[([^\]]+)\]/) // 匹配 [备注] 格式
+  
   for (const item of items) {
     const itemAmount = Math.abs(Number(item.amount) || 0)
-    // 检查回复文本中是否包含该金额（允许小数点误差）
-    if (replyText.includes(String(Math.round(itemAmount))) || 
-        replyText.includes(String(itemAmount.toFixed(2)))) {
+    let matchScore = 0
+    
+    // 检查金额是否匹配
+    if (amountMatch) {
+      const replyAmount = Math.abs(Number(amountMatch[1]))
+      if (Math.abs(itemAmount - replyAmount) < 0.01) {
+        matchScore += 10 // 金额匹配权重高
+      }
+    } else {
+      // 如果没有明确金额，检查文本中是否包含金额
+      if (replyText.includes(String(Math.round(itemAmount))) || 
+          replyText.includes(String(itemAmount.toFixed(2)))) {
+        matchScore += 5
+      }
+    }
+    
+    // 检查备注是否匹配
+    if (remarkMatch && item.remark) {
+      const replyRemark = remarkMatch[1].trim()
+      if (item.remark.includes(replyRemark) || replyRemark.includes(item.remark)) {
+        matchScore += 5
+      }
+    }
+    
+    // 如果匹配分数足够高，选择这个记录
+    if (matchScore >= 10 || (!matchedItem && matchScore > 0)) {
       matchedItem = item
-      break
+      if (matchScore >= 10) break // 如果金额精确匹配，直接使用
     }
   }
   
-  if (!matchedItem) {
-    // 如果没匹配到，删除最近一条记录
-    matchedItem = bill.items[0]
+  // 如果还是没匹配到，删除最近一条记录
+  if (!matchedItem && items.length > 0) {
+    matchedItem = items[0]
   }
   
   // 删除记录

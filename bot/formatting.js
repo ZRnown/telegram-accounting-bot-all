@@ -81,6 +81,7 @@ export async function formatSummary(ctx, chat, options = {}) {
                   usdt: true,
                   replier: true,
                   operator: true,
+                  remark: true, // 🔥 添加备注字段
                   createdAt: true
                 }
               }
