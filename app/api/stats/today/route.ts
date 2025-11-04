@@ -259,10 +259,11 @@ export async function GET(req: NextRequest) {
         // 🔥 修复：支持负数，不强制为0
         const net = gross - (gross * (feePercent || 0)) / 100
         const r = i.rate ? Number(i.rate) : rateB
+        // 🔥 修复：后台显示原始金额（不扣除费率），USDT计算仍然使用扣除费率后的金额
         const usdt = r ? Number((Math.abs(net) / r).toFixed(2)) * (net < 0 ? -1 : 1) : 0
         return {
           time: formatTimeLocal(i.createdAt as Date),
-          amount: `${net}${r ? ` / ${r}=${usdt}` : ''}`,
+          amount: `${gross}${r ? ` / ${r}=${usdt}` : ''}`, // 🔥 修复：显示原始金额gross，而不是net
           amountValue: gross,
           rate: (i.rate ? Number(i.rate) : null),
           replier: i.replier || '',

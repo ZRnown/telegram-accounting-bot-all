@@ -1888,14 +1888,14 @@ bot.launch().then(async () => {
   console.log('[定时任务] 自动日切检查已启动，每10分钟检查一次')
   
   // 🔥 新增：内存优化定时任务
-  // 1. 每小时清理不活跃的聊天（保存引用）
+  // 1. 🔥 内存优化：每30分钟清理不活跃的聊天（从1小时改为30分钟）
   intervals.push(setInterval(() => {
     try {
       cleanupInactiveChats()
     } catch (e) {
       console.error('[定时任务] 清理不活跃聊天失败:', e)
     }
-  }, 3600000)) // 1小时
+  }, 30 * 60 * 1000)) // 🔥 内存优化：30分钟
   
   // 2. 每6小时清理过期的功能开关缓存（由 middleware.js 内部 LRU 缓存自动处理）
   

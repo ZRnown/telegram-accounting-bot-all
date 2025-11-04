@@ -4,13 +4,13 @@
 import { LRUCache, limitMapSize, limitArraySize } from './lru-cache.js'
 
 // 配置项：内存优化（降低内存占用）
-const MAX_BOTS = 5 // 最多支持的机器人数量（减少）
-const MAX_CHATS_PER_BOT = 500 // 每个机器人最多缓存的聊天数量（减少）
-const MAX_USER_ID_CACHE = 200 // 每个聊天最多缓存的用户ID映射（减少）
-const MAX_COMMISSIONS = 50 // 每个聊天最多缓存的佣金记录（减少）
-const MAX_HISTORY = 10 // 最多保留的历史账单数量（减少，历史记录存数据库）
-const MAX_INCOMES = 200 // 当前账单最多保留的入款记录（减少，实际数据在数据库）
-const MAX_DISPATCHES = 200 // 当前账单最多保留的下发记录（减少，实际数据在数据库）
+const MAX_BOTS = 5 // 最多支持的机器人数量
+const MAX_CHATS_PER_BOT = 100 // 🔥 内存优化：每个机器人最多缓存的聊天数量（从500减少到100）
+const MAX_USER_ID_CACHE = 100 // 🔥 内存优化：每个聊天最多缓存的用户ID映射（从200减少到100）
+const MAX_COMMISSIONS = 30 // 🔥 内存优化：每个聊天最多缓存的佣金记录（从50减少到30）
+const MAX_HISTORY = 5 // 🔥 内存优化：最多保留的历史账单数量（从10减少到5，历史记录存数据库）
+const MAX_INCOMES = 100 // 🔥 内存优化：当前账单最多保留的入款记录（从200减少到100，实际数据在数据库）
+const MAX_DISPATCHES = 100 // 🔥 内存优化：当前账单最多保留的下发记录（从200减少到100，实际数据在数据库）
 
 // 使用 LRU 缓存存储 bot
 const bots = new LRUCache(MAX_BOTS)
@@ -71,29 +71,40 @@ function getChat(botId, chatId) {
 }
 
 /**
- * 清理不活跃的聊天（超过24小时未活动）
+ * 清理不活跃的聊天（🔥 内存优化：减少阈值，更频繁清理）
  */
 function cleanupInactiveChats() {
   const now = Date.now()
-  const INACTIVE_THRESHOLD = 24 * 60 * 60 * 1000 // 24小时
+  const INACTIVE_THRESHOLD = 2 * 60 * 60 * 1000 // 🔥 内存优化：从24小时减少到2小时
   
   let cleaned = 0
+  let removed = 0
   for (const [botId, botChats] of bots.cache.entries()) {
+    const chatsToRemove = []
     for (const [chatId, chat] of botChats.cache.entries()) {
       if (now - chat.lastActivityAt > INACTIVE_THRESHOLD) {
-        // 清理大型数据结构
+        // 🔥 内存优化：完全移除不活跃的聊天，而不是只清理数据
+        chatsToRemove.push(chatId)
+        cleaned++
+      } else {
+        // 清理大型数据结构（即使还没到阈值，也定期清理）
         chat.userIdByUsername.clear()
         chat.commissions.clear()
-        chat.current.incomes = []
-        chat.current.dispatches = []
-        chat.history = []
-        cleaned++
+        // 🔥 内存优化：只保留最近的数据
+        chat.current.incomes = chat.current.incomes.slice(-50)
+        chat.current.dispatches = chat.current.dispatches.slice(-50)
+        chat.history = chat.history.slice(-3)
       }
+    }
+    // 移除不活跃的聊天
+    for (const chatId of chatsToRemove) {
+      botChats.delete(chatId)
+      removed++
     }
   }
   
   if (cleaned > 0) {
-    console.log(`[memory-cleanup] 清理了 ${cleaned} 个不活跃的聊天`)
+    console.log(`[memory-cleanup] 清理了 ${cleaned} 个不活跃的聊天，移除了 ${removed} 个`)
   }
 }
 

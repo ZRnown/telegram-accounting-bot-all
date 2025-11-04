@@ -3,9 +3,9 @@ import { prisma } from '../lib/db.ts'
 import { ensureDbChat } from './database.js'
 import { LRUCache } from './lru-cache.js'
 
-// 功能开关缓存
-const featureCache = new LRUCache(500)
-const FEATURE_TTL_MS = 60 * 60 * 1000 // 1小时
+// 功能开关缓存（🔥 内存优化：减少缓存大小）
+const featureCache = new LRUCache(100)
+const FEATURE_TTL_MS = 30 * 60 * 1000 // 30分钟（减少TTL）
 
 /**
  * 检查功能是否启用
@@ -68,8 +68,8 @@ export function isAccountingCommand(text) {
   return false
 }
 
-// 🔥 记账开关缓存（减少数据库查询）
-const accountingEnabledCache = new LRUCache(500)
+// 🔥 记账开关缓存（减少数据库查询，🔥 内存优化：减少缓存大小）
+const accountingEnabledCache = new LRUCache(100)
 const ACCOUNTING_CACHE_TTL_MS = 5 * 60 * 1000 // 5分钟
 
 /**

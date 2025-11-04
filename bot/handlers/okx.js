@@ -23,7 +23,7 @@ function formatOKXPrice(sellers, methodName) {
       if (m === 'bank') return '银行卡'
       return m
     }).join(', ')
-    lines.push(`${emoji}    ${price}    ${seller.nickName}${methods ? ` (${methods})` : ''}`)
+    lines.push(`${emoji} ${price} ${seller.nickName}${methods ? ` (${methods})` : ''}`)
   })
   
   const now = new Date()
