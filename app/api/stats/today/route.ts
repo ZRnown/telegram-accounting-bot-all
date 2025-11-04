@@ -200,6 +200,7 @@ export async function GET(req: NextRequest) {
             amount: true,
             rate: true,
             usdt: true,
+            feeRate: true, // 🔥 添加单笔费率字段，用于正确计算
             replier: true,
             operator: true,
             remark: true, // 🔥 添加备注字段
@@ -238,7 +239,31 @@ export async function GET(req: NextRequest) {
           disps.push(item)
         }
       }
-      const tIncome = incs.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
+      // 🔥 修复费率计算：区分单笔费率（feeRate）和群组费率（feePercent）
+      // 对于有单笔费率的记录，金额已经是扣除费率后的，不需要再用群组费率扣除
+      // 对于没有单笔费率的记录，才用群组费率扣除
+      let totalGrossIncome = 0 // 原始总金额（用于显示）
+      let totalNetIncome = 0 // 扣除费率后的总金额（用于计算应下发）
+      
+      for (const inc of incs) {
+        const amount = Number(inc.amount) || 0
+        const itemFeeRate = inc.feeRate ? Number(inc.feeRate) : null
+        
+        if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+          // 有单笔费率：金额已经是扣除费率后的，需要还原原始金额用于显示
+          const grossAmount = amount / itemFeeRate
+          totalGrossIncome += grossAmount
+          totalNetIncome += amount // 已经是扣除费率后的
+        } else {
+          // 没有单笔费率：使用群组费率
+          const grossAmount = amount
+          totalGrossIncome += grossAmount
+          const netAmount = amount - (amount * (feePercent || 0)) / 100
+          totalNetIncome += netAmount
+        }
+      }
+      
+      const tIncome = totalGrossIncome // 用于显示的总入款（原始金额）
       const tDisp = disps.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
       let rateB = fixedRate ?? realtimeRate ?? 0
       if (!rateB) {
@@ -250,20 +275,33 @@ export async function GET(req: NextRequest) {
           }
         }
       }
-      const feeB = (tIncome * feePercent) / 100
-      // 🔥 修复：支持负数，不强制为0
-      const shouldB = tIncome - feeB
+      // 🔥 修复：应下发使用扣除费率后的总金额（已经考虑了单笔费率和群组费率）
+      const shouldB = totalNetIncome
       const toUSDTB = (n: number) => (rateB ? Number((n / rateB).toFixed(2)) : 0)
       const incomeRecordsSaved = incs.map((i: any) => {
-        const gross = Number(i.amount) || 0
-        // 🔥 修复：支持负数，不强制为0
-        const net = gross - (gross * (feePercent || 0)) / 100
+        const amount = Number(i.amount) || 0
+        const itemFeeRate = i.feeRate ? Number(i.feeRate) : null
+        
+        // 🔥 修复：计算原始金额（gross）和扣除费率后的金额（net）
+        let gross: number
+        let net: number
+        
+        if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+          // 有单笔费率：数据库中的amount已经是扣除费率后的，需要还原原始金额
+          gross = amount / itemFeeRate
+          net = amount // 已经是扣除费率后的
+        } else {
+          // 没有单笔费率：使用群组费率
+          gross = amount
+          net = amount - (amount * (feePercent || 0)) / 100
+        }
+        
         const r = i.rate ? Number(i.rate) : rateB
-        // 🔥 修复：后台显示原始金额（不扣除费率），USDT计算仍然使用扣除费率后的金额
+        // 🔥 修复：USDT计算使用扣除费率后的金额（net）
         const usdt = r ? Number((Math.abs(net) / r).toFixed(2)) * (net < 0 ? -1 : 1) : 0
         return {
           time: formatTimeLocal(i.createdAt as Date),
-          amount: `${gross}${r ? ` / ${r}=${usdt}` : ''}`, // 🔥 修复：显示原始金额gross，而不是net
+          amount: `${gross}${r ? ` / ${r}=${usdt}` : ''}`, // 🔥 修复：显示原始金额gross
           amountValue: gross,
           rate: (i.rate ? Number(i.rate) : null),
           replier: i.replier || '',
