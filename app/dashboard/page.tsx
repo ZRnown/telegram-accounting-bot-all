@@ -32,6 +32,7 @@ function DashboardPageInner() {
   const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
   
   // 白名单用户管理状态
   const [whitelistedUsers, setWhitelistedUsers] = useState<Array<{ id: string; userId: string; username: string | null; note: string | null; createdAt: string }>>([])
@@ -381,7 +382,7 @@ function DashboardPageInner() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="container mx-auto px-4 py-6 max-w-[95%]">
         <DashboardHeader
           currentDate={currentDate}
           onPreviousDay={handlePreviousDay}
@@ -782,6 +783,35 @@ function DashboardPageInner() {
                   <div className="text-sm text-slate-600 mt-1">{groupsCount === 0 ? '暂无群组' : (groupsCount == null ? '加载中...' : `共 ${groupsCount} 个群组`)}</div>
                 </div>
                 <div className="flex gap-2">
+                  {selectedGroups.size > 0 && (
+                    <button
+                      className="px-3 py-1.5 text-sm border rounded-md hover:bg-red-50 text-red-600 font-medium"
+                      onClick={async () => {
+                        if (!confirm(`确认删除选中的 ${selectedGroups.size} 个群组及其相关数据？此操作不可恢复`)) return
+                        let successCount = 0
+                        let failCount = 0
+                        
+                        for (const chatId of selectedGroups) {
+                          try {
+                            const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
+                            if (res.status === 204) {
+                              successCount++
+                            } else {
+                              failCount++
+                            }
+                          } catch {
+                            failCount++
+                          }
+                        }
+                        
+                        setSelectedGroups(new Set())
+                        toast({ title: '批量删除完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
+                        
+                        // 重新加载群列表
+                        setTimeout(() => window.location.reload(), 500)
+                      }}
+                    >🗑️ 删除选中 ({selectedGroups.size})</button>
+                  )}
                   <button
                     className="px-3 py-1.5 text-sm border rounded-md hover:bg-blue-50 text-blue-600 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={batchSaving || groups.length === 0}
@@ -859,7 +889,21 @@ function DashboardPageInner() {
                     <table className="w-full border-collapse">
                     <thead className="bg-slate-50">
                       <tr className="border-b-2 border-slate-200">
-                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">Chat ID</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[4%]">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            checked={filteredGroups.length > 0 && selectedGroups.size === filteredGroups.length}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedGroups(new Set(filteredGroups.map(g => g.id)))
+                              } else {
+                                setSelectedGroups(new Set())
+                              }
+                            }}
+                          />
+                        </th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[11%]">Chat ID</th>
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">群组名称</th>
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">绑定机器人</th>
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">邀请人/方式</th>
@@ -876,6 +920,22 @@ function DashboardPageInner() {
                         return (
                           <Fragment key={it.id}>
                             <tr className={`border-b hover:bg-slate-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>
+                              <td className="py-3 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                  checked={selectedGroups.has(it.id)}
+                                  onChange={(e) => {
+                                    const newSelected = new Set(selectedGroups)
+                                    if (e.target.checked) {
+                                      newSelected.add(it.id)
+                                    } else {
+                                      newSelected.delete(it.id)
+                                    }
+                                    setSelectedGroups(newSelected)
+                                  }}
+                                />
+                              </td>
                               <td className="py-3 px-3 text-sm text-slate-900 font-mono truncate" title={it.id}>{it.id}</td>
                               <td className="py-3 px-3 text-sm text-slate-900 font-medium truncate" title={it.title || '-'}>{it.title || '-'}</td>
                               <td className="py-3 px-3">
@@ -902,28 +962,23 @@ function DashboardPageInner() {
                               </td>
                               <td className="py-3 px-3 text-sm text-slate-900 truncate" title={inviterLabel}>{inviterLabel}</td>
                               <td className="py-3 px-3 text-center">
-                                <label className="inline-flex items-center gap-1 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                                    checked={draft.allowed}
-                                    onChange={(e) => {
-                                      const allowed = e.target.checked
-                                      const status = allowed ? 'APPROVED' : 'PENDING'
-                                      setDrafts((d) => ({
-                                        ...d,
-                                        [it.id]: {
-                                          status,
-                                          allowed,
-                                          botId: (d[it.id]?.botId ?? draft.botId) ?? null,
-                                        },
-                                      }))
-                                    }}
-                                  />
-                                  <span className={`text-xs font-medium ${draft.allowed ? 'text-green-600' : 'text-slate-500'}`}>
-                                    {draft.allowed ? '✓' : '✗'}
-                                  </span>
-                                </label>
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                  checked={draft.allowed}
+                                  onChange={(e) => {
+                                    const allowed = e.target.checked
+                                    const status = allowed ? 'APPROVED' : 'PENDING'
+                                    setDrafts((d) => ({
+                                      ...d,
+                                      [it.id]: {
+                                        status,
+                                        allowed,
+                                        botId: (d[it.id]?.botId ?? draft.botId) ?? null,
+                                      },
+                                    }))
+                                  }}
+                                />
                               </td>
                               <td className="py-3 px-3 text-xs text-slate-600">{new Date(it.createdAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                               <td className="py-3 px-3">
@@ -1012,7 +1067,7 @@ function DashboardPageInner() {
                             </tr>
                             {expandedRows[it.id] && (
                               <tr>
-                                <td colSpan={6} className="bg-slate-50 p-3">
+                                <td colSpan={7} className="bg-slate-50 p-3">
                                   <div>
                                     <div className="text-sm text-slate-700 mb-2">功能开关（群组 {it.title || it.id}）</div>
                                     <div className="flex flex-wrap gap-4 items-center">
