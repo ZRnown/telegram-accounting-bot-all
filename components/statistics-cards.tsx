@@ -1,8 +1,9 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { formatDateString } from "@/lib/utils"
 
 interface StatisticsCardsProps {
   currentDate: Date
@@ -31,20 +32,15 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     load()
   }, [chatId])
 
-  // 🔥 格式化本地日期字符串（避免时区问题）
-  const formatDateString = (date: Date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    return `${year}-${month}-${day}`
-  }
+  // 🔥 使用 useMemo 优化日期字符串计算
+  const dateStr = useMemo(() => formatDateString(currentDate), [currentDate])
 
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', formatDateString(currentDate))
+        params.set('date', dateStr)
         if (pick) params.set('bill', String(pick))
         if (chatId) params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`, { signal: controller.signal })
@@ -67,17 +63,13 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     }
     load()
     return () => controller.abort()
-  }, [currentDate, pick, chatId])
+  }, [dateStr, pick, chatId])
 
-  // 🔥 性能优化：移除无用的 effect
+  // 🔥 使用 useMemo 优化计算结果
+  const isCumulativeMode = useMemo(() => settings?.accountingMode === 'CARRY_OVER', [settings?.accountingMode])
+  const hasCarryOver = useMemo(() => data?.carryOver && data.carryOver > 0, [data?.carryOver])
 
-  if (!data) return null
-  
-  // 🔥 判断是否累计模式
-  const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-  const hasCarryOver = data.carryOver && data.carryOver > 0
-
-  const view = (() => {
+  const view = useMemo(() => {
     if (!data) return null as any
     const list = Array.isArray(data.bills) ? data.bills : []
     if (!list.length) return data
@@ -85,8 +77,19 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     const b = list[idx]
     if (!b) return data
     return { ...data, ...b }
-  })()
+  }, [data, pick])
 
+  // 🔥 使用 useCallback 优化事件处理
+  const handleBillChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = Number(e.target.value)
+    setPick(v)
+    if (v > 0) {
+      window.dispatchEvent(new CustomEvent('goto-bill', { detail: { type: 'income', index: v } }))
+    }
+  }, [])
+
+  if (!data || !view) return null
+  
   return (
     <Card>
       <CardHeader>
@@ -119,13 +122,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
                 <select
                   className="text-xs border border-slate-300 rounded px-2 py-1"
                   value={pick as any}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    setPick(v)
-                    if (v > 0) {
-                      window.dispatchEvent(new CustomEvent('goto-bill', { detail: { type: 'income', index: v } }))
-                    }
-                  }}
+                  onChange={handleBillChange}
                 >
                   <option value="">选择第几笔</option>
                   {Array.from({ length: data.billNumber }, (_, i) => i + 1).map((n) => (

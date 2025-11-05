@@ -1,7 +1,8 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
+import { formatDateString } from "@/lib/utils"
 
 interface CategoryStatsProps {
   currentDate: Date
@@ -11,20 +12,15 @@ interface CategoryStatsProps {
 export function CategoryStats({ currentDate, chatId }: CategoryStatsProps) {
   const [data, setData] = useState<any | null>(null)
 
-  // 🔥 格式化本地日期字符串（避免时区问题）
-  const formatDateString = (date: Date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    return `${year}-${month}-${day}`
-  }
+  // 🔥 使用 useMemo 优化日期字符串计算
+  const dateStr = useMemo(() => formatDateString(currentDate), [currentDate])
 
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', formatDateString(currentDate))
+        params.set('date', dateStr)
         if (chatId) params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`, { signal: controller.signal })
         if (!res.ok) throw new Error('failed')
@@ -36,7 +32,7 @@ export function CategoryStats({ currentDate, chatId }: CategoryStatsProps) {
     }
     load()
     return () => controller.abort()
-  }, [currentDate, chatId])
+  }, [dateStr, chatId])
 
   if (!data) return null
 

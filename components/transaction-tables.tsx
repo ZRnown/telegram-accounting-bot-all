@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
+import { formatDateString } from "@/lib/utils"
 
 interface TransactionTablesProps {
   currentDate: Date
@@ -14,32 +15,26 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
   const [pick, setPick] = useState<number | ''>('')
   // 🔥 删除无用的 incomeRefs，不再需要高亮功能
 
-  // 🔥 格式化本地日期字符串（避免时区问题）
-  const formatDateString = (date: Date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    return `${year}-${month}-${day}`
-  }
-
-  // 🔥 判断是否是今天（使用本地日期比较）
-  const isToday = (date: Date) => {
+  // 🔥 使用 useMemo 优化日期字符串和是否今天的判断
+  const dateStr = useMemo(() => formatDateString(currentDate), [currentDate])
+  const isTodayDate = useMemo(() => {
     const today = new Date()
-    return formatDateString(date) === formatDateString(today)
-  }
+    return dateStr === formatDateString(today)
+  }, [dateStr])
+
+  // 🔥 使用 useCallback 优化事件处理
+  const handleBillEvent = useCallback((ev: Event) => {
+    const detail = (ev as CustomEvent).detail as { type?: string; index?: number }
+    if (detail?.index && detail.index > 0) {
+      setPick(detail.index)
+    }
+  }, [])
 
   // 🔥 修复：监听账单选择事件，确保与 StatisticsCards 组件同步
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent).detail as { type?: string; index?: number }
-      if (detail?.index && detail.index > 0) {
-        // 🔥 立即更新 pick 状态，触发数据重新加载
-        setPick(detail.index)
-      }
-    }
-    window.addEventListener('goto-bill', handler as any)
-    return () => window.removeEventListener('goto-bill', handler as any)
-  }, [])
+    window.addEventListener('goto-bill', handleBillEvent as any)
+    return () => window.removeEventListener('goto-bill', handleBillEvent as any)
+  }, [handleBillEvent])
   
   // 🔥 修复：当日期变化时，重置 pick 状态，避免使用旧的账单索引
   useEffect(() => {
@@ -51,7 +46,7 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
     const load = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', formatDateString(currentDate))
+        params.set('date', dateStr)
         if (pick) params.set('bill', String(pick))
         if (chatId) params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`, { signal: controller.signal })
@@ -69,7 +64,6 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
     load()
     
     // 🔥 优化：添加轮询机制，每5秒自动刷新数据（仅当日期是今天时）
-    const isTodayDate = isToday(currentDate)
     let intervalId: NodeJS.Timeout | null = null
     if (isTodayDate) {
       intervalId = setInterval(() => {
@@ -85,7 +79,7 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
       controller.abort()
       if (intervalId) clearInterval(intervalId)
     }
-  }, [currentDate, pick, chatId])
+  }, [dateStr, pick, chatId, isTodayDate])
 
   // 🔥 删除高亮闪烁的无用逻辑
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, Suspense, useEffect, useState } from "react"
+import { Fragment, Suspense, useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { DashboardHeader } from "@/components/dashboard-header"
@@ -333,34 +333,49 @@ function DashboardPageInner() {
     return null
   }
 
-  const handlePreviousDay = () => {
-    const newDate = new Date(currentDate)
-    newDate.setDate(newDate.getDate() - 1)
-    setCurrentDate(newDate)
-  }
+  // 🔥 使用 useMemo 优化计算
+  const manualAddedSet = useMemo(() => getManualAddedSet(), [groups])
+  const inviterOptions = useMemo(() => {
+    return Array.from(new Set(groups.map(g => g.invitedByUsername || (manualAddedSet.has(g.id) ? '手动' : '-'))))
+      .filter(x => x !== '-')
+      .sort()
+  }, [groups, manualAddedSet])
+  
+  const filteredGroups = useMemo(() => {
+    return inviterFilter === '全部' 
+      ? groups 
+      : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter)
+  }, [groups, inviterFilter])
 
-  const handleNextDay = () => {
-    const newDate = new Date(currentDate)
-    newDate.setDate(newDate.getDate() + 1)
-    setCurrentDate(newDate)
-  }
+  // 🔥 使用 useCallback 优化事件处理
+  const handlePreviousDay = useCallback(() => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev)
+      newDate.setDate(newDate.getDate() - 1)
+      return newDate
+    })
+  }, [])
 
-  const handleDateChange = (date: Date) => {
+  const handleNextDay = useCallback(() => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev)
+      newDate.setDate(newDate.getDate() + 1)
+      return newDate
+    })
+  }, [])
+
+  const handleDateChange = useCallback((date: Date) => {
     setCurrentDate(date)
-  }
+  }, [])
 
-  const handleViewSummary = () => {
-    if (chatId) {
-      router.push(`/summary?chatId=${encodeURIComponent(chatId)}`)
-    } else {
-      router.push("/summary")
-    }
-  }
+  const handleViewSummary = useCallback(() => {
+    router.push('/summary')
+  }, [router])
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem("auth_token")
     router.push("/")
-  }
+  }, [router])
 
   const showCompact = !chatId
 
@@ -831,15 +846,12 @@ function DashboardPageInner() {
                       onChange={(e) => setInviterFilter(e.target.value)}
                     >
                       <option value="全部">全部</option>
-                      {Array.from(new Set(groups.map(g => g.invitedByUsername || (getManualAddedSet().has(g.id) ? '手动' : '-'))))
-                        .filter(x => x !== '-')
-                        .sort()
-                        .map(username => (
-                          <option key={username} value={username}>{username}</option>
-                        ))}
+                      {inviterOptions.map(username => (
+                        <option key={username} value={username}>{username}</option>
+                      ))}
                     </select>
                     <span className="text-sm text-slate-500">
-                      （显示 {inviterFilter === '全部' ? groups.length : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter).length} 个群组）
+                      （显示 {filteredGroups.length} 个群组）
                     </span>
                   </div>
                   
@@ -857,16 +869,10 @@ function DashboardPageInner() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(() => {
-                        // 🔥 筛选：按邀请人分类
-                        const filteredGroups = inviterFilter === '全部' 
-                          ? groups 
-                          : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter)
-                        
-                        return filteredGroups.map((it, idx) => {
+                      {filteredGroups.map((it, idx) => {
                           const draft = drafts[it.id] || { status: 'PENDING', botId: it.botId ?? null, allowed: !!it.allowed }
                           // 🔥 使用数据库返回的邀请人信息，优先使用 invitedByUsername，如果没有则使用手动添加标记
-                          const inviterLabel = it.invitedByUsername || (getManualAddedSet().has(it.id) ? '手动' : '-')
+                          const inviterLabel = it.invitedByUsername || (manualAddedSet.has(it.id) ? '手动' : '-')
                         return (
                           <Fragment key={it.id}>
                             <tr className={`border-b hover:bg-slate-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>

@@ -1,13 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ChevronLeft, ChevronRight, Download, LogOut, Calendar } from "lucide-react"
 import { exportToExcel } from "@/lib/export-excel"
 import { useRouter } from "next/navigation"
+import { formatDateString } from "@/lib/utils"
 
 interface DashboardHeaderProps {
   currentDate: Date
@@ -43,13 +44,8 @@ export function DashboardHeader({
   const router = useRouter()
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
 
-  // 🔥 格式化本地日期字符串（避免时区问题）
-  const formatDateString = (date: Date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    return `${year}-${month}-${day}`
-  }
+  // �� 使用 useMemo 优化日期字符串计算
+  const dateStr = useMemo(() => formatDateString(currentDate), [currentDate])
 
   // 🔥 从统计API获取实际的日期范围（考虑日切时间）
   useEffect(() => {
@@ -58,16 +54,15 @@ export function DashboardHeader({
     const fetchDateRange = async () => {
       try {
         const params = new URLSearchParams()
-        params.set('date', formatDateString(currentDate))
+        params.set('date', dateStr)
         params.set('chatId', chatId)
-        
         const res = await fetch(`/api/stats/today?${params.toString()}`)
         if (res.ok) {
-          const data = await res.json()
-          if (data.dateRangeStart && data.dateRangeEnd) {
+          const json = await res.json()
+          if (json.dateRangeStart && json.dateRangeEnd) {
             setDateRange({
-              start: new Date(data.dateRangeStart),
-              end: new Date(data.dateRangeEnd)
+              start: new Date(json.dateRangeStart),
+              end: new Date(json.dateRangeEnd)
             })
           }
         }
@@ -77,7 +72,7 @@ export function DashboardHeader({
     }
     
     fetchDateRange()
-  }, [currentDate, chatId])
+  }, [dateStr, chatId])
 
   const formatDateTime = (date: Date) => {
     return date.toLocaleString("zh-CN", {
