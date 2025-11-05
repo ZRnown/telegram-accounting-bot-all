@@ -325,20 +325,28 @@ function DashboardPageInner() {
               d[it.id] = { status, botId: it.botId ?? null, allowed }
             }
             setDrafts(d)
-            // 后台异步刷新缓存
-            setTimeout(() => {
-              Promise.all([fetch('/api/bots'), fetch('/api/chats')]).then(async ([botsRes, chatsRes]) => {
-                if (botsRes.ok && chatsRes.ok) {
-                  const botsData = await botsRes.json()
-                  const chatsData = await chatsRes.json()
-                  const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
-                  const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
-                  const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
-                  setCachedData(CACHE_KEY_BOTS, newBots)
-                  setCachedData(CACHE_KEY_GROUPS, chatsItems)
+            // 🔥 优化：后台异步刷新缓存，立即更新UI
+            Promise.all([fetch('/api/bots'), fetch('/api/chats')]).then(async ([botsRes, chatsRes]) => {
+              if (botsRes.ok && chatsRes.ok) {
+                const botsData = await botsRes.json()
+                const chatsData = await chatsRes.json()
+                const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
+                const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
+                const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
+                setBots(newBots)
+                setGroups(chatsItems)
+                setGroupsCount(chatsItems.length)
+                const d: Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }> = {}
+                for (const it of chatsItems) {
+                  const status = (it.status as any) || (it.allowed ? 'APPROVED' : 'PENDING')
+                  const allowed = status === 'APPROVED'
+                  d[it.id] = { status, botId: it.botId ?? null, allowed }
                 }
-              }).catch(() => {})
-            }, 100)
+                setDrafts(d)
+                setCachedData(CACHE_KEY_BOTS, newBots)
+                setCachedData(CACHE_KEY_GROUPS, chatsItems)
+              }
+            }).catch(() => {})
           } else {
             // 🔥 并行加载机器人和群组，提升加载速度
             const [botsRes, chatsRes] = await Promise.all([
@@ -373,6 +381,35 @@ function DashboardPageInner() {
       } catch {}
     }
     load()
+    
+    // 🔥 优化：如果没有chatId（群组管理页面），每30秒自动刷新一次群组列表
+    if (!chatId) {
+      const interval = setInterval(() => {
+        Promise.all([fetch('/api/bots'), fetch('/api/chats')]).then(async ([botsRes, chatsRes]) => {
+          if (botsRes.ok && chatsRes.ok) {
+            const botsData = await botsRes.json()
+            const chatsData = await chatsRes.json()
+            const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
+            const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
+            const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
+            setBots(newBots)
+            setGroups(chatsItems)
+            setGroupsCount(chatsItems.length)
+            const d: Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }> = {}
+            for (const it of chatsItems) {
+              const status = (it.status as any) || (it.allowed ? 'APPROVED' : 'PENDING')
+              const allowed = status === 'APPROVED'
+              d[it.id] = { status, botId: it.botId ?? null, allowed }
+            }
+            setDrafts(d)
+            setCachedData(CACHE_KEY_BOTS, newBots)
+            setCachedData(CACHE_KEY_GROUPS, chatsItems)
+          }
+        }).catch(() => {})
+      }, 30 * 1000) // 30秒刷新一次
+      
+      return () => clearInterval(interval)
+    }
   }, [mounted, chatId])
 
   // 🔥 使用 useMemo 优化计算（必须在所有条件返回之前）
@@ -854,12 +891,20 @@ function DashboardPageInner() {
                             </div>
                             
                             <div>
-                              <h3 className="font-semibold text-slate-900 mb-2">🔄 刷新说明</h3>
+                              <h3 className="font-semibold text-slate-900 mb-2">🔄 数据刷新说明</h3>
                               <p className="text-sm text-slate-600 mb-2">
-                                如果邀请人信息未显示，请刷新页面（F5 或 Ctrl+R）重新加载数据。
+                                <strong>如果数据没有更新，请刷新页面：</strong>
+                              </p>
+                              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1 mb-2">
+                                <li>按 F5 或 Ctrl+R（Windows/Linux）刷新页面</li>
+                                <li>按 Cmd+R（Mac）刷新页面</li>
+                                <li>或点击浏览器的刷新按钮</li>
+                              </ul>
+                              <p className="text-sm text-slate-600 mb-2">
+                                邀请人信息会在机器人被邀请时自动记录，如果机器人被踢出后重新加入，会更新为最新的邀请人信息。
                               </p>
                               <p className="text-sm text-slate-600">
-                                邀请人信息会在机器人被邀请时自动记录，如果机器人被踢出后重新加入，会更新为最新的邀请人信息。
+                                如果刷新后仍然没有显示，请检查机器人日志或重新邀请机器人加入群组。
                               </p>
                             </div>
                             

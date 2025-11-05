@@ -448,7 +448,7 @@ export async function performAutoDailyCutoff(getChat) {
             })
           }
           
-          // 如果有内存中的聊天对象，清空其内存数据
+          // 如果有内存中的聊天对象，清空其内存数据并重新加载设置
           // 注意：这里无法直接访问state，需要通过回调函数
           if (getChat && typeof getChat === 'function') {
             try {
@@ -464,11 +464,18 @@ export async function performAutoDailyCutoff(getChat) {
                   chat._billLastSync = 0
                   // 🔥 更新最后账单日期为今天日切的开始时间
                   chat._lastBillDate = todayStart.getTime()
-                  console.log(`[自动日切] 已清空群组 ${chatId} 的内存数据`, { todayStart: todayStart.toISOString() })
+                  
+                  // 🔥 修复：日切后重新同步设置到内存（确保操作人、汇率、费率不会丢失）
+                  // 创建一个假的ctx对象用于syncSettingsToMemory
+                  const fakeCtx = { chat: { id: chatId } }
+                  await syncSettingsToMemory(fakeCtx, chat, chatId)
+                  
+                  console.log(`[自动日切] 已清空群组 ${chatId} 的内存数据并重新加载设置`, { todayStart: todayStart.toISOString() })
                 }
               }
             } catch (e) {
               // 如果获取失败，忽略（可能是群组不在内存中）
+              console.error(`[自动日切] 同步设置失败 (chatId: ${chatId}):`, e)
             }
           }
           

@@ -135,8 +135,18 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">{isCumulativeMode ? '累计总入款' : '总入款金额'}</span>
-            <span className="text-lg font-semibold text-green-600">{view.totalIncome.toLocaleString()}</span>
+            <span className="text-lg font-semibold text-green-600">
+              {isCumulativeMode ? (view.totalIncome ?? 0).toLocaleString() : (view.totalIncome ?? 0).toLocaleString()}
+            </span>
           </div>
+          
+          {/* 🔥 累计模式：显示今日入款 */}
+          {isCumulativeMode && (
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+              <span className="text-sm text-slate-600">今日入款</span>
+              <span className="text-lg font-semibold text-blue-600">{(view.todayIncome ?? 0).toLocaleString()}</span>
+            </div>
+          )}
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">汇率</span>

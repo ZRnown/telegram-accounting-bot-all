@@ -790,13 +790,28 @@ bot.on('my_chat_member', async (ctx) => {
         
         // 发送欢迎消息
         try {
+          // 🔥 检查是否已设置汇率
+          const setting = await prisma.setting.findUnique({
+            where: { chatId },
+            select: { fixedRate: true, realtimeRate: true }
+          })
+          const hasRate = setting?.fixedRate != null || setting?.realtimeRate != null
+          
+          let rateHint = ''
+          if (!hasRate) {
+            rateHint = `\n💱 汇率设置：\n` +
+              `• 系统已自动获取实时汇率，如需手动设置请使用：设置固定汇率 7.13\n` +
+              `• 或保持使用实时汇率（系统会自动更新）\n`
+          }
+          
           await ctx.reply(
             `✅ 欢迎使用记账机器人！\n\n` +
             `您已被自动授权使用，所有功能已启用。\n` +
             `邀请人：${inviterUsername || inviterId}\n\n` +
             `机器人已默认开启记账功能，可直接使用 +金额 开始记账。\n` +
-            `发送 "使用说明" 查看详细指南。\n\n` +
-            `⚠️ 提示：如果机器人无响应，请：\n` +
+            `发送 "使用说明" 查看详细指南。\n` +
+            rateHint +
+            `\n⚠️ 提示：如果机器人无响应，请：\n` +
             `1. 将机器人设为管理员，或\n` +
             `2. 找 @BotFather 发送 /setprivacy 选择 Disable`
           )
@@ -806,13 +821,29 @@ bot.on('my_chat_member', async (ctx) => {
       } else {
         // 非白名单用户，提示需要审核
         try {
+          // 🔥 检查是否已设置汇率
+          const setting = await prisma.setting.findUnique({
+            where: { chatId },
+            select: { fixedRate: true, realtimeRate: true }
+          })
+          const hasRate = setting?.fixedRate != null || setting?.realtimeRate != null
+          
+          let rateHint = ''
+          if (!hasRate) {
+            rateHint = `\n💱 汇率设置：\n` +
+              `• 系统已自动获取实时汇率，如需手动设置请使用：设置固定汇率 7.13\n` +
+              `• 或保持使用实时汇率（系统会自动更新）\n`
+          }
+          
           await ctx.reply(
             `👋 机器人已加入群组！\n\n` +
             `⚠️ 当前需要管理员审核才能使用。\n` +
             `邀请人：${inviterUsername || inviterId}\n\n` +
+            `⚠️ 注意：邀请人（${inviterUsername || inviterId}）未在白名单中，因此需要管理员手动批准。\n\n` +
             `请联系管理员到后台批准本群使用。\n\n` +
             `💡 提示：如果您希望自动授权，请联系管理员将您的用户ID添加到白名单。\n` +
-            `您的用户ID：\`${inviterId}\``,
+            `您的用户ID：\`${inviterId}\`\n` +
+            rateHint,
             { parse_mode: 'Markdown' }
           )
         } catch (e) {
