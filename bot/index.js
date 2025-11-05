@@ -707,14 +707,7 @@ bot.on('my_chat_member', async (ctx) => {
       // 🔥 邀请记录功能已删除
       
       // Upsert chat，如果邀请人在白名单，自动设置 allowed=true
-      // 🔥 修复：保存邀请人信息（如果原来没有邀请人信息，则更新）
-      const existingChat = await prisma.chat.findUnique({
-        where: { id: chatId },
-        select: { invitedBy: true, invitedByUsername: true }
-      })
-      
-      const shouldUpdateInviter = !existingChat?.invitedBy && inviterId && inviterUsername
-      
+      // 🔥 修复：在新加入时总是保存邀请人信息
       const res = await prisma.chat.upsert({
         where: { id: chatId },
         create: { 
@@ -731,8 +724,8 @@ bot.on('my_chat_member', async (ctx) => {
           botId,
           status: autoAllowed ? 'APPROVED' : undefined,
           allowed: autoAllowed ? true : undefined,
-          // 🔥 如果原来没有邀请人信息，则更新
-          ...(shouldUpdateInviter ? {
+          // 🔥 新加入时总是更新邀请人信息（确保能获取到最新的邀请人）
+          ...(inviterId && inviterUsername ? {
             invitedBy: inviterId,
             invitedByUsername: inviterUsername
           } : {})

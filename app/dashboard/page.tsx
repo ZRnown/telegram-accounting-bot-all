@@ -17,6 +17,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 function DashboardPageInner() {
   const { toast } = useToast()
@@ -816,7 +824,87 @@ function DashboardPageInner() {
             <div className="bg-white border rounded-lg p-6">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <div className="text-lg font-semibold text-slate-900">群组管理</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-lg font-semibold text-slate-900">群组管理</div>
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">
+                          ℹ️ 说明
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>群组管理说明</DialogTitle>
+                          <DialogDescription className="space-y-4 pt-4">
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">📥 自动添加群组</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                当机器人被邀请加入群组时，系统会自动在群组管理中创建该群组的记录，并显示邀请人信息。
+                              </p>
+                              <p className="text-sm text-slate-600">
+                                如果邀请人在白名单中，该群组将自动被授权使用（无需手动批准）。
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">📤 自动删除群组</h3>
+                              <p className="text-sm text-slate-600">
+                                当机器人被踢出群组或离开群组时，系统会自动删除该群组的记录及相关数据。
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">🔄 刷新说明</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                如果邀请人信息未显示，请刷新页面（F5 或 Ctrl+R）重新加载数据。
+                              </p>
+                              <p className="text-sm text-slate-600">
+                                邀请人信息会在机器人被邀请时自动记录，如果机器人被踢出后重新加入，会更新为最新的邀请人信息。
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">🗑️ 删除功能</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                <strong>单个删除：</strong>点击群组行右侧的 🗑️ 按钮，可以删除该群组及其所有相关数据（包括账单、设置、操作员等）。此操作不可恢复。
+                              </p>
+                              <p className="text-sm text-slate-600">
+                                <strong>批量删除：</strong>勾选多个群组前的复选框，然后点击"删除选中"按钮，可以批量删除选中的群组。此操作不可恢复。
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">➕ 手动添加群组</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                如果机器人已经在群组中，但群组管理中没有显示，可以使用"手动添加群"功能：
+                              </p>
+                              <ol className="list-decimal list-inside text-sm text-slate-600 space-y-1">
+                                <li>点击"手动添加群"按钮</li>
+                                <li>输入群组的 Chat ID（格式：-1001234567890）</li>
+                                <li>选择要绑定的机器人</li>
+                                <li>点击"确定添加"</li>
+                              </ol>
+                              <p className="text-sm text-slate-600 mt-2">
+                                手动添加的群组，邀请人/方式会显示为"手动"。
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">👤 邀请人/方式</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                此列显示将机器人邀请到群组的用户信息：
+                              </p>
+                              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
+                                <li>如果显示用户名（如 @Thy1cc），表示该用户邀请的机器人</li>
+                                <li>如果显示"手动"，表示该群组是通过"手动添加群"功能添加的</li>
+                                <li>如果显示"-"，表示无法获取邀请人信息（可能是旧数据或机器人被踢出后重新加入）</li>
+                              </ul>
+                            </div>
+                          </DialogDescription>
+                        </DialogHeader>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
                   <div className="text-sm text-slate-600 mt-1">{groupsCount === 0 ? '暂无群组' : (groupsCount == null ? '加载中...' : `共 ${groupsCount} 个群组`)}</div>
                 </div>
                 <div className="flex gap-2">
