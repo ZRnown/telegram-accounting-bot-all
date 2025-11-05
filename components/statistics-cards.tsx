@@ -76,8 +76,15 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     const idx = pick ? (Number(pick) - 1) : (list.length - 1)
     const b = list[idx]
     if (!b) return data
-    return { ...data, ...b }
-  }, [data, pick])
+    // 🔥 累计模式：保留 API 返回的 todayIncome 和 totalIncome，不被选中账单的数据覆盖
+    const result = { ...data, ...b }
+    if (isCumulativeMode) {
+      // 在累计模式下，确保使用 API 返回的 todayIncome 和 totalIncome（而不是选中账单的 totalIncome）
+      if (data.todayIncome != null) result.todayIncome = data.todayIncome
+      if (data.totalIncome != null) result.totalIncome = data.totalIncome
+    }
+    return result
+  }, [data, pick, isCumulativeMode])
 
   // 🔥 使用 useCallback 优化事件处理
   const handleBillChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -170,30 +177,32 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
         </div>
         
         {/* 🔥 累计模式账单拆解 */}
-        {isCumulativeMode && hasCarryOver && (
+        {isCumulativeMode && (
           <div className="pt-2 border-t border-slate-200">
             <div className="text-sm font-medium text-slate-700 mb-2">📊 账单拆解（累计模式）</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 bg-green-50 rounded-lg border border-green-200">
                 <div className="text-xs text-slate-600 mb-1">今日入款</div>
-                <div className="font-semibold text-slate-900">{(view.todayIncome ?? view.totalIncome ?? 0).toLocaleString()}</div>
-                <div className="text-xs text-green-600">当天新增的入款金额</div>
+                <div className="font-semibold text-slate-900">{(view.todayIncome ?? data.todayIncome ?? 0).toLocaleString()}</div>
+                <div className="text-xs text-green-600">当个日切日内的入款金额</div>
               </div>
               
               <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <div className="text-xs text-slate-600 mb-1">累计总入款</div>
-                <div className="font-semibold text-slate-900">{(view.totalIncome ?? 0).toLocaleString()}</div>
+                <div className="font-semibold text-slate-900">{(view.totalIncome ?? data.totalIncome ?? 0).toLocaleString()}</div>
                 <div className="text-xs text-blue-600">从最早到现在的累计入款</div>
               </div>
               
-              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                <div className="text-xs text-slate-600 mb-1">历史未下发</div>
-                <div className="font-semibold text-slate-900">{(data.carryOver || 0).toLocaleString()}</div>
-                <div className="text-xs text-amber-600">昨天及之前累计的未下发</div>
-              </div>
+              {hasCarryOver && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <div className="text-xs text-slate-600 mb-1">历史未下发</div>
+                  <div className="font-semibold text-slate-900">{(data.carryOver || 0).toLocaleString()}</div>
+                  <div className="text-xs text-amber-600">昨天及之前累计的未下发</div>
+                </div>
+              )}
             </div>
             <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
-              💡 提示：应下发 = 今日入款（扣除费率后） + 历史未下发
+              💡 提示：应下发 = 今日入款（扣除费率后）{hasCarryOver ? ' + 历史未下发' : ''}
             </div>
           </div>
         )}

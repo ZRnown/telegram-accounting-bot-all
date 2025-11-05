@@ -318,7 +318,11 @@ export function registerIncome(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx)
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     const text = ctx.message.text.trim()
 
     if (ctx.from?.id && ctx.from?.username) {
@@ -638,7 +642,11 @@ export function registerDispatch(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx)
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     const text = ctx.message.text.trim()
     const isUSDT = /[uU]/.test(text)
     const m = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)/i)

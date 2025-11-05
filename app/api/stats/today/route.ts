@@ -479,8 +479,9 @@ export async function GET(req: NextRequest) {
       ...(isCumulativeMode
         ? {
             // 🔥 累计模式：返回今日入款和累计总入款
-            todayIncome: selected.totalIncome, // 今日入款（当前日期范围内的入款）
-            totalIncome: cumulativeTotalIncome, // 累计总入款（从最早到现在）
+            // todayIncome: 当前查看的日期范围内的入款（当个日切日内的入款）
+            todayIncome: selected.totalIncome, // 🔥 今日入款（当前日期范围内的入款，即当个日切日内的入款）
+            totalIncome: cumulativeTotalIncome, // 累计总入款（从最早到现在所有历史入款）
             shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
             notDispatched: (selected.notDispatched || 0) + carryOver,

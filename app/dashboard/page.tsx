@@ -373,6 +373,35 @@ function DashboardPageInner() {
       } catch {}
     }
     load()
+    
+    // 🔥 自动刷新群组列表（每10秒轮询一次，提升更新速度）
+    if (!chatId) {
+      const interval = setInterval(() => {
+        Promise.all([fetch('/api/bots'), fetch('/api/chats')]).then(async ([botsRes, chatsRes]) => {
+          if (botsRes.ok && chatsRes.ok) {
+            const botsData = await botsRes.json()
+            const chatsData = await chatsRes.json()
+            const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
+            const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
+            const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
+            setBots(newBots)
+            setGroups(chatsItems)
+            setGroupsCount(chatsItems.length)
+            const d: Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }> = {}
+            for (const it of chatsItems) {
+              const status = (it.status as any) || (it.allowed ? 'APPROVED' : 'PENDING')
+              const allowed = status === 'APPROVED'
+              d[it.id] = { status, botId: it.botId ?? null, allowed }
+            }
+            setDrafts(d)
+            setCachedData(CACHE_KEY_BOTS, newBots)
+            setCachedData(CACHE_KEY_GROUPS, chatsItems)
+          }
+        }).catch(() => {})
+      }, 10 * 1000) // 🔥 每10秒刷新一次
+      
+      return () => clearInterval(interval)
+    }
   }, [mounted, chatId])
 
   // 🔥 使用 useMemo 优化计算（必须在所有条件返回之前）
@@ -854,12 +883,17 @@ function DashboardPageInner() {
                             </div>
                             
                             <div>
-                              <h3 className="font-semibold text-slate-900 mb-2">🔄 刷新说明</h3>
+                              <h3 className="font-semibold text-slate-900 mb-2">🔄 数据刷新说明</h3>
                               <p className="text-sm text-slate-600 mb-2">
-                                如果邀请人信息未显示，请刷新页面（F5 或 Ctrl+R）重新加载数据。
+                                如果数据没有更新（如新添加的群组、邀请人信息等），请刷新页面：
                               </p>
+                              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1 mb-2">
+                                <li>按 F5 或 Ctrl+R（Windows/Linux）刷新页面</li>
+                                <li>按 Cmd+R（Mac）刷新页面</li>
+                                <li>或点击浏览器的刷新按钮</li>
+                              </ul>
                               <p className="text-sm text-slate-600">
-                                邀请人信息会在机器人被邀请时自动记录，如果机器人被踢出后重新加入，会更新为最新的邀请人信息。
+                                系统会自动刷新群组列表（每10秒），但如果邀请人信息未显示，仍需要手动刷新页面。
                               </p>
                             </div>
                             
