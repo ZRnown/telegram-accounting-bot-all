@@ -329,11 +329,7 @@ function DashboardPageInner() {
     load()
   }, [mounted, chatId])
 
-  if (!mounted) {
-    return null
-  }
-
-  // 🔥 使用 useMemo 优化计算
+  // 🔥 使用 useMemo 优化计算（必须在所有条件返回之前）
   const manualAddedSet = useMemo(() => getManualAddedSet(), [groups])
   const inviterOptions = useMemo(() => {
     return Array.from(new Set(groups.map(g => g.invitedByUsername || (manualAddedSet.has(g.id) ? '手动' : '-'))))
@@ -347,7 +343,7 @@ function DashboardPageInner() {
       : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter)
   }, [groups, inviterFilter])
 
-  // 🔥 使用 useCallback 优化事件处理
+  // 🔥 使用 useCallback 优化事件处理（必须在所有条件返回之前）
   const handlePreviousDay = useCallback(() => {
     setCurrentDate(prev => {
       const newDate = new Date(prev)
@@ -378,6 +374,10 @@ function DashboardPageInner() {
   }, [router])
 
   const showCompact = !chatId
+
+  if (!mounted) {
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
