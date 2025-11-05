@@ -374,7 +374,7 @@ function DashboardPageInner() {
     }
     load()
     
-    // 🔥 自动刷新群组列表（每10秒轮询一次，提升更新速度）
+    // 🔥 自动刷新群组列表（每30秒轮询一次，提升更新速度）
     if (!chatId) {
       const interval = setInterval(() => {
         Promise.all([fetch('/api/bots'), fetch('/api/chats')]).then(async ([botsRes, chatsRes]) => {
@@ -398,7 +398,7 @@ function DashboardPageInner() {
             setCachedData(CACHE_KEY_GROUPS, chatsItems)
           }
         }).catch(() => {})
-      }, 10 * 1000) // 🔥 每10秒刷新一次
+      }, 30 * 1000) // 🔥 每30秒刷新一次
       
       return () => clearInterval(interval)
     }
@@ -893,7 +893,7 @@ function DashboardPageInner() {
                                 <li>或点击浏览器的刷新按钮</li>
                               </ul>
                               <p className="text-sm text-slate-600">
-                                系统会自动刷新群组列表（每10秒），但如果邀请人信息未显示，仍需要手动刷新页面。
+                                系统会自动刷新群组列表（每30秒），但如果邀请人信息未显示，仍需要手动刷新页面。
                               </p>
                             </div>
                             
