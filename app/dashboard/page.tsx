@@ -7,6 +7,16 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { StatisticsCards } from "@/components/statistics-cards"
 import { TransactionTables } from "@/components/transaction-tables"
 import { CategoryStats } from "@/components/category-stats"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 function DashboardPageInner() {
   const { toast } = useToast()
@@ -33,6 +43,19 @@ function DashboardPageInner() {
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
+  
+  // 🔥 确认对话框状态
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    onConfirm: () => void
+  }>({
+    open: false,
+    title: '',
+    description: '',
+    onConfirm: () => {}
+  })
   
   // 白名单用户管理状态
   const [whitelistedUsers, setWhitelistedUsers] = useState<Array<{ id: string; userId: string; username: string | null; note: string | null; createdAt: string }>>([])
@@ -135,24 +158,38 @@ function DashboardPageInner() {
     }
   }
   
+  // 🔥 显示确认对话框的辅助函数
+  const showConfirm = (title: string, description: string, onConfirm: () => void) => {
+    setConfirmDialog({
+      open: true,
+      title,
+      description,
+      onConfirm
+    })
+  }
+  
   // 删除白名单用户
   const removeWhitelistedUser = async (userId: string) => {
-    if (!window.confirm('确定要删除这个白名单用户吗？')) return
+    showConfirm(
+      '删除白名单用户',
+      '确定要删除这个白名单用户吗？',
+      async () => {
     try {
       const res = await fetch('/api/whitelisted-users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
       })
-      if (res.ok) {
-        await loadWhitelistedUsers()
-        toast({ title: '成功', description: '删除成功' })
-      } else {
+        if (res.ok) {
+          await loadWhitelistedUsers()
+          toast({ title: '成功', description: '删除成功' })
+        } else {
+          toast({ title: '错误', description: '删除失败', variant: 'destructive' })
+        }
+      } catch (e) {
         toast({ title: '错误', description: '删除失败', variant: 'destructive' })
       }
-    } catch (e) {
-      toast({ title: '错误', description: '删除失败', variant: 'destructive' })
-    }
+    })
   }
   
   // 🔥 邀请记录功能已删除
@@ -786,74 +823,84 @@ function DashboardPageInner() {
                   {selectedGroups.size > 0 && (
                     <button
                       className="px-3 py-1.5 text-sm border rounded-md hover:bg-red-50 text-red-600 font-medium"
-                      onClick={async () => {
-                        if (!confirm(`确认删除选中的 ${selectedGroups.size} 个群组及其相关数据？此操作不可恢复`)) return
-                        let successCount = 0
-                        let failCount = 0
-                        
-                        for (const chatId of selectedGroups) {
-                          try {
-                            const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
-                            if (res.status === 204) {
-                              successCount++
-                            } else {
-                              failCount++
+                      onClick={() => {
+                        showConfirm(
+                          '批量删除群组',
+                          `确认删除选中的 ${selectedGroups.size} 个群组及其相关数据？此操作不可恢复`,
+                          async () => {
+                            let successCount = 0
+                            let failCount = 0
+                            
+                            for (const chatId of selectedGroups) {
+                              try {
+                                const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
+                                if (res.status === 204) {
+                                  successCount++
+                                } else {
+                                  failCount++
+                                }
+                              } catch {
+                                failCount++
+                              }
                             }
-                          } catch {
-                            failCount++
+                            
+                            setSelectedGroups(new Set())
+                            toast({ title: '批量删除完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
+                            
+                            // 重新加载群列表
+                            setTimeout(() => window.location.reload(), 500)
                           }
-                        }
-                        
-                        setSelectedGroups(new Set())
-                        toast({ title: '批量删除完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
-                        
-                        // 重新加载群列表
-                        setTimeout(() => window.location.reload(), 500)
+                        )
                       }}
                     >🗑️ 删除选中 ({selectedGroups.size})</button>
                   )}
                   <button
                     className="px-3 py-1.5 text-sm border rounded-md hover:bg-blue-50 text-blue-600 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={batchSaving || groups.length === 0}
-                    onClick={async () => {
-                      if (!confirm(`确认保存所有 ${groups.length} 个群组的设置？`)) return
-                      setBatchSaving(true)
-                      let successCount = 0
-                      let failCount = 0
-                      
-                      for (const it of groups) {
-                        const latest = drafts[it.id]
-                        if (!latest) continue
-                        
-                        try {
-                          const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              status: latest.status,
-                              botId: latest.botId ?? null,
-                              allowed: latest.allowed,
-                            }),
-                          })
-                          if (res.ok) {
-                            successCount++
-                          } else {
-                            failCount++
+                    onClick={() => {
+                      showConfirm(
+                        '批量保存设置',
+                        `确认保存所有 ${groups.length} 个群组的设置？`,
+                        async () => {
+                          setBatchSaving(true)
+                          let successCount = 0
+                          let failCount = 0
+                          
+                          for (const it of groups) {
+                            const latest = drafts[it.id]
+                            if (!latest) continue
+                            
+                            try {
+                              const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  status: latest.status,
+                                  botId: latest.botId ?? null,
+                                  allowed: latest.allowed,
+                                }),
+                              })
+                              if (res.ok) {
+                                successCount++
+                              } else {
+                                failCount++
+                              }
+                            } catch {
+                              failCount++
+                            }
                           }
-                        } catch {
-                          failCount++
+                          
+                          setBatchSaving(false)
+                          toast({ title: '批量保存完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
+                          
+                          // 清除缓存，重新加载
+                          if (typeof window !== 'undefined') {
+                            localStorage.removeItem('dashboard_cache_groups')
+                            localStorage.removeItem('dashboard_cache_bots')
+                          }
+                          setTimeout(() => window.location.reload(), 1000)
                         }
-                      }
-                      
-                      setBatchSaving(false)
-                      toast({ title: '批量保存完成', description: `成功：${successCount} 个，失败：${failCount} 个` })
-                      
-                      // 清除缓存，重新加载
-                      if (typeof window !== 'undefined') {
-                        localStorage.removeItem('dashboard_cache_groups')
-                        localStorage.removeItem('dashboard_cache_bots')
-                      }
-                      setTimeout(() => window.location.reload(), 1000)
+                      )
                     }}
                   >{batchSaving ? '批量保存中...' : '💾 一键保存全部'}</button>
                   <button
@@ -1044,22 +1091,27 @@ function DashboardPageInner() {
                                   >{saving[it.id] ? '⏳' : '💾'}</button>
                                   <button
                                     className="px-2.5 py-1 text-xs border rounded hover:bg-red-50 text-red-600 whitespace-nowrap"
-                                    onClick={async () => {
-                                      if (!confirm('确认删除该群组及其相关数据？此操作不可恢复')) return
-                                      try {
-                                        const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}`, { method: 'DELETE' })
-                                        if (res.status === 204) {
-                                          setGroups((prev) => prev.filter((g) => g.id !== it.id))
-                                          const n = (groupsCount || 0) - 1
-                                          setGroupsCount(n < 0 ? 0 : n)
-                                          toast({ title: '成功', description: '删除成功' })
-                                        } else {
-                                          const msg = await res.text().catch(() => '')
-                                          toast({ title: '错误', description: `删除失败：${msg || 'Server error'}`, variant: 'destructive' })
+                                    onClick={() => {
+                                      showConfirm(
+                                        '删除群组',
+                                        '确认删除该群组及其相关数据？此操作不可恢复',
+                                        async () => {
+                                          try {
+                                            const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}`, { method: 'DELETE' })
+                                            if (res.status === 204) {
+                                              setGroups((prev) => prev.filter((g) => g.id !== it.id))
+                                              const n = (groupsCount || 0) - 1
+                                              setGroupsCount(n < 0 ? 0 : n)
+                                              toast({ title: '成功', description: '删除成功' })
+                                            } else {
+                                              const msg = await res.text().catch(() => '')
+                                              toast({ title: '错误', description: `删除失败：${msg || 'Server error'}`, variant: 'destructive' })
+                                            }
+                                          } catch {
+                                            toast({ title: '错误', description: '删除失败：网络错误', variant: 'destructive' })
+                                          }
                                         }
-                                      } catch {
-                                        toast({ title: '错误', description: '删除失败：网络错误', variant: 'destructive' })
-                                      }
+                                      )
                                     }}
                                   >🗑️</button>
                                 </div>
@@ -1141,6 +1193,29 @@ function DashboardPageInner() {
           </div>
         )}
       </div>
+      
+      {/* 🔥 确认对话框 */}
+      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirmDialog.onConfirm()
+                setConfirmDialog(prev => ({ ...prev, open: false }))
+              }}
+            >
+              确认
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

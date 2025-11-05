@@ -633,8 +633,22 @@ bot.on('my_chat_member', async (ctx) => {
     const chatId = String(chat.id)
     const title = chat.title || ''
     const botId = await ensureCurrentBotId()
-    const inviterId = String(upd.from?.id || '')
-    const inviterUsername = upd.from?.username ? `@${upd.from.username}` : null
+    
+    // 🔥 修复：从 ctx.myChatMember.from 获取邀请人信息
+    const from = ctx.myChatMember?.from || upd.from
+    const inviterId = String(from?.id || '')
+    const inviterUsername = from?.username ? `@${from.username}` : null
+    
+    // 🔥 调试日志：输出原始数据
+    if (process.env.DEBUG_BOT === 'true') {
+      console.log('[my_chat_member][raw-data]', {
+        from: from,
+        inviterId,
+        inviterUsername,
+        firstName: from?.first_name,
+        lastName: from?.last_name
+      })
+    }
     
     console.log('[my_chat_member]', {
       botId,
@@ -642,7 +656,8 @@ bot.on('my_chat_member', async (ctx) => {
       title,
       inviterId,
       inviterUsername,
-      from: upd.from?.username ? `@${upd.from.username}` : upd.from?.id,
+      inviterName: from ? `${from.first_name || ''} ${from.last_name || ''}`.trim() : '',
+      from: from?.username ? `@${from.username}` : from?.id,
       old: oldStatus,
       new: newStatus,
     })
