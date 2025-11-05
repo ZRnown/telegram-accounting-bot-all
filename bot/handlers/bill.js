@@ -1,7 +1,7 @@
 // 账单相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { getChat } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch } from '../database.js'
+import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, getChatDailyCutoffHour } from '../database.js'
 import { buildInlineKb, hasOperatorPermission } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { getGlobalDailyCutoffHour } from '../utils.js'
@@ -104,8 +104,37 @@ export function registerDeleteBill(bot, ensureChat) {
         return
       }
       
-      // 不需要确认，直接删除
-      const { bill } = await getOrCreateTodayBill(chatId)
+      // 🔥 优化：先查询当前账单，不要自动创建（避免删除后立即创建新账单）
+      const cutoffHour = await getChatDailyCutoffHour(chatId)
+      const now = new Date()
+      const todayCutoff = new Date()
+      todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+      todayCutoff.setHours(cutoffHour, 0, 0, 0)
+      
+      let gte, lt
+      if (now >= todayCutoff) {
+        gte = new Date(todayCutoff)
+        lt = new Date(todayCutoff)
+        lt.setDate(lt.getDate() + 1)
+      } else {
+        gte = new Date(todayCutoff)
+        gte.setDate(gte.getDate() - 1)
+        lt = new Date(todayCutoff)
+      }
+      
+      // 🔥 查询当前账单（不自动创建）
+      const bill = await prisma.bill.findFirst({
+        where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
+        orderBy: { openedAt: 'asc' }
+      })
+      
+      if (!bill) {
+        // 如果没有账单，直接清空内存即可
+        chat.current.incomes = []
+        chat.current.dispatches = []
+        return ctx.reply('✅ 当前没有账单', { ...(await buildInlineKb(ctx)) })
+      }
+      
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
       const settings = await prisma.setting.findUnique({
@@ -115,11 +144,9 @@ export function registerDeleteBill(bot, ensureChat) {
       const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
       
       if (isCumulativeMode) {
-        // 累计模式：完全删除账单
-        await Promise.all([
-          prisma.billItem.deleteMany({ where: { billId: bill.id } }),
-          prisma.bill.delete({ where: { id: bill.id } })
-        ])
+        // 累计模式：完全删除账单（先删除账单项，再删除账单，确保事务性）
+        await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+        await prisma.bill.delete({ where: { id: bill.id } })
       } else {
         // 清零模式：只删除账单项
         await prisma.billItem.deleteMany({ where: { billId: bill.id } })
@@ -166,7 +193,43 @@ export function registerDeleteBill(bot, ensureChat) {
     const finalChatId = pendingInfo.chatId || chatId
     
     try {
-      const { bill } = await getOrCreateTodayBill(finalChatId)
+      // 🔥 优化：先查询当前账单，不要自动创建（避免删除后立即创建新账单）
+      const cutoffHour = await getChatDailyCutoffHour(finalChatId)
+      const now = new Date()
+      const todayCutoff = new Date()
+      todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
+      todayCutoff.setHours(cutoffHour, 0, 0, 0)
+      
+      let gte, lt
+      if (now >= todayCutoff) {
+        gte = new Date(todayCutoff)
+        lt = new Date(todayCutoff)
+        lt.setDate(lt.getDate() + 1)
+      } else {
+        gte = new Date(todayCutoff)
+        gte.setDate(gte.getDate() - 1)
+        lt = new Date(todayCutoff)
+      }
+      
+      // 🔥 查询当前账单（不自动创建）
+      const bill = await prisma.bill.findFirst({
+        where: { chatId: finalChatId, status: 'OPEN', openedAt: { gte, lt } },
+        orderBy: { openedAt: 'asc' }
+      })
+      
+      if (!bill) {
+        // 如果没有账单，直接清空内存即可
+        chat.current.incomes = []
+        chat.current.dispatches = []
+        // 🔥 清除待删除标记
+        if (global.pendingDeleteBills) {
+          global.pendingDeleteBills.delete(deletePendingKey)
+        }
+        await ctx.reply('✅ 当前没有账单', { ...(await buildInlineKb(ctx)) })
+        await ctx.deleteMessage().catch(() => {})
+        return
+      }
+      
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
       const settings = await prisma.setting.findUnique({
@@ -176,11 +239,9 @@ export function registerDeleteBill(bot, ensureChat) {
       const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
       
       if (isCumulativeMode) {
-        // 累计模式：完全删除账单
-        await Promise.all([
-          prisma.billItem.deleteMany({ where: { billId: bill.id } }),
-          prisma.bill.delete({ where: { id: bill.id } })
-        ])
+        // 累计模式：完全删除账单（先删除账单项，再删除账单，确保事务性）
+        await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+        await prisma.bill.delete({ where: { id: bill.id } })
       } else {
         // 清零模式：只删除账单项
         await prisma.billItem.deleteMany({ where: { billId: bill.id } })

@@ -409,7 +409,10 @@ export async function GET(req: NextRequest) {
       try {
         // 🔥 计算当前选中账单的历史数据（昨天及之前的所有账单，但不包括已删除的）
         const selectedBill = billsData[selIdx]
-        if (selectedBill) {
+        // 🔥 如果没有选中的账单，确保 carryOver 为 0
+        if (!selectedBill) {
+          carryOver = 0
+        } else if (selectedBill) {
           // 计算昨天的日期范围
           let yGte: Date
           if (dateStr) {
@@ -503,7 +506,8 @@ export async function GET(req: NextRequest) {
             }
           }
           const hTotalDispatched = hDisps.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
-          carryOver = Math.max(hTotalNetIncome - hTotalDispatched, 0)
+          // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
+          carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
         }
         
         // 🔥 计算累计总入款：从最早到现在所有的入款（包括今天）

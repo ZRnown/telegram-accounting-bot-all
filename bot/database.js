@@ -112,7 +112,7 @@ export async function checkAndClearIfNewDay(chat, chatId) {
 /**
  * 获取群组的日切时间（优先使用群组级别，否则使用全局配置）
  */
-async function getChatDailyCutoffHour(chatId) {
+export async function getChatDailyCutoffHour(chatId) {
   try {
     const setting = await prisma.setting.findUnique({
       where: { chatId },
