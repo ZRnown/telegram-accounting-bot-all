@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
 
     // 🔥 优化：直接返回群组数据，移除实时验证（避免群组消失）
     // 验证逻辑移到后台任务，不阻塞API响应
+    // 🔥 直接查询所有字段（包括 invitedBy 和 invitedByUsername）
     const chats = await prisma.chat.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -55,8 +56,8 @@ export async function GET(req: NextRequest) {
         allowed: true,
         createdAt: true,
         botId: true,
-        invitedBy: true, // 🔥 新增：邀请人ID
-        invitedByUsername: true, // 🔥 新增：邀请人用户名
+        invitedBy: true, // 邀请人ID
+        invitedByUsername: true, // 邀请人用户名
         bot: { select: { id: true, name: true, token: true } },
       },
     })

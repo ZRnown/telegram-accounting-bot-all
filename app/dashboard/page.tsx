@@ -855,17 +855,17 @@ function DashboardPageInner() {
                     </span>
                   </div>
                   
-                  <div className="overflow-x-auto">
-                    <table className="min-w-[1100px] border-collapse">
+                  <div className="w-full">
+                    <table className="w-full border-collapse">
                     <thead className="bg-slate-50">
                       <tr className="border-b-2 border-slate-200">
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Chat ID</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">群组名称</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">绑定机器人</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">邀请人/方式</th>
-                        <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">允许使用</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">创建时间</th>
-                        <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">操作</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">Chat ID</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">群组名称</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">绑定机器人</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">邀请人/方式</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[10%]">允许使用</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[16%]">创建时间</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[20%]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -876,11 +876,11 @@ function DashboardPageInner() {
                         return (
                           <Fragment key={it.id}>
                             <tr className={`border-b hover:bg-slate-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>
-                              <td className="py-3 px-4 text-sm text-slate-900 font-mono">{it.id}</td>
-                              <td className="py-3 px-4 text-sm text-slate-900 font-medium">{it.title || '-'}</td>
-                              <td className="py-3 px-4">
+                              <td className="py-3 px-3 text-sm text-slate-900 font-mono truncate" title={it.id}>{it.id}</td>
+                              <td className="py-3 px-3 text-sm text-slate-900 font-medium truncate" title={it.title || '-'}>{it.title || '-'}</td>
+                              <td className="py-3 px-3">
                                 <select
-                                  className="border rounded-md px-3 py-1.5 text-sm w-full max-w-[200px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  className="border rounded-md px-2 py-1.5 text-xs w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                   value={draft.botId || ''}
                                   onChange={(e) => {
                                     const value = e.target.value || null
@@ -900,9 +900,9 @@ function DashboardPageInner() {
                                   ))}
                                 </select>
                               </td>
-                              <td className="py-3 px-4 text-sm text-slate-900">{inviterLabel}</td>
-                              <td className="py-3 px-4 text-center">
-                                <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <td className="py-3 px-3 text-sm text-slate-900 truncate" title={inviterLabel}>{inviterLabel}</td>
+                              <td className="py-3 px-3 text-center">
+                                <label className="inline-flex items-center gap-1 cursor-pointer">
                                   <input
                                     type="checkbox"
                                     className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
@@ -921,13 +921,13 @@ function DashboardPageInner() {
                                     }}
                                   />
                                   <span className={`text-xs font-medium ${draft.allowed ? 'text-green-600' : 'text-slate-500'}`}>
-                                    {draft.allowed ? '✓ 已允许' : '✗ 未允许'}
+                                    {draft.allowed ? '✓' : '✗'}
                                   </span>
                                 </label>
                               </td>
-                              <td className="py-3 px-4 text-sm text-slate-600">{new Date(it.createdAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-                              <td className="py-3 px-4">
-                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <td className="py-3 px-3 text-xs text-slate-600">{new Date(it.createdAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                              <td className="py-3 px-3">
+                                <div className="flex items-center justify-center gap-1 flex-wrap">
                                   <button
                                     className="px-2.5 py-1 text-xs border rounded hover:bg-slate-50 whitespace-nowrap"
                                     onClick={() => router.push(`/dashboard?chatId=${encodeURIComponent(it.id)}`)}
