@@ -634,21 +634,27 @@ bot.on('my_chat_member', async (ctx) => {
     const title = chat.title || ''
     const botId = await ensureCurrentBotId()
     
-    // 🔥 修复：从 ctx.myChatMember.from 获取邀请人信息
-    const from = ctx.myChatMember?.from || upd.from
+    // 🔥 修复：从多个可能的位置获取邀请人信息
+    // Telegram API 的 my_chat_member 事件中，from 字段可能在不同位置
+    const from = ctx.myChatMember?.from || 
+                 ctx.update?.my_chat_member?.from || 
+                 upd.from || 
+                 ctx.from
     const inviterId = String(from?.id || '')
     const inviterUsername = from?.username ? `@${from.username}` : null
     
-    // 🔥 调试日志：输出原始数据
-    if (process.env.DEBUG_BOT === 'true') {
-      console.log('[my_chat_member][raw-data]', {
-        from: from,
-        inviterId,
-        inviterUsername,
-        firstName: from?.first_name,
-        lastName: from?.last_name
-      })
-    }
+    // 🔥 调试日志：输出原始数据（总是输出，方便排查）
+    console.log('[my_chat_member][raw-data]', {
+      ctxMyChatMemberFrom: ctx.myChatMember?.from,
+      updFrom: upd.from,
+      ctxFrom: ctx.from,
+      finalFrom: from,
+      inviterId,
+      inviterUsername,
+      firstName: from?.first_name,
+      lastName: from?.last_name,
+      updateType: ctx.update?.update_id ? 'update' : 'no-update'
+    })
     
     console.log('[my_chat_member]', {
       botId,
@@ -708,6 +714,42 @@ bot.on('my_chat_member', async (ctx) => {
       
       // Upsert chat，如果邀请人在白名单，自动设置 allowed=true
       // 🔥 修复：在新加入时总是保存邀请人信息
+      // 🔥 如果 my_chat_member 事件中没有 from 字段，尝试从数据库查询最近的邀请记录
+      let finalInviterId = inviterId
+      let finalInviterUsername = inviterUsername
+      
+      // 如果从事件中获取不到邀请人信息，尝试从消息发送者获取（如果群组刚创建）
+      if (!finalInviterId || !finalInviterUsername) {
+        console.log('[my_chat_member][no-inviter-in-event]', { chatId, inviterId, inviterUsername })
+        // 检查是否有最近的 message 事件（可能在同一时间或稍早触发）
+        // 如果群组刚被创建，可能 message 事件中的发送者就是邀请人
+        try {
+          const existingChat = await prisma.chat.findUnique({
+            where: { id: chatId },
+            select: { invitedBy: true, invitedByUsername: true, createdAt: true }
+          })
+          // 如果群组刚创建（1分钟内），且没有邀请人信息，尝试从 message 事件获取
+          if (existingChat && (!existingChat.invitedBy || !existingChat.invitedByUsername)) {
+            const createdAt = existingChat.createdAt
+            const now = new Date()
+            const diffMs = now.getTime() - createdAt.getTime()
+            // 如果群组是1分钟内创建的，可能消息发送者就是邀请人
+            if (diffMs < 60000) {
+              console.log('[my_chat_member][try-message-sender]', { chatId, diffMs })
+              // 注意：这里无法直接获取，因为 message 事件已经处理过了
+              // 我们只能依赖 my_chat_member 事件中的 from 字段
+            }
+          } else if (existingChat?.invitedBy && existingChat?.invitedByUsername) {
+            // 如果已有邀请人信息，使用它
+            finalInviterId = existingChat.invitedBy
+            finalInviterUsername = existingChat.invitedByUsername
+            console.log('[my_chat_member][use-existing-inviter]', { chatId, finalInviterId, finalInviterUsername })
+          }
+        } catch (e) {
+          console.error('[my_chat_member][query-existing-failed]', e)
+        }
+      }
+      
       const res = await prisma.chat.upsert({
         where: { id: chatId },
         create: { 
@@ -716,20 +758,27 @@ bot.on('my_chat_member', async (ctx) => {
           botId, 
           status: autoAllowed ? 'APPROVED' : 'PENDING', 
           allowed: autoAllowed,
-          invitedBy: inviterId || null, // 🔥 保存邀请人ID
-          invitedByUsername: inviterUsername || null // 🔥 保存邀请人用户名
+          invitedBy: finalInviterId || null, // 🔥 保存邀请人ID
+          invitedByUsername: finalInviterUsername || null // 🔥 保存邀请人用户名
         },
         update: { 
           title, 
           botId,
           status: autoAllowed ? 'APPROVED' : undefined,
           allowed: autoAllowed ? true : undefined,
-          // 🔥 新加入时总是更新邀请人信息（确保能获取到最新的邀请人）
-          ...(inviterId && inviterUsername ? {
-            invitedBy: inviterId,
-            invitedByUsername: inviterUsername
+          // 🔥 新加入时总是更新邀请人信息（如果事件中有，则更新；如果没有但已有，则保留）
+          ...(finalInviterId && finalInviterUsername ? {
+            invitedBy: finalInviterId,
+            invitedByUsername: finalInviterUsername
           } : {})
         },
+      })
+      
+      console.log('[my_chat_member][inviter-saved]', {
+        chatId,
+        fromEvent: { inviterId, inviterUsername },
+        final: { finalInviterId, finalInviterUsername },
+        saved: { invitedBy: res.invitedBy, invitedByUsername: res.invitedByUsername }
       })
       
       console.log('[my_chat_member][upsert-result]', { 
@@ -863,9 +912,15 @@ bot.on('my_chat_member', async (ctx) => {
         chatStatus: res.status
       })
     } else if (newStatus === 'left' || newStatus === 'kicked') {
-      // 机器人离开：解绑该机器人
+      // 机器人离开：解绑该机器人（但不删除记录，保留邀请人信息）
       try {
-        await prisma.chat.update({ where: { id: chatId }, data: { bot: { disconnect: true } } })
+        await prisma.chat.update({ 
+          where: { id: chatId }, 
+          data: { 
+            bot: { disconnect: true },
+            // 🔥 不清空邀请人信息，保留以便重新加入时能看到历史记录
+          } 
+        })
         console.log('[my_chat_member][unbind-ok]', { chatId })
       } catch (e) {
         console.error('[my_chat_member][unbind-fail]', e)
@@ -944,19 +999,10 @@ bot.catch(async (err, ctx) => {
   } catch {}
 })
 
-// 监听机器人在群内的成员状态变化：如被踢/离开则删除记录
-bot.on('my_chat_member', async (ctx) => {
-  try {
-    const chatId = String(ctx.chat?.id || '')
-    const newStatus = ctx.update?.my_chat_member?.new_chat_member?.status
-    if (!chatId || !newStatus) return
-    if (newStatus === 'kicked' || newStatus === 'left') {
-      await prisma.operator.deleteMany({ where: { chatId } }).catch(() => {})
-      await prisma.setting.deleteMany({ where: { chatId } }).catch(() => {})
-      await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
-    }
-  } catch {}
-})
+// 🔥 删除重复的 my_chat_member 处理器
+// 注意：上面的 my_chat_member 处理器已经处理了 left/kicked 情况（解绑机器人）
+// 这里不需要重复删除记录，因为上面的处理器已经处理了
+// 如果确实需要删除所有相关数据，可以在上面的处理器中添加
 
 // 激活（禁用群内自助开通，改为提示后台审批）
 bot.hears(/^(激活机器人|激活)$/i, async (ctx) => {
