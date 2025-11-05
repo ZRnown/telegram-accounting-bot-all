@@ -125,9 +125,14 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
                   onChange={handleBillChange}
                 >
                   <option value="">选择第几笔</option>
-                  {Array.from({ length: data.billNumber }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>{`第 ${n} 笔`}</option>
-                  ))}
+                  {Array.from({ length: data.billNumber }, (_, i) => i + 1).map((n) => {
+                    const label = Array.isArray(data.billLabels) && data.billLabels[n - 1] 
+                      ? data.billLabels[n - 1] 
+                      : `第 ${n} 笔`
+                    return (
+                      <option key={n} value={n}>{label}</option>
+                    )
+                  })}
                 </select>
               )}
             </div>

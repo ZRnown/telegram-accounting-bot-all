@@ -106,7 +106,24 @@ export function registerDeleteBill(bot, ensureChat) {
       
       // 不需要确认，直接删除
       const { bill } = await getOrCreateTodayBill(chatId)
-      await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+      // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
+      // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
+      const settings = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { accountingMode: true }
+      })
+      const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+      
+      if (isCumulativeMode) {
+        // 累计模式：完全删除账单
+        await Promise.all([
+          prisma.billItem.deleteMany({ where: { billId: bill.id } }),
+          prisma.bill.delete({ where: { id: bill.id } })
+        ])
+      } else {
+        // 清零模式：只删除账单项
+        await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+      }
       
       chat.current.incomes = []
       chat.current.dispatches = []
@@ -150,7 +167,24 @@ export function registerDeleteBill(bot, ensureChat) {
     
     try {
       const { bill } = await getOrCreateTodayBill(finalChatId)
-      await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+      // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
+      // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
+      const settings = await prisma.setting.findUnique({
+        where: { chatId: finalChatId },
+        select: { accountingMode: true }
+      })
+      const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+      
+      if (isCumulativeMode) {
+        // 累计模式：完全删除账单
+        await Promise.all([
+          prisma.billItem.deleteMany({ where: { billId: bill.id } }),
+          prisma.bill.delete({ where: { id: bill.id } })
+        ])
+      } else {
+        // 清零模式：只删除账单项
+        await prisma.billItem.deleteMany({ where: { billId: bill.id } })
+      }
       
       chat.current.incomes = []
       chat.current.dispatches = []

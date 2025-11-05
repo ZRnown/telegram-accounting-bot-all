@@ -16,7 +16,7 @@ export function registerStartAccounting(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     await updateSettings(chatId, { accountingEnabled: true })
     clearAccountingCache(chatId) // 🔥 清除缓存，立即生效
     await ctx.reply('✅ 已开始记账，机器人已激活并开始记录', { ...(await buildInlineKb(ctx)) })
@@ -36,7 +36,7 @@ export function registerStopAccounting(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有权限。只有管理员或已添加的操作人可以操作。')
     }
     
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     await updateSettings(chatId, { accountingEnabled: false })
     clearAccountingCache(chatId) // 🔥 清除缓存，立即生效
     await ctx.reply('⏸️ 已停止记账，机器人已暂停记录。发送"开始"可重新开始记账', { ...(await buildInlineKb(ctx)) })
@@ -62,7 +62,7 @@ export function registerIncomeWithRemark(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
     }
 
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
     if (isNewDay) {
@@ -150,7 +150,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。')
     }
 
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
     if (isNewDay) {
@@ -233,7 +233,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。')
     }
 
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
     if (isNewDay) {
@@ -315,7 +315,7 @@ export function registerIncome(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
     }
 
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
@@ -466,7 +466,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。')
     }
     
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
     if (isNewDay) {
@@ -556,7 +556,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。')
     }
     
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
     if (isNewDay) {
@@ -639,7 +639,7 @@ export function registerDispatch(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
     }
     
-    const chatId = await ensureDbChat(ctx)
+    const chatId = await ensureDbChat(ctx, chat)
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)

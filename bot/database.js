@@ -413,8 +413,9 @@ export async function performAutoDailyCutoff(getChat) {
         const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
-        // 只有每日清零模式才需要关闭昨天的账单
-        if (accountingMode === 'DAILY_RESET') {
+        // 🔥 累计模式：只关闭昨天的账单（不删除），让它们成为历史数据
+        // 🔥 清零模式：关闭昨天的账单（原有逻辑）
+        if (accountingMode === 'CARRY_OVER' || accountingMode === 'DAILY_RESET') {
           // 🔥 修复：优先使用群组级别的日切时间
           const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
             ? settings.dailyCutoffHour

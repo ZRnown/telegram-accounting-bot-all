@@ -367,6 +367,12 @@ export default function ChatSettingsPage() {
                 />
                 <span className="text-sm">📈 累计模式（持续累计未下发）</span>
               </label>
+              <div className="mt-3 space-y-2 text-xs text-slate-600 leading-relaxed">
+                <p>💡 <strong>每日清零：</strong> 每个日切周期都会生成全新的账单，历史账单不会参与当日计算，也不会累计未下发金额。</p>
+                <p>💡 <strong>累计模式：</strong> 当前账单会自动叠加所有更早账单的未下发金额；删除账单时会同步删除该账单的全部流水，后续账单的历史数据也会随之回收。</p>
+                <p>⚙️ <strong>性能建议：</strong> 累计模式在后台统计时会对日期内全部账单与历史数据做聚合，账单数量较多时建议定期归档或导出，以避免不必要的数据库与内存占用。</p>
+                <p>💱 <strong>汇率管理：</strong> 机器人首次加入群组或重启后，会自动刷新实时 USDT 汇率；如需固定汇率，可在此处设置“固定汇率”，自动值会立即被覆盖。</p>
+              </div>
             </div>
           </div>
 

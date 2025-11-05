@@ -1,62 +1,57 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 
-// 计算历史未下发金额（用于累计模式）
-async function getHistoricalNotDispatched(chatId: string, billOpenedAt: Date) {
+// 🔥 计算历史未下发金额（用于累计模式）- 每个账单独立计算自己的历史数据
+async function getHistoricalNotDispatched(chatId: string, billOpenedAt: Date, feePercent: number = 0) {
   try {
-    const today = new Date(billOpenedAt)
-    today.setHours(0, 0, 0, 0)
-    
+    // 🔥 查询早于当前账单的所有账单（OPEN和CLOSED状态，不包括已删除的）
     const historicalBills = await prisma.bill.findMany({
       where: { 
         chatId, 
-        openedAt: { lt: today }
+        openedAt: { lt: billOpenedAt } // 早于当前账单的所有账单
       },
       include: {
         items: {
           select: {
             type: true,
             amount: true,
-            rate: true
+            rate: true,
+            feeRate: true // 🔥 添加费率字段
           }
         }
       },
       orderBy: { openedAt: 'asc' }
     })
     
-    let totalHistoricalIncome = 0
+    let totalHistoricalNetIncome = 0 // 扣除费率后的历史入款
     let totalHistoricalDispatch = 0
-    let totalHistoricalIncomeUSDT = 0
-    let totalHistoricalDispatchUSDT = 0
     
     for (const bill of historicalBills) {
       const incomes = bill.items.filter((i: any) => i.type === 'INCOME')
       const dispatches = bill.items.filter((i: any) => i.type === 'DISPATCH')
       
-      const billIncome = incomes.reduce((s: number, i: any) => s + Number(i.amount || 0), 0)
+      // 🔥 计算历史入款（考虑单笔费率）
+      for (const inc of incomes) {
+        const amount = Number(inc.amount || 0)
+        const itemFeeRate = inc.feeRate ? Number(inc.feeRate) : null
+        if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+          totalHistoricalNetIncome += amount // 已经是扣除费率后的
+        } else {
+          totalHistoricalNetIncome += amount - (amount * (feePercent || 0)) / 100
+        }
+      }
+      
       const billDispatch = dispatches.reduce((s: number, d: any) => s + Number(d.amount || 0), 0)
-      
-      totalHistoricalIncome += billIncome
       totalHistoricalDispatch += billDispatch
-      
-      // 计算USDT（使用每笔的汇率或最后一笔的汇率）
-      for (const i of incomes) {
-        if (i.rate && i.rate > 0) {
-          totalHistoricalIncomeUSDT += Number(i.amount || 0) / Number(i.rate)
-        }
-      }
-      for (const d of dispatches) {
-        if (d.rate && d.rate > 0) {
-          totalHistoricalDispatchUSDT += Number(d.amount || 0) / Number(d.rate)
-        }
-      }
     }
     
+    const historicalNotDispatched = Math.max(totalHistoricalNetIncome - totalHistoricalDispatch, 0)
+    
     return {
-      historicalIncome: totalHistoricalIncome,
+      historicalIncome: totalHistoricalNetIncome,
       historicalDispatch: totalHistoricalDispatch,
-      historicalNotDispatched: totalHistoricalIncome - totalHistoricalDispatch,
-      historicalNotDispatchedUSDT: totalHistoricalIncomeUSDT - totalHistoricalDispatchUSDT
+      historicalNotDispatched: historicalNotDispatched,
+      historicalNotDispatchedUSDT: 0 // USDT计算在调用处处理
     }
   } catch (e) {
     console.error('计算历史未下发失败', e)
@@ -133,12 +128,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const notDispatched = shouldDispatch - totalDispatch
     const notDispatchedUSDT = effectiveRate ? Number((notDispatched / effectiveRate).toFixed(1)) : 0
 
-    // 🔥 如果是累计模式，计算历史未下发
+    // 🔥 如果是累计模式，计算历史未下发（每个账单独立计算）
     let historicalData = null
     const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
     
     if (isCumulativeMode) {
-      historicalData = await getHistoricalNotDispatched(bill.chatId, bill.openedAt)
+      historicalData = await getHistoricalNotDispatched(bill.chatId, bill.openedAt, feePercent)
+      // 🔥 计算USDT
+      if (effectiveRate > 0 && historicalData.historicalNotDispatched > 0) {
+        historicalData.historicalNotDispatchedUSDT = Number((historicalData.historicalNotDispatched / effectiveRate).toFixed(2))
+      }
     }
 
     return Response.json({

@@ -540,7 +540,7 @@ function extractMention(text) {
 
 // 🔥 核心命令（bot.start）已移至 handlers/core.js，只保留 /start 命令
 
-// /help 别名（与“使用说明”一致）
+// /help 别名（与"使用说明"一致）
 // 审批中间件：群组需后台审批通过（Chat.status === 'APPROVED'）后才允许普通指令
 // 简易告警节流：每个群 60s 内只提醒一次
 const LAST_WARN_AT = new Map() // chatId -> ts
@@ -565,12 +565,12 @@ bot.use(async (ctx, next) => {
   }
   const text = ctx.message?.text || ''
   // 记录说话者的 userId 映射，若其 @username 在操作员列表中，则收集其 userId
+  const chatState = ensureChat(ctx)
   try {
-    const chat = ensureChat(ctx)
-    if (chat && ctx.from?.id) {
+    if (chatState && ctx.from?.id) {
       const uname = ctx.from?.username ? `@${ctx.from.username}` : null
-      if (uname) chat.userIdByUsername.set(uname, ctx.from.id)
-      if (uname && chat.operators.has(uname)) chat.operatorIds.add(ctx.from.id)
+      if (uname) chatState.userIdByUsername.set(uname, ctx.from.id)
+      if (uname && chatState.operators.has(uname)) chatState.operatorIds.add(ctx.from.id)
     }
   } catch {}
   // 🔥 私聊：允许使用部分命令，但大部分功能需要通过内联菜单
@@ -584,7 +584,7 @@ bot.use(async (ctx, next) => {
     // 对于允许的命令，继续处理（不在这里 return）
   }
   const botId = await ensureCurrentBotId()
-  const chatId = await ensureDbChat(ctx)
+  const chatId = await ensureDbChat(ctx, chatState)
   const dbChat = await prisma.chat.findUnique({ where: { id: chatId }, select: { botId: true, allowed: true, bot: { select: { id: true, token: true } } } })
   const bypass = /^(?:\/start|\/myid|显示账单|\+0|使用说明)$/i.test(text)
   const currentToken = (process.env.BOT_TOKEN || '').trim()
@@ -1574,7 +1574,7 @@ bot.hears(/^佣金\s*模式$/i, async (ctx) => {
   await ctx.reply('已开启佣金模式（在回复某人消息时输入 +N 或 -N 调整佣金）')
 })
 
-// 在“回复某个用户的消息”时，用 +N/-N 调整佣金
+// 在"回复某个用户的消息"时，用 +N/-N 调整佣金
 bot.on('text', async (ctx, next) => {
   const chat = ensureChat(ctx)
   if (!chat) return
