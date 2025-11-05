@@ -31,20 +31,22 @@ model BotFeatureFlag {
 }
 
 model Chat {
-  id           String            @id
-  title        String?
-  createdAt    DateTime          @default(now())
-  status       ChatStatus        @default(PENDING)
-  allowed      Boolean           @default(false)
-  botId        String?
-  bills        Bill[]
-  bot          Bot?              @relation(fields: [botId], references: [id])
-  featureFlags ChatFeatureFlag[]
-  commissions  Commission[]
-  dispatches   Dispatch[]
-  incomes      Income[]
-  operators    Operator[]
-  settings     Setting?
+  id                String            @id
+  title             String?
+  createdAt         DateTime          @default(now())
+  status            ChatStatus        @default(PENDING)
+  allowed           Boolean           @default(false)
+  botId             String?
+  invitedBy         String? // 🔥 新增：邀请人用户ID
+  invitedByUsername String? // 🔥 新增：邀请人用户名
+  bills             Bill[]
+  bot               Bot?              @relation(fields: [botId], references: [id])
+  featureFlags      ChatFeatureFlag[]
+  commissions       Commission[]
+  dispatches        Dispatch[]
+  incomes           Income[]
+  operators         Operator[]
+  settings          Setting?
 }
 
 model ChatFeatureFlag {
@@ -106,8 +108,8 @@ model BillItem {
   amount    Float
   usdt      Float?
   rate      Float?
-  feeRate   Float?   // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
-  remark    String?  // 🔥 新增：备注（用于备注入账）
+  feeRate   Float? // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
+  remark    String? // 🔥 新增：备注（用于备注入账）
   replier   String?
   operator  String?
   createdAt DateTime @default(now())

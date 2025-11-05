@@ -1,7 +1,7 @@
 // 记账相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { parseAmountAndRate } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettings } from '../database.js'
+import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettings, syncSettingsToMemory } from '../database.js'
 import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
@@ -63,7 +63,11 @@ export function registerIncomeWithRemark(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx)
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     
     const text = ctx.message.text.trim()
     const match = text.match(/^(.+?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
@@ -147,7 +151,11 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx)
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     
     const text = ctx.message.text.trim()
     const match = text.match(/^@(\w+)\s*\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
@@ -226,7 +234,11 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx)
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     
     const amountStr = match[1]
     const isUSDT = /[uU]/.test(text)
@@ -451,7 +463,11 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     }
     
     const chatId = await ensureDbChat(ctx)
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     
     const text = ctx.message.text.trim()
     const match = text.match(/^@(\w+)\s*下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i)
@@ -537,7 +553,11 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     }
     
     const chatId = await ensureDbChat(ctx)
-    await checkAndClearIfNewDay(chat, chatId)
+    const isNewDay = await checkAndClearIfNewDay(chat, chatId)
+    // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
+    if (isNewDay) {
+      await syncSettingsToMemory(ctx, chat, chatId)
+    }
     
     const amountStr = match[1].replace(/\s+/g, '')
     const isUSDT = /[uU]/.test(text)

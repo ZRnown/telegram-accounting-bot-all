@@ -137,7 +137,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
           </div>
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-            <span className="text-sm text-slate-600">总入款金额</span>
+            <span className="text-sm text-slate-600">{isCumulativeMode ? '累计总入款' : '总入款金额'}</span>
             <span className="text-lg font-semibold text-green-600">{view.totalIncome.toLocaleString()}</span>
           </div>
 
@@ -179,8 +179,14 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 bg-green-50 rounded-lg border border-green-200">
                 <div className="text-xs text-slate-600 mb-1">今日入款</div>
-                <div className="font-semibold text-slate-900">{view.totalIncome.toLocaleString()}</div>
+                <div className="font-semibold text-slate-900">{(view.todayIncome ?? view.totalIncome ?? 0).toLocaleString()}</div>
                 <div className="text-xs text-green-600">当天新增的入款金额</div>
+              </div>
+              
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="text-xs text-slate-600 mb-1">累计总入款</div>
+                <div className="font-semibold text-slate-900">{(view.totalIncome ?? 0).toLocaleString()}</div>
+                <div className="text-xs text-blue-600">从最早到现在的累计入款</div>
               </div>
               
               <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
@@ -190,7 +196,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
               </div>
             </div>
             <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
-              💡 提示：应下发 = 今日入款 + 历史未下发
+              💡 提示：应下发 = 今日入款（扣除费率后） + 历史未下发
             </div>
           </div>
         )}

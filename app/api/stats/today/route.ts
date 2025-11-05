@@ -316,7 +316,7 @@ export async function GET(req: NextRequest) {
         operator: d.operator || '',
       }))
       billsAgg.push({
-        totalIncome: tIncome,
+        totalIncome: tIncome, // 🔥 今日入款（当前日期范围内的入款）
         exchangeRate: rateB,
         feeRate: feePercent,
         shouldDispatch: shouldB,
@@ -387,11 +387,14 @@ export async function GET(req: NextRequest) {
 
     const selected = selectedBillAgg
 
-    // carry-over: add yesterday's notDispatched into today's should/notDispatched
+    // 🔥 累计模式：计算今日入款和累计总入款
     let carryOver = 0
-    if (settings?.accountingMode === 'CARRY_OVER') {
+    let cumulativeTotalIncome = selected.totalIncome // 默认等于今日入款（非累计模式）
+    const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+    
+    if (isCumulativeMode) {
       try {
-        // 计算昨天的日期范围
+        // 计算昨天的日期范围（用于计算历史未下发）
         let yGte: Date
         if (dateStr) {
           // 从日期字符串查询：计算昨天
@@ -404,7 +407,8 @@ export async function GET(req: NextRequest) {
           yGte.setDate(yGte.getDate() - 1)
         }
         const yLt = new Date(gte) // 今天的开始就是昨天的结束
-        // 🔥 内存优化：只选择必要的字段
+        
+        // 🔥 计算历史未下发金额（从昨天开始往前累计）
         const yBills = await prisma.bill.findMany({
           where: { chatId, openedAt: { gte: yGte, lt: yLt } },
           select: { id: true },
@@ -414,26 +418,78 @@ export async function GET(req: NextRequest) {
         const yItems = yBillIds.length
           ? await prisma.billItem.findMany({
               where: { billId: { in: yBillIds } },
-              select: { type: true, amount: true }
+              select: { type: true, amount: true, feeRate: true }
             })
           : []
         const yIncs = yItems.filter((x: any) => x.type === 'INCOME')
         const yDisps = yItems.filter((x: any) => x.type === 'DISPATCH')
-        const yTotalIncome = yIncs.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
+        
+        // 🔥 修复：正确计算昨天的入款（考虑单笔费率）
+        let yTotalGrossIncome = 0
+        let yTotalNetIncome = 0
+        for (const inc of yIncs) {
+          const amount = Number(inc.amount) || 0
+          const itemFeeRate = inc.feeRate ? Number(inc.feeRate) : null
+          if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+            const grossAmount = amount / itemFeeRate
+            yTotalGrossIncome += grossAmount
+            yTotalNetIncome += amount
+          } else {
+            yTotalGrossIncome += amount
+            yTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
+          }
+        }
         const yTotalDispatched = yDisps.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
-        const feeRate = settings?.feePercent ?? 0
-        const fee = (yTotalIncome * feeRate) / 100
-        const yShould = Math.max(yTotalIncome - fee, 0)
-        carryOver = Math.max(yShould - yTotalDispatched, 0)
-      } catch {}
+        carryOver = Math.max(yTotalNetIncome - yTotalDispatched, 0)
+        
+        // 🔥 计算累计总入款：从最早到现在所有的入款（包括今天）
+        const allBills = await prisma.bill.findMany({
+          where: { chatId, openedAt: { lt } }, // 所有早于今天结束时间的账单（包含今天）
+          select: { id: true },
+          orderBy: { openedAt: 'asc' }
+        })
+        const allBillIds = allBills.map((b: any) => b.id)
+        const allItems = allBillIds.length
+          ? await prisma.billItem.findMany({
+              where: { billId: { in: allBillIds }, type: 'INCOME' },
+              select: { amount: true, feeRate: true }
+            })
+          : []
+        
+        // 🔥 计算累计总入款（原始金额，用于显示）
+        cumulativeTotalIncome = 0
+        for (const item of allItems) {
+          const amount = Number(item.amount) || 0
+          const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
+          if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+            cumulativeTotalIncome += amount / itemFeeRate // 还原原始金额
+          } else {
+            cumulativeTotalIncome += amount
+          }
+        }
+      } catch (e) {
+        console.error('[累计模式计算错误]', e)
+      }
     }
 
     return Response.json({
       billNumber: billsAgg.length,
       bills: billsAgg,
       ...selected,
-      ...(carryOver > 0
+      ...(isCumulativeMode
         ? {
+            // 🔥 累计模式：返回今日入款和累计总入款
+            todayIncome: selected.totalIncome, // 今日入款（当前日期范围内的入款）
+            totalIncome: cumulativeTotalIncome, // 累计总入款（从最早到现在）
+            shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
+            shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
+            notDispatched: (selected.notDispatched || 0) + carryOver,
+            notDispatchedUSDT: (selected.notDispatchedUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
+            carryOver,
+          }
+        : carryOver > 0
+        ? {
+            // 非累计模式，但有历史数据（兼容旧逻辑）
             shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
             notDispatched: (selected.notDispatched || 0) + carryOver,

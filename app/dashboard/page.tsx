@@ -18,7 +18,8 @@ function DashboardPageInner() {
   const chatId = (searchParams?.get("chatId") || "").trim()
   const [chatTitle, setChatTitle] = useState<string>("")
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
-  const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; bot?: { name: string } }>>([])
+  const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; invitedBy?: string | null; invitedByUsername?: string | null; bot?: { name: string } }>>([])
+  const [inviterFilter, setInviterFilter] = useState<string>('全部') // 🔥 新增：邀请人筛选
   const [drafts, setDrafts] = useState<Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }>>({})
   const [bots, setBots] = useState<Array<{ id: string; name: string; enabled?: boolean; realName?: string | null }>>([])
   const [saving, setSaving] = useState<Record<string, boolean>>({})
@@ -202,6 +203,7 @@ function DashboardPageInner() {
   const CACHE_KEY_BOTS = 'dashboard_cache_bots'
   const CACHE_KEY_GROUPS = 'dashboard_cache_groups'
   const CACHE_TTL = 5 * 60 * 1000 // 5分钟
+  const CACHE_MANUAL_ADDED = 'dashboard_manual_added_chats'
 
   const getCachedData = (key: string) => {
     if (typeof window === 'undefined') return null
@@ -223,6 +225,29 @@ function DashboardPageInner() {
     if (typeof window === 'undefined') return
     try {
       localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }))
+    } catch {}
+  }
+
+  // 读取本地记录的“手动添加”的群组
+  const getManualAddedSet = (): Set<string> => {
+    if (typeof window === 'undefined') return new Set<string>()
+    try {
+      const raw = localStorage.getItem(CACHE_MANUAL_ADDED)
+      if (!raw) return new Set<string>()
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) return new Set(arr as string[])
+      return new Set<string>()
+    } catch {
+      return new Set<string>()
+    }
+  }
+
+  const addManualAdded = (chatId: string) => {
+    if (typeof window === 'undefined') return
+    try {
+      const set = getManualAddedSet()
+      set.add(chatId)
+      localStorage.setItem(CACHE_MANUAL_ADDED, JSON.stringify(Array.from(set)))
     } catch {}
   }
 
@@ -518,6 +543,8 @@ function DashboardPageInner() {
                             const msg = await res.text().catch(() => '')
                             throw new Error(msg || '添加失败')
                           }
+                          // 记录为手动添加
+                          addManualAdded(chatId)
                           // 重新加载群列表
                           const gl = await fetch('/api/chats')
                           if (gl.ok) {
@@ -794,21 +821,52 @@ function DashboardPageInner() {
               {groupsCount === 0 ? (
                 <div className="text-center text-slate-500 text-sm py-6">暂无群组</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse">
+                <>
+                  {/* 🔥 新增：邀请人筛选下拉框 */}
+                  <div className="mb-4 flex items-center gap-3">
+                    <label className="text-sm font-medium text-slate-700">按邀请人筛选：</label>
+                    <select
+                      className="border rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[150px]"
+                      value={inviterFilter}
+                      onChange={(e) => setInviterFilter(e.target.value)}
+                    >
+                      <option value="全部">全部</option>
+                      {Array.from(new Set(groups.map(g => g.invitedByUsername || (getManualAddedSet().has(g.id) ? '手动' : '-'))))
+                        .filter(x => x !== '-')
+                        .sort()
+                        .map(username => (
+                          <option key={username} value={username}>{username}</option>
+                        ))}
+                    </select>
+                    <span className="text-sm text-slate-500">
+                      （显示 {inviterFilter === '全部' ? groups.length : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter).length} 个群组）
+                    </span>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[1100px] border-collapse">
                     <thead className="bg-slate-50">
                       <tr className="border-b-2 border-slate-200">
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Chat ID</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">群组名称</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">绑定机器人</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">邀请人/方式</th>
                         <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">允许使用</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">创建时间</th>
                         <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">操作</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {groups.map((it, idx) => {
-                        const draft = drafts[it.id] || { status: 'PENDING', botId: it.botId ?? null, allowed: !!it.allowed }
+                      {(() => {
+                        // 🔥 筛选：按邀请人分类
+                        const filteredGroups = inviterFilter === '全部' 
+                          ? groups 
+                          : groups.filter(g => (g.invitedByUsername || '-') === inviterFilter)
+                        
+                        return filteredGroups.map((it, idx) => {
+                          const draft = drafts[it.id] || { status: 'PENDING', botId: it.botId ?? null, allowed: !!it.allowed }
+                          // 🔥 使用数据库返回的邀请人信息，优先使用 invitedByUsername，如果没有则使用手动添加标记
+                          const inviterLabel = it.invitedByUsername || (getManualAddedSet().has(it.id) ? '手动' : '-')
                         return (
                           <Fragment key={it.id}>
                             <tr className={`border-b hover:bg-slate-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-25'}`}>
@@ -836,6 +894,7 @@ function DashboardPageInner() {
                                   ))}
                                 </select>
                               </td>
+                              <td className="py-3 px-4 text-sm text-slate-900">{inviterLabel}</td>
                               <td className="py-3 px-4 text-center">
                                 <label className="inline-flex items-center gap-2 cursor-pointer">
                                   <input
@@ -1009,6 +1068,7 @@ function DashboardPageInner() {
                     </tbody>
                   </table>
                 </div>
+              </>
               )}
             </div>
           </div>

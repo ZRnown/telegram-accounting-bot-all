@@ -55,6 +55,8 @@ export async function GET(req: NextRequest) {
         allowed: true,
         createdAt: true,
         botId: true,
+        invitedBy: true, // 🔥 新增：邀请人ID
+        invitedByUsername: true, // 🔥 新增：邀请人用户名
         bot: { select: { id: true, name: true, token: true } },
       },
     })

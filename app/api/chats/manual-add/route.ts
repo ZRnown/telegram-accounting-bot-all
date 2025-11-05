@@ -41,7 +41,15 @@ export async function POST(req: NextRequest) {
     const chat = await prisma.chat.upsert({
       where: { id: chatId },
       update: { title, bot: { connect: { id: botId } } },
-      create: { id: chatId, title, status: 'PENDING', allowed: false, bot: { connect: { id: botId } } },
+      create: { 
+        id: chatId, 
+        title, 
+        status: 'PENDING', 
+        allowed: false, 
+        bot: { connect: { id: botId } },
+        invitedBy: null, // 🔥 手动添加标记为空
+        invitedByUsername: '手动' // 🔥 手动添加标记为"手动"
+      },
       select: { id: true, title: true, status: true, botId: true },
     })
 
