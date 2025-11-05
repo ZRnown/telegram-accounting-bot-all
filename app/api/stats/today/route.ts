@@ -472,19 +472,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 🔥 累计模式：计算今日入款（当前查询日期范围内的入款，不管是否累计模式都要返回）
-    // 无论累计模式还是非累计模式，todayIncome都应该显示当前查询日期范围内的入款
-    const todayIncome = selected.totalIncome // 当前查询日期范围内的入款（gross）
-    
     return Response.json({
       billNumber: billsAgg.length,
       bills: billsAgg,
       ...selected,
-      // 🔥 修复：无论是否累计模式，都返回todayIncome（当前查询日期范围内的入款）
-      todayIncome,
       ...(isCumulativeMode
         ? {
             // 🔥 累计模式：返回今日入款和累计总入款
+            todayIncome: selected.totalIncome, // 今日入款（当前日期范围内的入款）
             totalIncome: cumulativeTotalIncome, // 累计总入款（从最早到现在）
             shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
