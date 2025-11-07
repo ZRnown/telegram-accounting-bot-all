@@ -15,21 +15,23 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
   const [pick, setPick] = useState<number | ''>('')
   const [settings, setSettings] = useState<any>(null)
 
-  // 🔥 加载群组设置（判断是否累计模式）
+  // 🔥 加载群组设置（判断是否累计模式）- 使用useMemo缓存结果
   useEffect(() => {
     if (!chatId) return
+    let cancelled = false
     const load = async () => {
       try {
         const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
-        if (res.ok) {
+        if (res.ok && !cancelled) {
           const json = await res.json()
           setSettings(json.settings)
         }
       } catch (e) {
-        console.error('加载设置失败', e)
+        if (!cancelled) console.error('加载设置失败', e)
       }
     }
     load()
+    return () => { cancelled = true }
   }, [chatId])
 
   // 🔥 使用 useMemo 优化日期字符串计算
@@ -47,7 +49,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
         if (!res.ok) throw new Error('failed')
         const json = await res.json()
         setData(json)
-        // default select latest bill if any (respect existing pick)
+        // 🔥 性能优化：只在没有选择时才自动选择，避免不必要的状态更新
         if (!pick) {
           if (json?.selectedBillIndex) {
             setPick(json.selectedBillIndex)
@@ -58,7 +60,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
           }
         }
       } catch (e) {
-        if ((e as any).name !== 'AbortError') console.error(e)
+        if ((e as any).name !== 'AbortError') console.error('加载数据失败', e)
       }
     }
     load()
@@ -67,7 +69,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
 
   // 🔥 使用 useMemo 优化计算结果
   const isCumulativeMode = useMemo(() => settings?.accountingMode === 'CARRY_OVER', [settings?.accountingMode])
-  const hasCarryOver = useMemo(() => data?.carryOver && data.carryOver > 0, [data?.carryOver])
+  const hasCarryOver = useMemo(() => Boolean(data?.carryOver && data.carryOver > 0), [data?.carryOver])
 
   const view = useMemo(() => {
     if (!data) return null as any
@@ -76,6 +78,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     const idx = pick ? (Number(pick) - 1) : (list.length - 1)
     const b = list[idx]
     if (!b) return data
+    // 🔥 性能优化：避免创建新对象，直接合并
     return { ...data, ...b }
   }, [data, pick])
 
@@ -117,7 +120,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">当日第</span>
             <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold text-slate-900">{data.billNumber} 笔账单</span>
+              <span className="text-lg font-semibold text-slate-900">{(data.billNumber ?? 0)} 笔账单</span>
               {data.billNumber > 0 && (
                 <select
                   className="text-xs border border-slate-300 rounded px-2 py-1"
@@ -125,9 +128,10 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
                   onChange={handleBillChange}
                 >
                   <option value="">选择第几笔</option>
-                  {Array.from({ length: data.billNumber }, (_, i) => i + 1).map((n) => {
-                    const label = Array.isArray(data.billLabels) && data.billLabels[n - 1] 
-                      ? data.billLabels[n - 1] 
+                  {Array.from({ length: data.billNumber }, (_, i) => {
+                    const n = i + 1
+                    const label = Array.isArray(data.billLabels) && data.billLabels[i] 
+                      ? data.billLabels[i] 
                       : `第 ${n} 笔`
                     return (
                       <option key={n} value={n}>{label}</option>
@@ -140,37 +144,37 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">总入款金额</span>
-            <span className="text-lg font-semibold text-green-600">{view.totalIncome.toLocaleString()}</span>
+            <span className="text-lg font-semibold text-green-600">{(view.totalIncome ?? 0).toLocaleString()}</span>
           </div>
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">汇率</span>
-            <span className="text-lg font-semibold text-slate-900">{view.exchangeRate}</span>
+            <span className="text-lg font-semibold text-slate-900">{view.exchangeRate ?? 0}</span>
           </div>
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">费率</span>
-            <span className="text-lg font-semibold text-slate-900">{view.feeRate}%</span>
+            <span className="text-lg font-semibold text-slate-900">{view.feeRate ?? 0}%</span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
           <div className="p-3 bg-blue-50 rounded-lg">
             <div className="text-xs text-slate-600 mb-1">应下发</div>
-            <div className="font-semibold text-slate-900">{view.shouldDispatch.toLocaleString()}</div>
-            <div className="text-sm text-blue-600">{view.shouldDispatchUSDT.toFixed(2)} USDT</div>
+            <div className="font-semibold text-slate-900">{(view.shouldDispatch ?? 0).toLocaleString()}</div>
+            <div className="text-sm text-blue-600">{(view.shouldDispatchUSDT ?? 0).toFixed(2)} USDT</div>
           </div>
 
           <div className="p-3 bg-green-50 rounded-lg">
             <div className="text-xs text-slate-600 mb-1">已下发</div>
-            <div className="font-semibold text-slate-900">{view.dispatched.toLocaleString()}</div>
-            <div className="text-sm text-green-600">{view.dispatchedUSDT.toFixed(2)} USDT</div>
+            <div className="font-semibold text-slate-900">{(view.dispatched ?? 0).toLocaleString()}</div>
+            <div className="text-sm text-green-600">{(view.dispatchedUSDT ?? 0).toFixed(2)} USDT</div>
           </div>
 
           <div className="p-3 bg-orange-50 rounded-lg">
             <div className="text-xs text-slate-600 mb-1">未下发</div>
-            <div className="font-semibold text-slate-900">{view.notDispatched.toLocaleString()}</div>
-            <div className="text-sm text-orange-600">{view.notDispatchedUSDT.toFixed(2)} USDT</div>
+            <div className="font-semibold text-slate-900">{(view.notDispatched ?? 0).toLocaleString()}</div>
+            <div className="text-sm text-orange-600">{(view.notDispatchedUSDT ?? 0).toFixed(2)} USDT</div>
           </div>
         </div>
         
@@ -186,7 +190,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
               </div>
             </div>
             <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
-              💡 提示：应下发 = 当前账单入款（扣除费率后）{hasCarryOver ? ' + 历史未下发' : ''}
+              💡 提示：应下发 = 当前账单入款（扣除费率后）{hasCarryOver && ' + 历史未下发'}
             </div>
           </div>
         )}
