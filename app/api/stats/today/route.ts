@@ -184,15 +184,14 @@ export async function GET(req: NextRequest) {
     }
 
     // 🔥 重新查询账单（使用正确的日切时间）
-    // 🔥 累计模式：查询所有账单（包括昨天的CLOSED账单），用于显示历史数据
+    // 🔥 累计模式：查询所有OPEN状态的账单（一直记账，直到手动删除或保存）
     // 🔥 清零模式：只查询当天的OPEN账单
     const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
     const billsData = isCumulativeMode
       ? await prisma.bill.findMany({
           where: { 
             chatId, 
-            openedAt: { gte, lt },
-            // 累计模式：包括OPEN和CLOSED状态的账单（不包括已删除的）
+            status: 'OPEN', // 🔥 累计模式：只显示OPEN状态的账单（一直记账，直到手动删除或保存）
           },
           select: { id: true, openedAt: true, status: true },
           orderBy: { openedAt: 'asc' }
@@ -445,42 +444,32 @@ export async function GET(req: NextRequest) {
             orderBy: { openedAt: 'asc' }
           })
           
-          // 🔥 为每个账单生成标签（显示开启日期）
+          // 🔥 为每个账单生成标签（累计模式：显示开启日期，如果跨天了）
           const todayStart = dateStr ? startOfDateRange(dateStr, cutoffHour) : gte
           const todayEnd = dateStr ? endOfDateRange(dateStr, cutoffHour) : lt
           
           billLabels = billsData.map((bill: any, idx: number) => {
             const billDate = new Date(bill.openedAt)
-            const yesterdayStart = new Date(yGte)
-            const yesterdayEnd = new Date(yLt)
             const currentTodayStart = new Date(todayStart)
             const currentTodayEnd = new Date(todayEnd)
             
-            // 判断是否是今天的账单
-            if (billDate >= currentTodayStart && billDate < currentTodayEnd) {
-              return `第 ${idx + 1} 笔`
-            }
-            
-            // 判断是否是昨天的账单
-            if (billDate >= yesterdayStart && billDate < yesterdayEnd) {
-              const yesterdayIndex = yesterdayBills.findIndex((b: any) => b.id === bill.id)
-              if (yesterdayIndex >= 0) {
-                return `昨日第${yesterdayIndex + 1}笔订单`
+            // 🔥 累计模式：如果账单不在今天的日期范围内，显示开启日期
+            if (billDate < currentTodayStart || billDate >= currentTodayEnd) {
+              const billYear = billDate.getFullYear()
+              const billMonth = billDate.getMonth() + 1
+              const billDay = billDate.getDate()
+              const nowYear = new Date().getFullYear()
+              
+              // 如果是今年，只显示月日；否则显示年月日
+              if (billYear === nowYear) {
+                return `${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
+              } else {
+                return `${billYear}年${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
               }
             }
             
-            // 更早的账单：显示开启日期
-            const billYear = billDate.getFullYear()
-            const billMonth = billDate.getMonth() + 1
-            const billDay = billDate.getDate()
-            const nowYear = new Date().getFullYear()
-            
-            // 如果是今年，只显示月日；否则显示年月日
-            if (billYear === nowYear) {
-              return `${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
-            } else {
-              return `${billYear}年${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
-            }
+            // 今天的账单：显示"第X笔"
+            return `第 ${idx + 1} 笔`
           })
           
           const historicalBillIds = historicalBills.map((b: any) => b.id)

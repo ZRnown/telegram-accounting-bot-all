@@ -141,6 +141,33 @@ export async function getChatDailyCutoffHour(chatId) {
  * - 如果当前时间是3号凌晨1点（< 3号02:00），归入2号的账单（2025/11/02 02:00:00 — 2025/11/03 02:00:00）
  */
 export async function getOrCreateTodayBill(chatId) {
+  // 🔥 先检查是否是累计模式
+  const settings = await prisma.setting.findUnique({
+    where: { chatId },
+    select: { accountingMode: true }
+  })
+  const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+  
+  // 🔥 累计模式：如果已有OPEN账单，直接使用，不创建新的
+  if (isCumulativeMode) {
+    const existingBill = await prisma.bill.findFirst({
+      where: { chatId, status: 'OPEN' },
+      orderBy: { openedAt: 'asc' }
+    })
+    
+    if (existingBill) {
+      // 返回已有账单，计算其日期范围（用于兼容性）
+      const cutoffHour = await getChatDailyCutoffHour(chatId)
+      const billDate = new Date(existingBill.openedAt)
+      const gte = new Date(billDate)
+      gte.setHours(cutoffHour, 0, 0, 0)
+      const lt = new Date(gte)
+      lt.setDate(lt.getDate() + 1)
+      return { bill: existingBill, gte, lt }
+    }
+  }
+  
+  // 🔥 清零模式或累计模式但没有OPEN账单：按日切逻辑创建账单
   const cutoffHour = await getChatDailyCutoffHour(chatId)
   const now = new Date()
   
@@ -413,9 +440,9 @@ export async function performAutoDailyCutoff(getChat) {
         const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
-        // 🔥 累计模式：只关闭昨天的账单（不删除），让它们成为历史数据
+        // 🔥 累计模式：不自动关闭账单，一直记账直到手动删除或保存
         // 🔥 清零模式：关闭昨天的账单（原有逻辑）
-        if (accountingMode === 'CARRY_OVER' || accountingMode === 'DAILY_RESET') {
+        if (accountingMode === 'DAILY_RESET') {
           // 🔥 修复：优先使用群组级别的日切时间
           const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
             ? settings.dailyCutoffHour
