@@ -541,13 +541,13 @@ export async function GET(req: NextRequest) {
       ...selected,
       ...(isCumulativeMode
         ? {
-            // 🔥 累计模式：返回今日入款和累计总入款
+            // 🔥 累计模式：返回这个账单的总入款（不是累计总入款）
             // todayIncome: 当前日期范围内的入款（当日切日内的入款）
             todayIncome: selected.totalIncome, // 今日入款（当前日期范围内的入款，即当日切日内的入款）
-            totalIncome: cumulativeTotalIncome, // 累计总入款（从最早到现在）
-            shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
+            totalIncome: selected.totalIncome, // 🔥 这个账单的总入款金额（不是累计总入款）
+            shouldDispatch: (selected.shouldDispatch || 0) + carryOver, // 这个账单的应下发 + 历史未下发
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
-            notDispatched: (selected.notDispatched || 0) + carryOver,
+            notDispatched: (selected.notDispatched || 0) + carryOver, // 这个账单的未下发 + 历史未下发
             notDispatchedUSDT: (selected.notDispatchedUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
             carryOver,
           }

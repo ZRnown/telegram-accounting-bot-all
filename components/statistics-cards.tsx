@@ -138,12 +138,10 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
             </div>
           </div>
 
-          {!isCumulativeMode && (
-            <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-              <span className="text-sm text-slate-600">总入款金额</span>
-              <span className="text-lg font-semibold text-green-600">{view.totalIncome.toLocaleString()}</span>
-            </div>
-          )}
+          <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+            <span className="text-sm text-slate-600">总入款金额</span>
+            <span className="text-lg font-semibold text-green-600">{view.totalIncome.toLocaleString()}</span>
+          </div>
 
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
             <span className="text-sm text-slate-600">汇率</span>
