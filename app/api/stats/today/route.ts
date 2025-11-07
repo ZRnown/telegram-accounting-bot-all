@@ -511,12 +511,14 @@ export async function GET(req: NextRequest) {
         }
         
         // 🔥 计算累计总入款：从最早到现在所有的入款（包括今天）
+        // 注意：已删除的账单不会出现在查询结果中，因为删除是物理删除
         const allBills = await prisma.bill.findMany({
           where: { chatId, openedAt: { lt } }, // 所有早于今天结束时间的账单（包含今天）
           select: { id: true },
           orderBy: { openedAt: 'asc' }
         })
         const allBillIds = allBills.map((b: any) => b.id)
+        // 🔥 只查询存在的账单的账单项（已删除的账单项不会出现在查询结果中）
         const allItems = allBillIds.length
           ? await prisma.billItem.findMany({
               where: { billId: { in: allBillIds }, type: 'INCOME' },
