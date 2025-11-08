@@ -484,16 +484,29 @@ export async function GET(req: NextRequest) {
           const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
           
           // 🔥 查询历史账单：昨天及之前的所有账单
-          // 🔥 如果昨天最后一笔是CLOSED，则不包括昨天的账单；如果是OPEN，则包括
+          // 🔥 如果昨天最后一笔是CLOSED，则不包括昨天的账单（因为昨天的账单已经保存，不计入历史未下发）
+          // 🔥 如果是OPEN，则包括（因为昨天的账单未保存，需要计入历史未下发）
+          // 🔥 但是历史入款应该始终显示（包括所有已保存和未保存的历史账单）
           const historicalBillsWhere: any = {
             chatId,
             openedAt: { lt: selectedBill.openedAt }
           }
           
-          // 🔥 如果昨天最后一笔是CLOSED，排除昨天的账单
+          // 🔥 查询所有历史账单（用于计算历史入款）
+          const allHistoricalBills = await prisma.bill.findMany({
+            where: {
+              chatId,
+              openedAt: { lt: selectedBill.openedAt }
+            },
+            select: { id: true, openedAt: true, status: true },
+            orderBy: { openedAt: 'asc' }
+          })
+          
+          // 🔥 如果昨天最后一笔是CLOSED，排除昨天的账单（用于计算历史未下发）
+          // 🔥 但历史入款仍然包括所有历史账单
           if (!shouldIncludeYesterday && lastYesterdayBill) {
             historicalBillsWhere.openedAt = { 
-              lt: yGte // 只查询昨天之前的账单
+              lt: yGte // 只查询昨天之前的账单（用于计算历史未下发）
             }
           }
           
@@ -540,10 +553,35 @@ export async function GET(req: NextRequest) {
             return `第 ${idx + 1} 笔${isClosed ? '（已保存）' : ''}`
           })
           
-          // 🔥 性能优化：只在有历史账单时查询账单项
+          // 🔥 计算历史入款：使用所有历史账单（包括已保存和未保存的）
+          const allHistoricalBillIds = allHistoricalBills.map((b: any) => b.id)
+          const allHistoricalItems = allHistoricalBillIds.length
+            ? await prisma.billItem.findMany({
+                where: { billId: { in: allHistoricalBillIds } },
+                select: { type: true, amount: true, feeRate: true }
+              })
+            : []
+          
+          // 🔥 计算历史入款（原始金额，用于显示）
+          let hTotalGrossIncome = 0
+          for (const item of allHistoricalItems) {
+            if (item.type === 'INCOME') {
+              const amount = Number(item.amount) || 0
+              const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
+              if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+                // 有单笔费率：amount是扣除费率后的，需要还原原始金额
+                hTotalGrossIncome += amount / itemFeeRate
+              } else {
+                // 没有单笔费率：直接使用金额
+                hTotalGrossIncome += amount
+              }
+            }
+          }
+          historicalIncome = hTotalGrossIncome
+          
+          // 🔥 计算历史未下发：只使用未保存的历史账单（用于计算未下发）
           if (historicalBills.length === 0) {
             carryOver = 0
-            historicalIncome = 0
           } else {
             const historicalBillIds = historicalBills.map((b: any) => b.id)
             // 🔥 性能优化：一次性查询所有账单项，避免多次查询
@@ -554,7 +592,6 @@ export async function GET(req: NextRequest) {
             
             // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
             let hTotalNetIncome = 0 // 扣除费率后的历史入款（用于计算未下发）
-            let hTotalGrossIncome = 0 // 原始历史入款（用于显示）
             let hTotalDispatched = 0
             
             for (const item of historicalItems) {
@@ -562,13 +599,8 @@ export async function GET(req: NextRequest) {
               if (item.type === 'INCOME') {
                 const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
                 if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-                  // 有单笔费率：amount是扣除费率后的，需要还原原始金额
-                  const grossAmount = amount / itemFeeRate
-                  hTotalGrossIncome += grossAmount
                   hTotalNetIncome += amount // 已经是扣除费率后的
                 } else {
-                  // 没有单笔费率：使用群组费率
-                  hTotalGrossIncome += amount
                   hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
                 }
               } else if (item.type === 'DISPATCH') {
@@ -578,9 +610,6 @@ export async function GET(req: NextRequest) {
             
             // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
             carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
-            
-            // 🔥 保存历史入款（原始金额，用于显示）
-            historicalIncome = hTotalGrossIncome
           }
         }
         
