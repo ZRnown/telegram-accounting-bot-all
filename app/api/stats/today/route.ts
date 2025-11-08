@@ -185,9 +185,30 @@ export async function GET(req: NextRequest) {
 
     // 🔥 重新查询账单（使用正确的日切时间）
     // 🔥 累计模式：查询当天的所有账单（OPEN和CLOSED），包括已保存的账单
+    // 🔥 同时查询昨日未保存的账单（OPEN状态），放在今日第一笔
     // 🔥 清零模式：只查询当天的OPEN账单
     const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-    const billsData = await prisma.bill.findMany({
+    
+    // 🔥 计算昨天的日期范围
+    const yGte = new Date(gte)
+    yGte.setDate(yGte.getDate() - 1)
+    const yLt = new Date(gte) // 今天的开始就是昨天的结束
+    
+    // 🔥 查询昨日未保存的账单（OPEN状态）
+    const yesterdayOpenBills = isCumulativeMode 
+      ? await prisma.bill.findMany({
+          where: { 
+            chatId, 
+            openedAt: { gte: yGte, lt: yLt },
+            status: 'OPEN' // 🔥 只查询OPEN状态的，未保存的
+          },
+          select: { id: true, openedAt: true, status: true },
+          orderBy: { openedAt: 'asc' }
+        })
+      : []
+    
+    // 🔥 查询当天的所有账单
+    const todayBills = await prisma.bill.findMany({
       where: { 
         chatId, 
         openedAt: { gte, lt }, // 🔥 查询当天的所有账单
@@ -196,6 +217,9 @@ export async function GET(req: NextRequest) {
       select: { id: true, openedAt: true, status: true },
       orderBy: { openedAt: 'asc' }
     })
+    
+    // 🔥 合并账单：昨日未保存的账单放在最前面（今日第一笔）
+    const billsData = [...yesterdayOpenBills, ...todayBills]
 
     const billIds = billsData.map((b: any) => b.id)
       const billItems = billIds.length
@@ -410,6 +434,7 @@ export async function GET(req: NextRequest) {
 
     // 🔥 累计模式：每个账单独立计算自己的历史数据
     let carryOver = 0
+    let historicalIncome = 0 // 🔥 历史入款（原始金额，用于显示）
     let cumulativeTotalIncome = selected.totalIncome // 默认等于今日入款（非累计模式）
     let billLabels: string[] = [] // 🔥 账单标签（用于显示"昨日第X笔订单"）
     
@@ -421,7 +446,19 @@ export async function GET(req: NextRequest) {
         if (!selectedBill) {
           carryOver = 0
         } else if (selectedBill) {
-          // 计算昨天的日期范围
+          // 计算昨天的日期范围（用于判断昨日未保存的账单）
+          let yGteForLabel: Date
+          if (dateStr) {
+            const todayStart = startOfDateRange(dateStr, cutoffHour)
+            yGteForLabel = new Date(todayStart)
+            yGteForLabel.setDate(yGteForLabel.getDate() - 1)
+          } else {
+            yGteForLabel = new Date(gte)
+            yGteForLabel.setDate(yGteForLabel.getDate() - 1)
+          }
+          const yLtForLabel = new Date(gte) // 今天的开始就是昨天的结束
+          
+          // 计算昨天的日期范围（用于历史数据计算）
           let yGte: Date
           if (dateStr) {
             const todayStart = startOfDateRange(dateStr, cutoffHour)
@@ -476,6 +513,9 @@ export async function GET(req: NextRequest) {
             const currentTodayEnd = new Date(todayEnd)
             const isClosed = bill.status === 'CLOSED'
             
+            // 🔥 判断是否是昨日未保存的账单（OPEN状态，且openedAt在昨天范围内）
+            const isYesterdayOpen = !isClosed && billDate >= yGteForLabel && billDate < yLtForLabel
+            
             // 🔥 累计模式：如果账单不在今天的日期范围内，显示开启日期
             if (billDate < currentTodayStart || billDate >= currentTodayEnd) {
               const billYear = billDate.getFullYear()
@@ -488,6 +528,11 @@ export async function GET(req: NextRequest) {
                 ? `${billMonth}月${billDay}日开启的`
                 : `${billYear}年${billMonth}月${billDay}日开启的`
               
+              // 🔥 昨日未保存的账单：显示"昨日第X笔订单"
+              if (isYesterdayOpen) {
+                return `昨日第${idx + 1}笔订单（未保存）`
+              }
+              
               return `${dateStr}第${idx + 1}笔订单${isClosed ? '（已保存）' : ''}`
             }
             
@@ -498,6 +543,7 @@ export async function GET(req: NextRequest) {
           // 🔥 性能优化：只在有历史账单时查询账单项
           if (historicalBills.length === 0) {
             carryOver = 0
+            historicalIncome = 0
           } else {
             const historicalBillIds = historicalBills.map((b: any) => b.id)
             // 🔥 性能优化：一次性查询所有账单项，避免多次查询
@@ -507,7 +553,8 @@ export async function GET(req: NextRequest) {
             })
             
             // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
-            let hTotalNetIncome = 0
+            let hTotalNetIncome = 0 // 扣除费率后的历史入款（用于计算未下发）
+            let hTotalGrossIncome = 0 // 原始历史入款（用于显示）
             let hTotalDispatched = 0
             
             for (const item of historicalItems) {
@@ -515,8 +562,13 @@ export async function GET(req: NextRequest) {
               if (item.type === 'INCOME') {
                 const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
                 if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+                  // 有单笔费率：amount是扣除费率后的，需要还原原始金额
+                  const grossAmount = amount / itemFeeRate
+                  hTotalGrossIncome += grossAmount
                   hTotalNetIncome += amount // 已经是扣除费率后的
                 } else {
+                  // 没有单笔费率：使用群组费率
+                  hTotalGrossIncome += amount
                   hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
                 }
               } else if (item.type === 'DISPATCH') {
@@ -526,6 +578,9 @@ export async function GET(req: NextRequest) {
             
             // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
             carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
+            
+            // 🔥 保存历史入款（原始金额，用于显示）
+            historicalIncome = hTotalGrossIncome
           }
         }
         
@@ -574,6 +629,7 @@ export async function GET(req: NextRequest) {
             // 🔥 累计模式：返回这个账单的总入款和今日入款
             todayIncome: selected.todayIncome ?? selected.totalIncome, // 🔥 今日入款（当日切日内的入款）
             totalIncome: selected.totalIncome, // 🔥 这个账单的总入款金额（不是累计总入款）
+            historicalIncome: historicalIncome, // 🔥 历史入款（原始金额，用于显示）
             shouldDispatch: (selected.shouldDispatch || 0) + carryOver, // 这个账单的应下发 + 历史未下发
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
             notDispatched: (selected.notDispatched || 0) + carryOver, // 这个账单的未下发 + 历史未下发
