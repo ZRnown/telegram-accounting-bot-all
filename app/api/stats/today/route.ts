@@ -184,26 +184,21 @@ export async function GET(req: NextRequest) {
     }
 
     // 🔥 重新查询账单（使用正确的日切时间）
-    // 🔥 累计模式：查询所有OPEN状态的账单（一直记账，直到手动删除或保存）
+    // 🔥 累计模式：查询当天的所有账单（OPEN和CLOSED），包括已保存的账单
     // 🔥 清零模式：只查询当天的OPEN账单
     const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-    const billsData = isCumulativeMode
-      ? await prisma.bill.findMany({
-          where: { 
-            chatId, 
-            status: 'OPEN', // 🔥 累计模式：只显示OPEN状态的账单（一直记账，直到手动删除或保存）
-          },
-          select: { id: true, openedAt: true, status: true },
-          orderBy: { openedAt: 'asc' }
-        })
-      : await prisma.bill.findMany({
-          where: { chatId, openedAt: { gte, lt }, status: 'OPEN' },
-          select: { id: true, openedAt: true, status: true },
-          orderBy: { openedAt: 'asc' }
-        })
+    const billsData = await prisma.bill.findMany({
+      where: { 
+        chatId, 
+        openedAt: { gte, lt }, // 🔥 查询当天的所有账单
+        ...(isCumulativeMode ? {} : { status: 'OPEN' }) // 🔥 累计模式：包括CLOSED状态；清零模式：只查询OPEN
+      },
+      select: { id: true, openedAt: true, status: true },
+      orderBy: { openedAt: 'asc' }
+    })
 
     const billIds = billsData.map((b: any) => b.id)
-    const billItems = billIds.length
+      const billItems = billIds.length
       ? await prisma.billItem.findMany({
           where: { billId: { in: billIds } },
           select: {
@@ -216,7 +211,7 @@ export async function GET(req: NextRequest) {
             replier: true,
             operator: true,
             remark: true, // 🔥 添加备注字段
-            createdAt: true,
+            createdAt: true, // 🔥 用于计算今日入款（累计模式）
           },
           orderBy: { createdAt: 'asc' }
         })
@@ -327,8 +322,35 @@ export async function GET(req: NextRequest) {
         replier: d.replier || '',
         operator: d.operator || '',
       }))
+      // 🔥 累计模式：计算今日入款（当日切日内的入款）
+      let todayIncome = tIncome // 默认等于总入款
+      if (isCumulativeMode) {
+        // 计算当日切时间范围
+        const todayStart = dateStr ? startOfDateRange(dateStr, cutoffHour) : gte
+        const todayEnd = dateStr ? endOfDateRange(dateStr, cutoffHour) : lt
+        
+        // 只计算在当日切时间范围内的入款
+        todayIncome = 0
+        for (const inc of incs) {
+          const itemDate = new Date(inc.createdAt)
+          if (itemDate >= todayStart && itemDate < todayEnd) {
+            const amount = Number(inc.amount) || 0
+            const itemFeeRate = inc.feeRate ? Number(inc.feeRate) : null
+            
+            if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+              // 有单笔费率：还原原始金额
+              todayIncome += amount / itemFeeRate
+            } else {
+              // 没有单笔费率：直接使用金额
+              todayIncome += amount
+            }
+          }
+        }
+      }
+      
       billsAgg.push({
-        totalIncome: tIncome, // 🔥 今日入款（当前日期范围内的入款）
+        totalIncome: tIncome, // 这个账单的总入款
+        todayIncome: todayIncome, // 🔥 今日入款（当日切日内的入款，累计模式使用）
         exchangeRate: rateB,
         feeRate: feePercent,
         shouldDispatch: shouldB,
@@ -368,34 +390,21 @@ export async function GET(req: NextRequest) {
     const incomeByRate: Record<string, number> = {}
     const selectedBillId = billsData[selIdx]?.id
     const selItems = selectedBillId ? (itemsByBillId.get(selectedBillId) || []) : []
-    // 🔥 性能优化：一次性分类
-    const selIncs: any[] = []
-    for (const item of selItems) {
-      if (item.type === 'INCOME') {
-        selIncs.push(item)
-      }
-    }
-    selIncs.forEach((i: any) => {
-      const amount = Number(i.amount) || 0
-      const rate = Number(i.rate || 0) || undefined
-      if (i.replier) incomeByReplier[i.replier] = (incomeByReplier[i.replier] || 0) + amount
-      if (i.operator) incomeByOperator[i.operator] = (incomeByOperator[i.operator] || 0) + amount
-      if (rate) incomeByRate[rate.toString()] = (incomeByRate[rate.toString()] || 0) + amount
-    })
-    // 🔥 改为按操作人（operator）分类统计
+    // 🔥 性能优化：单次遍历同时分类和统计，减少内存分配
     const dispatchByOperator: Record<string, number> = {}
-    const selDisps: any[] = []
     for (const item of selItems) {
-      if (item.type === 'DISPATCH') {
-        selDisps.push(item)
+      const amount = Number(item.amount) || 0
+      if (item.type === 'INCOME') {
+        const rate = Number(item.rate || 0) || undefined
+        if (item.replier) incomeByReplier[item.replier] = (incomeByReplier[item.replier] || 0) + amount
+        if (item.operator) incomeByOperator[item.operator] = (incomeByOperator[item.operator] || 0) + amount
+        if (rate) incomeByRate[rate.toString()] = (incomeByRate[rate.toString()] || 0) + amount
+      } else if (item.type === 'DISPATCH') {
+        // 优先使用operator，如果没有则使用replier作为后备
+        const operator = item.operator || item.replier || '未知'
+        if (operator) dispatchByOperator[operator] = (dispatchByOperator[operator] || 0) + amount
       }
     }
-    selDisps.forEach((d: any) => {
-      const amount = Number(d.amount) || 0
-      // 优先使用operator，如果没有则使用replier作为后备
-      const operator = d.operator || d.replier || '未知'
-      if (operator) dispatchByOperator[operator] = (dispatchByOperator[operator] || 0) + amount
-    })
 
     const selected = selectedBillAgg
 
@@ -424,23 +433,36 @@ export async function GET(req: NextRequest) {
           }
           const yLt = new Date(gte) // 今天的开始就是昨天的结束
           
-          // 🔥 查询昨天及之前的所有账单（OPEN和CLOSED状态，不包括已删除的）
-          const historicalBills = await prisma.bill.findMany({
-            where: { 
-              chatId, 
-              openedAt: { lt: selectedBill.openedAt }, // 早于当前账单的所有账单
-            },
-            select: { id: true, openedAt: true, status: true },
-            orderBy: { openedAt: 'asc' }
-          })
-          
-          // 🔥 计算昨天的账单数量（用于显示"昨日第X笔订单"）
-          const yesterdayBills = await prisma.bill.findMany({
+          // 🔥 查询昨天的最后一笔账单（用于判断状态）- 性能优化：只查询最后一笔
+          const lastYesterdayBill = await prisma.bill.findFirst({
             where: { 
               chatId, 
               openedAt: { gte: yGte, lt: yLt }
             },
-            select: { id: true, openedAt: true },
+            select: { id: true, openedAt: true, status: true },
+            orderBy: { openedAt: 'desc' } // 🔥 降序排列，第一个就是最后一笔
+          })
+          
+          // 🔥 判断昨天最后一笔账单的状态
+          const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
+          
+          // 🔥 查询历史账单：昨天及之前的所有账单
+          // 🔥 如果昨天最后一笔是CLOSED，则不包括昨天的账单；如果是OPEN，则包括
+          const historicalBillsWhere: any = {
+            chatId,
+            openedAt: { lt: selectedBill.openedAt }
+          }
+          
+          // 🔥 如果昨天最后一笔是CLOSED，排除昨天的账单
+          if (!shouldIncludeYesterday && lastYesterdayBill) {
+            historicalBillsWhere.openedAt = { 
+              lt: yGte // 只查询昨天之前的账单
+            }
+          }
+          
+          const historicalBills = await prisma.bill.findMany({
+            where: historicalBillsWhere,
+            select: { id: true, openedAt: true, status: true },
             orderBy: { openedAt: 'asc' }
           })
           
@@ -452,6 +474,7 @@ export async function GET(req: NextRequest) {
             const billDate = new Date(bill.openedAt)
             const currentTodayStart = new Date(todayStart)
             const currentTodayEnd = new Date(todayEnd)
+            const isClosed = bill.status === 'CLOSED'
             
             // 🔥 累计模式：如果账单不在今天的日期范围内，显示开启日期
             if (billDate < currentTodayStart || billDate >= currentTodayEnd) {
@@ -461,42 +484,49 @@ export async function GET(req: NextRequest) {
               const nowYear = new Date().getFullYear()
               
               // 如果是今年，只显示月日；否则显示年月日
-              if (billYear === nowYear) {
-                return `${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
-              } else {
-                return `${billYear}年${billMonth}月${billDay}日开启的第${idx + 1}笔订单`
+              const dateStr = billYear === nowYear 
+                ? `${billMonth}月${billDay}日开启的`
+                : `${billYear}年${billMonth}月${billDay}日开启的`
+              
+              return `${dateStr}第${idx + 1}笔订单${isClosed ? '（已保存）' : ''}`
+            }
+            
+            // 今天的账单：显示"第X笔"，如果已保存则标注
+            return `第 ${idx + 1} 笔${isClosed ? '（已保存）' : ''}`
+          })
+          
+          // 🔥 性能优化：只在有历史账单时查询账单项
+          if (historicalBills.length === 0) {
+            carryOver = 0
+          } else {
+            const historicalBillIds = historicalBills.map((b: any) => b.id)
+            // 🔥 性能优化：一次性查询所有账单项，避免多次查询
+            const historicalItems = await prisma.billItem.findMany({
+              where: { billId: { in: historicalBillIds } },
+              select: { type: true, amount: true, feeRate: true }
+            })
+            
+            // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
+            let hTotalNetIncome = 0
+            let hTotalDispatched = 0
+            
+            for (const item of historicalItems) {
+              const amount = Number(item.amount) || 0
+              if (item.type === 'INCOME') {
+                const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
+                if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+                  hTotalNetIncome += amount // 已经是扣除费率后的
+                } else {
+                  hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
+                }
+              } else if (item.type === 'DISPATCH') {
+                hTotalDispatched += amount
               }
             }
             
-            // 今天的账单：显示"第X笔"
-            return `第 ${idx + 1} 笔`
-          })
-          
-          const historicalBillIds = historicalBills.map((b: any) => b.id)
-          const historicalItems = historicalBillIds.length
-            ? await prisma.billItem.findMany({
-                where: { billId: { in: historicalBillIds } },
-                select: { type: true, amount: true, feeRate: true }
-              })
-            : []
-          
-          const hIncs = historicalItems.filter((x: any) => x.type === 'INCOME')
-          const hDisps = historicalItems.filter((x: any) => x.type === 'DISPATCH')
-          
-          // 🔥 计算历史未下发（考虑单笔费率）
-          let hTotalNetIncome = 0
-          for (const inc of hIncs) {
-            const amount = Number(inc.amount) || 0
-            const itemFeeRate = inc.feeRate ? Number(inc.feeRate) : null
-            if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-              hTotalNetIncome += amount // 已经是扣除费率后的
-            } else {
-              hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
-            }
+            // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
+            carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
           }
-          const hTotalDispatched = hDisps.reduce((s: number, x: any) => s + (Number(x.amount) || 0), 0)
-          // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
-          carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
         }
         
         // 🔥 计算累计总入款：从最早到现在所有的入款（包括今天）
@@ -541,9 +571,8 @@ export async function GET(req: NextRequest) {
       ...selected,
       ...(isCumulativeMode
         ? {
-            // 🔥 累计模式：返回这个账单的总入款（不是累计总入款）
-            // todayIncome: 当前日期范围内的入款（当日切日内的入款）
-            todayIncome: selected.totalIncome, // 今日入款（当前日期范围内的入款，即当日切日内的入款）
+            // 🔥 累计模式：返回这个账单的总入款和今日入款
+            todayIncome: selected.todayIncome ?? selected.totalIncome, // 🔥 今日入款（当日切日内的入款）
             totalIncome: selected.totalIncome, // 🔥 这个账单的总入款金额（不是累计总入款）
             shouldDispatch: (selected.shouldDispatch || 0) + carryOver, // 这个账单的应下发 + 历史未下发
             shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),

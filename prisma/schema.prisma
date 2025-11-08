@@ -206,6 +206,7 @@ enum BillStatus {
 enum AccountingMode {
   DAILY_RESET
   CARRY_OVER
+  SINGLE_BILL_PER_DAY // 🔥 每天只有一笔订单，不支持保存，但支持删除
 }
 
 enum ChatStatus {

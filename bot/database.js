@@ -141,33 +141,16 @@ export async function getChatDailyCutoffHour(chatId) {
  * - 如果当前时间是3号凌晨1点（< 3号02:00），归入2号的账单（2025/11/02 02:00:00 — 2025/11/03 02:00:00）
  */
 export async function getOrCreateTodayBill(chatId) {
-  // 🔥 先检查是否是累计模式
+  // 🔥 先检查记账模式
   const settings = await prisma.setting.findUnique({
     where: { chatId },
     select: { accountingMode: true }
   })
-  const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+  const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+  const isCumulativeMode = accountingMode === 'CARRY_OVER'
+  const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
   
-  // 🔥 累计模式：如果已有OPEN账单，直接使用，不创建新的
-  if (isCumulativeMode) {
-    const existingBill = await prisma.bill.findFirst({
-      where: { chatId, status: 'OPEN' },
-      orderBy: { openedAt: 'asc' }
-    })
-    
-    if (existingBill) {
-      // 返回已有账单，计算其日期范围（用于兼容性）
-      const cutoffHour = await getChatDailyCutoffHour(chatId)
-      const billDate = new Date(existingBill.openedAt)
-      const gte = new Date(billDate)
-      gte.setHours(cutoffHour, 0, 0, 0)
-      const lt = new Date(gte)
-      lt.setDate(lt.getDate() + 1)
-      return { bill: existingBill, gte, lt }
-    }
-  }
-  
-  // 🔥 清零模式或累计模式但没有OPEN账单：按日切逻辑创建账单
+  // 🔥 所有模式：按日切逻辑查找或创建账单（每天只有一笔账单）
   const cutoffHour = await getChatDailyCutoffHour(chatId)
   const now = new Date()
   
@@ -192,6 +175,8 @@ export async function getOrCreateTodayBill(chatId) {
     lt = new Date(todayCutoff)
   }
   
+  // 🔥 单笔订单模式：如果当天已有OPEN账单，直接返回；否则创建新的
+  // 🔥 其他模式：查找或创建当天的OPEN账单
   let bill = await prisma.bill.findFirst({ 
     where: { chatId, status: 'OPEN', openedAt: { gte, lt } }, 
     orderBy: { openedAt: 'asc' } 
@@ -440,9 +425,8 @@ export async function performAutoDailyCutoff(getChat) {
         const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
-        // 🔥 累计模式：不自动关闭账单，一直记账直到手动删除或保存
-        // 🔥 清零模式：关闭昨天的账单（原有逻辑）
-        if (accountingMode === 'DAILY_RESET') {
+        // 🔥 所有模式：日切时关闭昨天的账单，确保每天只有一笔账单
+        if (accountingMode === 'CARRY_OVER' || accountingMode === 'DAILY_RESET' || accountingMode === 'SINGLE_BILL_PER_DAY') {
           // 🔥 修复：优先使用群组级别的日切时间
           const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
             ? settings.dailyCutoffHour

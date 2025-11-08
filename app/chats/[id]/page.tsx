@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 
-type AccountingMode = 'DAILY_RESET' | 'CARRY_OVER'
+type AccountingMode = 'DAILY_RESET' | 'CARRY_OVER' | 'SINGLE_BILL_PER_DAY'
 
 interface ChatSettings {
   chat: {
@@ -340,8 +340,14 @@ export default function ChatSettingsPage() {
           <div className="bg-white border rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-semibold">📊 记账模式</h3>
-              <span className={`text-xs px-2 py-1 rounded ${accountingMode === 'DAILY_RESET' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                {accountingMode === 'DAILY_RESET' ? '每日清零' : '累计模式'}
+              <span className={`text-xs px-2 py-1 rounded ${
+                accountingMode === 'DAILY_RESET' ? 'bg-blue-100 text-blue-700' : 
+                accountingMode === 'CARRY_OVER' ? 'bg-green-100 text-green-700' : 
+                'bg-purple-100 text-purple-700'
+              }`}>
+                {accountingMode === 'DAILY_RESET' ? '每日清零' : 
+                 accountingMode === 'CARRY_OVER' ? '累计模式' : 
+                 '单笔订单'}
               </span>
             </div>
             <div className="space-y-2">
@@ -367,9 +373,21 @@ export default function ChatSettingsPage() {
                 />
                 <span className="text-sm">📈 累计模式（持续累计未下发）</span>
               </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="accountingMode"
+                  value="SINGLE_BILL_PER_DAY"
+                  checked={accountingMode === 'SINGLE_BILL_PER_DAY'}
+                  onChange={(e) => setAccountingMode(e.target.value as AccountingMode)}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">📋 单笔订单（每天只有一笔，不支持保存）</span>
+              </label>
               <div className="mt-3 space-y-2 text-xs text-slate-600 leading-relaxed">
                 <p>💡 <strong>每日清零：</strong> 每个日切周期都会生成全新的账单，历史账单不会参与当日计算，也不会累计未下发金额。</p>
                 <p>💡 <strong>累计模式：</strong> 当前账单会自动叠加所有更早账单的未下发金额；删除账单时会同步删除该账单的全部流水，后续账单的历史数据也会随之回收。</p>
+                <p>💡 <strong>单笔订单：</strong> 每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单，每天单独记账。</p>
                 <p>⚙️ <strong>性能建议：</strong> 累计模式在后台统计时会对日期内全部账单与历史数据做聚合，账单数量较多时建议定期归档或导出，以避免不必要的数据库与内存占用。</p>
                 <p>💱 <strong>汇率管理：</strong> 机器人首次加入群组或重启后，会自动刷新实时 USDT 汇率；如需固定汇率，可在此处设置“固定汇率”，自动值会立即被覆盖。</p>
               </div>

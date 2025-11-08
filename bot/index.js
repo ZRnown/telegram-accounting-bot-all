@@ -1559,10 +1559,17 @@ bot.hears(/^查看记账模式$/i, async (ctx) => {
   const chatId = await ensureDbChat(ctx)
   const settings = await prisma.setting.findUnique({ where: { chatId } })
   const mode = settings?.accountingMode || 'DAILY_RESET'
-  const modeName = mode === 'CARRY_OVER' ? '累计模式（结转未下发）' : '清零模式（按日清零）'
-  const desc = mode === 'CARRY_OVER' 
-    ? '当前模式：未下发金额会累计到次日继续统计'
-    : '当前模式：每日账单独立计算，不结转历史'
+  let modeName = '清零模式（按日清零）'
+  let desc = '当前模式：每日账单独立计算，不结转历史'
+  
+  if (mode === 'CARRY_OVER') {
+    modeName = '累计模式（结转未下发）'
+    desc = '当前模式：未下发金额会累计到次日继续统计'
+  } else if (mode === 'SINGLE_BILL_PER_DAY') {
+    modeName = '单笔订单模式'
+    desc = '当前模式：每天只有一笔订单，不支持保存，但支持删除。日切时会自动关闭昨天的账单。'
+  }
+  
   await ctx.reply(`${modeName}\n${desc}`)
 })
 

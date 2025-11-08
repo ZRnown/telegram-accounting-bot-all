@@ -34,10 +34,24 @@ export function registerSaveBill(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx, chat)
     
     try {
+      // 🔥 检查记账模式
+      const settings = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { accountingMode: true }
+      })
+      const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+      const isCumulativeMode = accountingMode === 'CARRY_OVER'
+      const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
+      
+      // 🔥 单笔订单模式：不支持保存账单
+      if (isSingleBillMode) {
+        return ctx.reply('⚠️ 当前记账模式不支持保存账单。每天只有一笔订单，日切时会自动关闭。', { ...(await buildInlineKb(ctx)) })
+      }
+      
       const { bill } = await getOrCreateTodayBill(chatId)
       await prisma.bill.update({
         where: { id: bill.id },
-        data: { status: 'CLOSED', closedAt: new Date() }
+        data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() }
       })
       
       // 清空内存
@@ -51,7 +65,13 @@ export function registerSaveBill(bot, ensureChat) {
       chat.current.incomes = []
       chat.current.dispatches = []
       
-      await ctx.reply('✅ 账单已保存并清空', { ...(await buildInlineKb(ctx)) })
+      // 🔥 累计模式：保存后自动创建新的账单（按日切逻辑）
+      if (isCumulativeMode) {
+        await getOrCreateTodayBill(chatId)
+        await ctx.reply('✅ 账单已保存，已自动创建新的账单', { ...(await buildInlineKb(ctx)) })
+      } else {
+        await ctx.reply('✅ 账单已保存并清空', { ...(await buildInlineKb(ctx)) })
+      }
     } catch (e) {
       console.error('保存账单失败', e)
       await ctx.reply('❌ 保存账单失败，请稍后重试')

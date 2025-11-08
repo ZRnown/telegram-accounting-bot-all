@@ -39,7 +39,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       fixedRate?: number | null
       realtimeRate?: number | null
       feePercent?: number | null
-      accountingMode?: 'DAILY_RESET' | 'CARRY_OVER'
+      accountingMode?: 'DAILY_RESET' | 'CARRY_OVER' | 'SINGLE_BILL_PER_DAY'
       featureWarningMode?: string
       addressVerificationEnabled?: boolean
       dailyCutoffHour?: number
@@ -68,7 +68,9 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (fixedRate !== undefined) patchData.fixedRate = fixedRate
     if (realtimeRate !== undefined) patchData.realtimeRate = realtimeRate
     if (typeof body.feePercent === 'number') patchData.feePercent = body.feePercent
-    if (body.accountingMode === 'DAILY_RESET' || body.accountingMode === 'CARRY_OVER') patchData.accountingMode = body.accountingMode
+    if (body.accountingMode === 'DAILY_RESET' || body.accountingMode === 'CARRY_OVER' || body.accountingMode === 'SINGLE_BILL_PER_DAY') {
+      patchData.accountingMode = body.accountingMode
+    }
     if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) patchData.featureWarningMode = body.featureWarningMode
     // 🔥 修复：boolean字段即使是false也要添加到patchData中
     if (typeof body.addressVerificationEnabled === 'boolean') patchData.addressVerificationEnabled = body.addressVerificationEnabled
