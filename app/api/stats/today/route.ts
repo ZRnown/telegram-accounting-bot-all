@@ -492,26 +492,27 @@ export async function GET(req: NextRequest) {
             openedAt: { lt: selectedBill.openedAt }
           }
           
-          // 🔥 查询所有历史账单（用于计算历史入款）
-          const allHistoricalBills = await prisma.bill.findMany({
-            where: {
-              chatId,
-              openedAt: { lt: selectedBill.openedAt }
-            },
-            select: { id: true, openedAt: true, status: true },
-            orderBy: { openedAt: 'asc' }
-          })
-          
           // 🔥 如果昨天最后一笔是CLOSED，排除昨天的账单（用于计算历史未下发）
-          // 🔥 但历史入款仍然包括所有历史账单
           if (!shouldIncludeYesterday && lastYesterdayBill) {
             historicalBillsWhere.openedAt = { 
               lt: yGte // 只查询昨天之前的账单（用于计算历史未下发）
             }
           }
           
+          // 🔥 查询历史账单（用于计算历史未下发）
           const historicalBills = await prisma.bill.findMany({
             where: historicalBillsWhere,
+            select: { id: true, openedAt: true, status: true },
+            orderBy: { openedAt: 'asc' }
+          })
+          
+          // 🔥 查询所有未CLOSED的历史账单（用于计算历史入款）
+          const allHistoricalBills = await prisma.bill.findMany({
+            where: {
+              chatId,
+              openedAt: { lt: selectedBill.openedAt },
+              status: 'OPEN' // 🔥 只查询OPEN状态的账单
+            },
             select: { id: true, openedAt: true, status: true },
             orderBy: { openedAt: 'asc' }
           })
