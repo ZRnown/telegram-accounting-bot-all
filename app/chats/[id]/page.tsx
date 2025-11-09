@@ -385,11 +385,11 @@ export default function ChatSettingsPage() {
                 <span className="text-sm">📋 单笔订单（每天只有一笔，不支持保存）</span>
               </label>
               <div className="mt-3 space-y-2 text-xs text-slate-600 leading-relaxed">
-                <p>💡 <strong>每日清零：</strong> 每个日切周期都会生成全新的账单，历史账单不会参与当日计算，也不会累计未下发金额。</p>
-                <p>💡 <strong>累计模式：</strong> 当前账单会自动叠加所有更早账单的未下发金额；删除账单时会同步删除该账单的全部流水，后续账单的历史数据也会随之回收。</p>
-                <p>💡 <strong>单笔订单：</strong> 每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单，每天单独记账。</p>
+                <p>💡 <strong>每日清零：</strong> 每个日切周期都会生成全新的账单，历史账单不会参与当日计算，也不会累计未下发金额。支持设置日切时间。</p>
+                <p>💡 <strong>累计模式：</strong> 当前账单会自动叠加所有更早账单的未下发金额；删除账单时会同步删除该账单的全部流水，后续账单的历史数据也会随之回收。不支持设置日切时间，账单按保存时间自动创建。</p>
+                <p>💡 <strong>单笔订单：</strong> 每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单，每天单独记账。支持设置日切时间。</p>
                 <p>⚙️ <strong>性能建议：</strong> 累计模式在后台统计时会对日期内全部账单与历史数据做聚合，账单数量较多时建议定期归档或导出，以避免不必要的数据库与内存占用。</p>
-                <p>💱 <strong>汇率管理：</strong> 机器人首次加入群组或重启后，会自动刷新实时 USDT 汇率；如需固定汇率，可在此处设置“固定汇率”，自动值会立即被覆盖。</p>
+                <p>💱 <strong>汇率管理：</strong> 机器人首次加入群组或重启后，会自动刷新实时 USDT 汇率；如需固定汇率，可在群组设置中设置"固定汇率"，自动值会立即被覆盖。</p>
               </div>
             </div>
           </div>
@@ -424,7 +424,8 @@ export default function ChatSettingsPage() {
             <select
               value={dailyCutoffHour}
               onChange={(e) => setDailyCutoffHour(Number(e.target.value))}
-              className="w-full p-2 text-sm border rounded"
+              disabled={accountingMode === 'CARRY_OVER'}
+              className={`w-full p-2 text-sm border rounded ${accountingMode === 'CARRY_OVER' ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`}
             >
               {Array.from({ length: 13 }, (_, i) => (
                 <option key={i} value={i}>
@@ -432,7 +433,11 @@ export default function ChatSettingsPage() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-500 mt-2">💡 设置每天结算的起始时间点</p>
+            {accountingMode === 'CARRY_OVER' ? (
+              <p className="text-xs text-amber-600 mt-2">⚠️ 累计模式下不支持设置日切时间，账单按保存时间自动创建</p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-2">💡 设置每天结算的起始时间点</p>
+            )}
           </div>
 
           {/* 地址验证 */}

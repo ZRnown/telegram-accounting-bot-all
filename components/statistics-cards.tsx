@@ -29,6 +29,24 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
       }
     }
   }, [])
+  
+  // 🔥 监听URL变化，更新账单选择
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const handleLocationChange = () => {
+        const params = new URLSearchParams(window.location.search)
+        const billParam = params.get('bill')
+        if (billParam) {
+          const billIndex = Number(billParam)
+          if (!isNaN(billIndex) && billIndex > 0) {
+            setPick(billIndex)
+          }
+        }
+      }
+      window.addEventListener('popstate', handleLocationChange)
+      return () => window.removeEventListener('popstate', handleLocationChange)
+    }
+  }, [])
 
   // 🔥 加载群组设置（判断是否累计模式）- 使用useMemo缓存结果
   useEffect(() => {

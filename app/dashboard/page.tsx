@@ -464,10 +464,10 @@ function DashboardPageInner() {
 
   // 🔥 累计模式：上一笔/下一笔账单导航
   const handlePreviousBill = useCallback(() => {
-    if (billData && billData.selectedBillIndex > 1) {
+    if (billData && billData.selectedBillIndex && billData.selectedBillIndex > 1) {
       const newIndex = billData.selectedBillIndex - 1
       // 🔥 通过修改URL参数来切换账单
-      const params = new URLSearchParams()
+      const params = new URLSearchParams(window.location.search)
       if (chatId) params.set('chatId', chatId)
       params.set('bill', String(newIndex))
       router.push(`/dashboard?${params.toString()}`)
@@ -475,10 +475,10 @@ function DashboardPageInner() {
   }, [billData, chatId, router])
 
   const handleNextBill = useCallback(() => {
-    if (billData && billData.selectedBillIndex < (billData.totalBills || 0)) {
+    if (billData && billData.selectedBillIndex && billData.totalBills && billData.selectedBillIndex < billData.totalBills) {
       const newIndex = billData.selectedBillIndex + 1
       // 🔥 通过修改URL参数来切换账单
-      const params = new URLSearchParams()
+      const params = new URLSearchParams(window.location.search)
       if (chatId) params.set('chatId', chatId)
       params.set('bill', String(newIndex))
       router.push(`/dashboard?${params.toString()}`)
@@ -516,8 +516,8 @@ function DashboardPageInner() {
           hideGroupButton={!!chatId}
           showBackHome={!!chatId && isAdmin}
           isAdmin={isAdmin}
-          onPreviousBill={handlePreviousBill}
-          onNextBill={handleNextBill}
+          onPreviousBill={handlePreviousBill || undefined}
+          onNextBill={handleNextBill || undefined}
           hasPreviousBill={billData?.hasPreviousBill || false}
           hasNextBill={billData?.hasNextBill || false}
           billStartTime={billData?.billStartTime}

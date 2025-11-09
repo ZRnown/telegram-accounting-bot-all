@@ -31,6 +31,9 @@ interface DashboardHeaderProps {
   hasNextBill?: boolean
   billStartTime?: string
   billEndTime?: string
+  // 🔥 修复：使用正确的属性名
+  startDate?: Date
+  endDate?: Date
 }
 
 export function DashboardHeader({
@@ -214,10 +217,6 @@ export function DashboardHeader({
                   上一笔账单
                 </Button>
 
-                <div className="text-sm font-medium text-slate-700 px-3 py-2 bg-slate-100 rounded-md border border-slate-200">
-                  选择账单
-                </div>
-
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -257,9 +256,11 @@ export function DashboardHeader({
               {isCumulativeMode && billStartTime && billEndTime ? (
                 // 🔥 累计模式：显示账单的开始时间到结束时间
                 <>数据范围: {formatDateTime(new Date(billStartTime))} — {formatDateTime(new Date(billEndTime))}</>
-              ) : (
+              ) : dateRange ? (
                 // 🔥 非累计模式：显示日期范围
-                <>数据范围: {formatDateTime(startDate)} — {formatDateTime(endDate)}</>
+                <>数据范围: {formatDateTime(dateRange.start)} — {formatDateTime(dateRange.end)}</>
+              ) : (
+                <>数据范围: 加载中...</>
               )}
             </div>
 
