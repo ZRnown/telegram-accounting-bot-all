@@ -293,9 +293,12 @@ export async function getHistoricalNotDispatched(chatId, settings, currentBillOp
       ? settings.dailyCutoffHour
       : await getGlobalDailyCutoffHour()
     
-    // 🔥 如果提供了当前账单的开启时间，只计算该账单之前的历史未下发
-    // 🔥 否则计算所有早于今天的账单（兼容旧逻辑）
-    let historicalBillsWhere = { chatId }
+    // 🔥 历史未下发只包括OPEN状态的账单（未保存的账单）
+    // 🔥 不包括CLOSED状态的账单（已保存的账单）
+    let historicalBillsWhere: any = { 
+      chatId,
+      status: 'OPEN' // 🔥 只查询OPEN状态的账单（未保存的）
+    }
     
     if (currentBillOpenedAt) {
       // 🔥 计算当前账单所在天的开始时间
@@ -323,14 +326,15 @@ export async function getHistoricalNotDispatched(chatId, settings, currentBillOp
       // 🔥 判断昨天最后一笔账单的状态
       const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
       
-      // 🔥 查询历史账单：如果昨天最后一笔是CLOSED，则不包括昨天的账单
+      // 🔥 查询历史账单：只查询当前账单之前的OPEN状态账单
       historicalBillsWhere.openedAt = { lt: currentBillOpenedAt }
       
+      // 🔥 如果昨天最后一笔是CLOSED，则不包括昨天的账单（因为已保存，不计入历史未下发）
       if (!shouldIncludeYesterday && lastYesterdayBill) {
         historicalBillsWhere.openedAt = { lt: yGte }
       }
     } else {
-      // 🔥 兼容旧逻辑：计算所有早于今天的账单
+      // 🔥 兼容旧逻辑：计算所有早于今天的OPEN状态账单
       const today = startOfDay(new Date(), cutoffHour)
       historicalBillsWhere.openedAt = { lt: today }
     }

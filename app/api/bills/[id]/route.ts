@@ -26,9 +26,11 @@ async function getHistoricalNotDispatched(chatId: string, billOpenedAt: Date, fe
     const lastYesterdayBill = yesterdayBills.length > 0 ? yesterdayBills[0] : null
     const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
     
-    // 🔥 查询历史账单：如果昨天最后一笔是CLOSED，则不包括昨天的账单
+    // 🔥 查询历史账单：只包括OPEN状态的账单（未保存的）
+    // 🔥 不包括CLOSED状态的账单（已保存的）
     const historicalBillsWhere: any = {
       chatId,
+      status: 'OPEN', // 🔥 只查询OPEN状态的账单（未保存的）
       openedAt: { lt: billOpenedAt }
     }
     

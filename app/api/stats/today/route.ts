@@ -499,7 +499,11 @@ export async function GET(req: NextRequest) {
             }
           }
           
-          // 🔥 查询历史账单（用于计算历史未下发）
+          // 🔥 查询历史账单（用于计算历史未下发）：只包括OPEN状态的账单（未保存的）
+          // 🔥 确保只查询OPEN状态的账单
+          if (!historicalBillsWhere.status) {
+            historicalBillsWhere.status = 'OPEN'
+          }
           const historicalBills = await prisma.bill.findMany({
             where: historicalBillsWhere,
             select: { id: true, openedAt: true, status: true },
