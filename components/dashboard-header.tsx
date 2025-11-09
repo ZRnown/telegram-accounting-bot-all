@@ -24,16 +24,9 @@ interface DashboardHeaderProps {
   hideGroupButton?: boolean
   showBackHome?: boolean
   isAdmin?: boolean
-  // 🔥 累计模式导航
-  onPreviousBill?: () => void
-  onNextBill?: () => void
-  hasPreviousBill?: boolean
-  hasNextBill?: boolean
+  // 🔥 累计模式数据
   billStartTime?: string
   billEndTime?: string
-  // 🔥 修复：使用正确的属性名
-  startDate?: Date
-  endDate?: Date
 }
 
 export function DashboardHeader({
@@ -50,10 +43,6 @@ export function DashboardHeader({
   hideGroupButton,
   showBackHome,
   isAdmin,
-  onPreviousBill,
-  onNextBill,
-  hasPreviousBill,
-  hasNextBill,
   billStartTime,
   billEndTime,
 }: DashboardHeaderProps) {
@@ -83,17 +72,18 @@ export function DashboardHeader({
     return () => { cancelled = true }
   }, [chatId])
 
-  // 🔥 从统计API获取实际的日期范围（考虑日切时间）
+  // 🔥 从统计API获取实际的日期范围（考虑日切时间）- 仅非累计模式需要
   useEffect(() => {
-    if (!chatId) return
+    if (!chatId || isCumulativeMode) return
     
+    let cancelled = false
     const fetchDateRange = async () => {
       try {
         const params = new URLSearchParams()
         params.set('date', dateStr)
         params.set('chatId', chatId)
         const res = await fetch(`/api/stats/today?${params.toString()}`)
-        if (res.ok) {
+        if (res.ok && !cancelled) {
           const json = await res.json()
           if (json.dateRangeStart && json.dateRangeEnd) {
             setDateRange({
@@ -103,12 +93,13 @@ export function DashboardHeader({
           }
         }
       } catch (e) {
-        console.error('获取日期范围失败', e)
+        if (!cancelled) console.error('获取日期范围失败', e)
       }
     }
     
     fetchDateRange()
-  }, [dateStr, chatId])
+    return () => { cancelled = true }
+  }, [dateStr, chatId, isCumulativeMode])
 
   const formatDateTime = (date: Date) => {
     return date.toLocaleString("zh-CN", {
@@ -204,47 +195,21 @@ export function DashboardHeader({
 
         {!compact && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            {isCumulativeMode ? (
-              // 🔥 累计模式：上一笔/下一笔账单导航
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={(e) => {
-                    e.preventDefault()
-                    console.log('[按钮点击] 上一笔账单, onPreviousBill:', onPreviousBill)
-                    if (onPreviousBill) {
-                      onPreviousBill()
-                    } else {
-                      console.warn('[按钮点击] onPreviousBill 未定义')
-                    }
-                  }}
-                  disabled={!hasPreviousBill || !onPreviousBill}
-                >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
-                  上一笔账单
-                </Button>
+            {/* 🔥 数据范围放在最左边 */}
+            <div className="text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-md">
+              {isCumulativeMode && billStartTime && billEndTime ? (
+                // 🔥 累计模式：显示账单的开始时间到结束时间
+                <>数据范围: {formatDateTime(new Date(billStartTime))} — {formatDateTime(new Date(billEndTime))}</>
+              ) : dateRange ? (
+                // 🔥 非累计模式：显示日期范围
+                <>数据范围: {formatDateTime(dateRange.start)} — {formatDateTime(dateRange.end)}</>
+              ) : (
+                <>数据范围: 加载中...</>
+              )}
+            </div>
 
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={(e) => {
-                    e.preventDefault()
-                    console.log('[按钮点击] 下一笔账单, onNextBill:', onNextBill)
-                    if (onNextBill) {
-                      onNextBill()
-                    } else {
-                      console.warn('[按钮点击] onNextBill 未定义')
-                    }
-                  }}
-                  disabled={!hasNextBill || !onNextBill}
-                >
-                  下一笔账单
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </div>
-            ) : (
-              // 🔥 非累计模式：上一天/下一天导航
+            {/* 🔥 非累计模式：上一天/下一天导航 */}
+            {!isCumulativeMode && (
               <div className="flex items-center gap-2 flex-wrap">
                 <Button variant="outline" size="sm" onClick={onPreviousDay}>
                   <ChevronLeft className="w-4 h-4 mr-1" />
@@ -267,18 +232,6 @@ export function DashboardHeader({
                 </Button>
               </div>
             )}
-
-            <div className="text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-md">
-              {isCumulativeMode && billStartTime && billEndTime ? (
-                // 🔥 累计模式：显示账单的开始时间到结束时间
-                <>数据范围: {formatDateTime(new Date(billStartTime))} — {formatDateTime(new Date(billEndTime))}</>
-              ) : dateRange ? (
-                // 🔥 非累计模式：显示日期范围
-                <>数据范围: {formatDateTime(dateRange.start)} — {formatDateTime(dateRange.end)}</>
-              ) : (
-                <>数据范围: 加载中...</>
-              )}
-            </div>
 
             <div className="flex gap-2">
               {!isCumulativeMode && (

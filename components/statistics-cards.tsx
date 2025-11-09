@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useEffect, useState, useMemo, useCallback } from "react"
+import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { formatDateString } from "@/lib/utils"
 
@@ -15,36 +15,22 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
   const [settings, setSettings] = useState<any>(null)
+  // 🔥 使用 useRef 保存回调，避免依赖变化导致重新渲染
+  const onBillDataChangeRef = useRef(onBillDataChange)
+  useEffect(() => {
+    onBillDataChangeRef.current = onBillDataChange
+  }, [onBillDataChange])
   
   // 🔥 从URL参数读取账单索引（累计模式）
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      const billParam = params.get('bill')
-      if (billParam) {
-        const billIndex = Number(billParam)
-        if (!isNaN(billIndex) && billIndex > 0) {
-          setPick(billIndex)
-        }
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const billParam = params.get('bill')
+    if (billParam) {
+      const billIndex = Number(billParam)
+      if (!isNaN(billIndex) && billIndex > 0) {
+        setPick(billIndex)
       }
-    }
-  }, [])
-  
-  // 🔥 监听URL变化，更新账单选择
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const handleLocationChange = () => {
-        const params = new URLSearchParams(window.location.search)
-        const billParam = params.get('bill')
-        if (billParam) {
-          const billIndex = Number(billParam)
-          if (!isNaN(billIndex) && billIndex > 0) {
-            setPick(billIndex)
-          }
-        }
-      }
-      window.addEventListener('popstate', handleLocationChange)
-      return () => window.removeEventListener('popstate', handleLocationChange)
     }
   }, [])
 
@@ -82,10 +68,9 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
         if (!res.ok) throw new Error('failed')
         const json = await res.json()
         setData(json)
-        // 🔥 传递账单数据给父组件（用于累计模式导航）
-        if (onBillDataChange) {
-          console.log('[StatisticsCards] 传递账单数据:', json)
-          onBillDataChange(json)
+        // 🔥 传递账单时间数据给父组件（仅传递必要数据）
+        if (onBillDataChangeRef.current) {
+          onBillDataChangeRef.current(json)
         }
         // 🔥 性能优化：只在没有选择时才自动选择，避免不必要的状态更新
         if (!pick) {
@@ -103,7 +88,7 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
     }
     load()
     return () => controller.abort()
-  }, [dateStr, pick, chatId, onBillDataChange])
+  }, [dateStr, pick, chatId]) // 🔥 移除 onBillDataChange 依赖，使用 useRef 或直接调用
 
   // 🔥 使用 useMemo 优化计算结果
   const isCumulativeMode = useMemo(() => settings?.accountingMode === 'CARRY_OVER', [settings?.accountingMode])
