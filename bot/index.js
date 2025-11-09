@@ -920,11 +920,64 @@ bot.on('my_chat_member', async (ctx) => {
     const newStatus = ctx.update?.my_chat_member?.new_chat_member?.status
     if (!chatId || !newStatus) return
     if (newStatus === 'kicked' || newStatus === 'left') {
-      await prisma.operator.deleteMany({ where: { chatId } }).catch(() => {})
-      await prisma.setting.deleteMany({ where: { chatId } }).catch(() => {})
-      await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
+      // 🔥 获取当前机器人的 botId
+      const currentBotId = await ensureCurrentBotId().catch(() => null)
+      
+      // 🔥 检查该群聊中是否还有其他该用户的机器人
+      // 查询该群聊绑定的其他机器人（不包括当前机器人）
+      const chat = await prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { botId: true }
+      }).catch(() => null)
+      
+      // 🔥 如果该群聊绑定的机器人就是当前机器人，或者没有绑定机器人
+      // 需要检查是否还有其他机器人也在该群中
+      let hasOtherBots = false
+      if (currentBotId) {
+        // 查询所有启用的机器人（排除当前机器人）
+        const otherBots = await prisma.bot.findMany({
+          where: { 
+            enabled: true,
+            id: { not: currentBotId }
+          },
+          select: { id: true, token: true }
+        }).catch(() => [])
+        
+        // 🔥 检查这些机器人是否在该群中
+        for (const bot of otherBots) {
+          if (!bot.token) continue
+          try {
+            const url = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(chatId)}`
+            const resp = await fetch(url, { 
+              method: 'GET',
+              signal: AbortSignal.timeout(2000) // 2秒超时
+            })
+            if (resp.ok) {
+              const json = await resp.json().catch(() => null)
+              if (json?.ok) {
+                hasOtherBots = true
+                break
+              }
+            }
+          } catch {
+            // 忽略错误，继续检查下一个
+          }
+        }
+      }
+      
+      // 🔥 只有当该群中没有其他机器人时，才删除群聊记录
+      if (!hasOtherBots) {
+        await prisma.operator.deleteMany({ where: { chatId } }).catch(() => {})
+        await prisma.setting.deleteMany({ where: { chatId } }).catch(() => {})
+        await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
+        console.log('[机器人退群] 已删除群聊记录', { chatId, currentBotId })
+      } else {
+        console.log('[机器人退群] 群中还有其他机器人，保留群聊记录', { chatId, currentBotId })
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.error('[my_chat_member] 处理失败', e)
+  }
 })
 
 // 激活（禁用群内自助开通，改为提示后台审批）

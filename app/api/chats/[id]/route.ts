@@ -110,6 +110,50 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
     const exists = await prisma.chat.findUnique({ where: { id }, select: { id: true } })
     if (!exists) return new Response('Not Found', { status: 404 })
 
+    // 🔥 查询所有启用的机器人，检查它们是否在该群中，如果是则让它们退群
+    const bots = await prisma.bot.findMany({
+      where: { enabled: true },
+      select: { id: true, token: true }
+    })
+    
+    // 🔥 并发让所有在该群中的机器人退群
+    const leavePromises = bots.map(async (bot) => {
+      if (!bot.token) return
+      try {
+        // 先检查机器人是否在该群中
+        const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
+        const resp = await fetch(getChatUrl, { 
+          method: 'GET',
+          signal: AbortSignal.timeout(2000) // 2秒超时
+        })
+        if (resp.ok) {
+          const json = await resp.json().catch(() => null)
+          if (json?.ok) {
+            // 机器人确实在该群中，让它退群
+            const leaveChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/leaveChat?chat_id=${encodeURIComponent(id)}`
+            await fetch(leaveChatUrl, { 
+              method: 'POST',
+              signal: AbortSignal.timeout(2000) // 2秒超时
+            }).catch(() => {}) // 忽略错误，继续处理
+            console.log('[删除群聊] 机器人已退群', { chatId: id, botId: bot.id })
+          }
+        }
+      } catch (e) {
+        // 忽略错误，继续处理下一个机器人
+        console.error('[删除群聊] 检查/退群失败', { chatId: id, botId: bot.id, error: e })
+      }
+    })
+    
+    // 🔥 等待所有退群操作完成（最多等待5秒）
+    try {
+      await Promise.race([
+        Promise.all(leavePromises),
+        new Promise(resolve => setTimeout(resolve, 5000)) // 5秒超时
+      ])
+    } catch (e) {
+      console.error('[删除群聊] 退群操作失败', e)
+    }
+
     // Delete related data first to satisfy FKs
     try { await prisma.billItem.deleteMany({ where: { bill: { chatId: id } } }) } catch {}
     try { await prisma.bill.deleteMany({ where: { chatId: id } }) } catch {}
