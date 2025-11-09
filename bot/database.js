@@ -295,7 +295,7 @@ export async function getHistoricalNotDispatched(chatId, settings, currentBillOp
     
     // 🔥 历史未下发只包括OPEN状态的账单（未保存的账单）
     // 🔥 不包括CLOSED状态的账单（已保存的账单）
-    let historicalBillsWhere: any = { 
+    let historicalBillsWhere = { 
       chatId,
       status: 'OPEN' // 🔥 只查询OPEN状态的账单（未保存的）
     }
