@@ -2,7 +2,7 @@
 import { prisma } from '../../lib/db.ts'
 import { parseAmountAndRate } from '../state.js'
 import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettings, syncSettingsToMemory } from '../database.js'
-import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
+import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
 import { getUsername } from '../helpers.js'
@@ -58,8 +58,8 @@ export function registerIncomeWithRemark(bot, ensureChat) {
       return // 中间件已处理提醒
     }
 
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
 
     const chatId = await ensureDbChat(ctx, chat)
@@ -146,8 +146,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       return // 中间件已处理提醒
     }
 
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
 
     const chatId = await ensureDbChat(ctx, chat)
@@ -229,8 +229,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     const match = text.match(/^\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
     if (!match) return next()
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
 
     const chatId = await ensureDbChat(ctx, chat)
@@ -311,8 +311,8 @@ export function registerIncome(bot, ensureChat) {
       return // 中间件已处理提醒
     }
 
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
 
     const chatId = await ensureDbChat(ctx, chat)
@@ -462,8 +462,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       return // 中间件已处理提醒
     }
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -552,8 +552,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     const match = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)(?:u|U)?$/i)
     if (!match) return next()
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -635,8 +635,8 @@ export function registerDispatch(bot, ensureChat) {
       return // 中间件已处理提醒
     }
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以记账。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)

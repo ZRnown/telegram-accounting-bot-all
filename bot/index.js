@@ -19,7 +19,7 @@ import {
 // 新模块导入
 import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff, deleteLastIncome, deleteLastDispatch } from './database.js'
 import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
-import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, hasOperatorPermission, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
+import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
 

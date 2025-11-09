@@ -1,7 +1,7 @@
 // 设置相关命令处理器
 import { prisma } from '../../lib/db.ts'
 import { ensureDbChat, updateSettings } from '../database.js'
-import { buildInlineKb, hasOperatorPermission, fetchRealtimeRateUSDTtoCNY, isAdmin, hasPermissionWithWhitelist, getEffectiveRate } from '../helpers.js'
+import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, isAdmin, hasPermissionWithWhitelist, getEffectiveRate } from '../helpers.js'
 import { formatMoney } from '../utils.js'
 
 /**

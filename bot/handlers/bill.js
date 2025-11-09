@@ -2,7 +2,7 @@
 import { prisma } from '../../lib/db.ts'
 import { getChat } from '../state.js'
 import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, getChatDailyCutoffHour } from '../database.js'
-import { buildInlineKb, hasOperatorPermission } from '../helpers.js'
+import { buildInlineKb, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { getGlobalDailyCutoffHour } from '../utils.js'
 import { startOfDay, endOfDay } from '../utils.js'
@@ -27,8 +27,8 @@ export function registerSaveBill(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以操作。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -88,8 +88,8 @@ export function registerDeleteBill(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以操作。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -191,8 +191,8 @@ export function registerDeleteBill(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     // 🔥 从临时存储中获取chatId
@@ -311,8 +311,8 @@ export function registerDeleteAllBills(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以操作。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -366,8 +366,8 @@ export function registerUndoIncome(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以操作。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
@@ -394,8 +394,8 @@ export function registerUndoDispatch(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     
-    if (!(await hasOperatorPermission(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有记账权限。只有管理员或已添加的操作人可以操作。')
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
     
     const chatId = await ensureDbChat(ctx, chat)
