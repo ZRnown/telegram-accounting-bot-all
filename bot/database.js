@@ -278,8 +278,11 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
 
 /**
  * 计算历史未下发金额（用于累计模式）
+ * @param {string} chatId - 群组ID
+ * @param {object} settings - 设置对象
+ * @param {Date} currentBillOpenedAt - 当前账单的开启时间（可选，如果不提供则计算所有早于今天的账单）
  */
-export async function getHistoricalNotDispatched(chatId, settings) {
+export async function getHistoricalNotDispatched(chatId, settings, currentBillOpenedAt = null) {
   try {
     if (settings?.accountingMode !== 'CARRY_OVER') {
       return { notDispatched: 0, notDispatchedUSDT: 0 }
@@ -289,52 +292,98 @@ export async function getHistoricalNotDispatched(chatId, settings) {
     const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
       ? settings.dailyCutoffHour
       : await getGlobalDailyCutoffHour()
-    const today = startOfDay(new Date(), cutoffHour)
     
+    // 🔥 如果提供了当前账单的开启时间，只计算该账单之前的历史未下发
+    // 🔥 否则计算所有早于今天的账单（兼容旧逻辑）
+    let historicalBillsWhere = { chatId }
+    
+    if (currentBillOpenedAt) {
+      // 🔥 计算当前账单所在天的开始时间
+      const billDayStart = new Date(currentBillOpenedAt)
+      billDayStart.setHours(cutoffHour, 0, 0, 0)
+      if (currentBillOpenedAt < billDayStart) {
+        billDayStart.setDate(billDayStart.getDate() - 1)
+      }
+      
+      // 🔥 计算昨天的日期范围（用于判断昨天最后一笔账单的状态）
+      const yGte = new Date(billDayStart)
+      yGte.setDate(yGte.getDate() - 1)
+      const yLt = new Date(billDayStart)
+      
+      // 🔥 查询昨天的最后一笔账单（用于判断状态）
+      const lastYesterdayBill = await prisma.bill.findFirst({
+        where: { 
+          chatId, 
+          openedAt: { gte: yGte, lt: yLt }
+        },
+        select: { id: true, openedAt: true, status: true },
+        orderBy: { openedAt: 'desc' }
+      })
+      
+      // 🔥 判断昨天最后一笔账单的状态
+      const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
+      
+      // 🔥 查询历史账单：如果昨天最后一笔是CLOSED，则不包括昨天的账单
+      historicalBillsWhere.openedAt = { lt: currentBillOpenedAt }
+      
+      if (!shouldIncludeYesterday && lastYesterdayBill) {
+        historicalBillsWhere.openedAt = { lt: yGte }
+      }
+    } else {
+      // 🔥 兼容旧逻辑：计算所有早于今天的账单
+      const today = startOfDay(new Date(), cutoffHour)
+      historicalBillsWhere.openedAt = { lt: today }
+    }
+    
+    // 🔥 性能优化：先查询账单ID，再批量查询账单项，避免N+1查询
     const historicalBills = await prisma.bill.findMany({
-      where: { chatId, openedAt: { lt: today } },
-      include: { 
-        items: {
-          select: { type: true, amount: true, rate: true }
-        }
-      },
+      where: historicalBillsWhere,
+      select: { id: true },
       orderBy: { openedAt: 'asc' }
     })
-
+    
+    if (historicalBills.length === 0) {
+      return { notDispatched: 0, notDispatchedUSDT: 0 }
+    }
+    
+    const historicalBillIds = historicalBills.map(b => b.id)
+    
+    // 🔥 性能优化：一次性查询所有账单项，避免N+1查询
+    const historicalItems = await prisma.billItem.findMany({
+      where: { billId: { in: historicalBillIds } },
+      select: { type: true, amount: true, feeRate: true }
+    })
+    
     const feePercent = settings?.feePercent ?? 0
+    
+    // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
+    let totalHistoricalNetIncome = 0 // 扣除费率后的历史入款（用于计算未下发）
+    let totalHistoricalDispatch = 0
+    
+    for (const item of historicalItems) {
+      const amount = Number(item.amount || 0)
+      if (item.type === 'INCOME') {
+        const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
+        if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
+          // 有单笔费率：amount已经是扣除费率后的
+          totalHistoricalNetIncome += amount
+        } else {
+          // 没有单笔费率：需要扣除费率
+          totalHistoricalNetIncome += amount - (amount * (feePercent || 0)) / 100
+        }
+      } else if (item.type === 'DISPATCH') {
+        totalHistoricalDispatch += amount
+      }
+    }
+    
+    // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
+    const notDispatched = Math.max(0, totalHistoricalNetIncome - totalHistoricalDispatch)
+    
+    // 🔥 计算USDT（使用当前汇率）
     const fixedRate = settings?.fixedRate ?? null
     const realtimeRate = settings?.realtimeRate ?? null
-
-    let totalHistoricalIncome = 0
-    let totalHistoricalDispatch = 0
-    let totalHistoricalIncomeUSDT = 0
-    let totalHistoricalDispatchUSDT = 0
-
-    for (const bill of historicalBills) {
-      const incomes = bill.items.filter(i => i.type === 'INCOME')
-      const dispatches = bill.items.filter(i => i.type === 'DISPATCH')
-
-      const billIncome = incomes.reduce((s, i) => s + (Number(i.amount) || 0), 0)
-      const billDispatch = dispatches.reduce((s, d) => s + (Number(d.amount) || 0), 0)
-
-      let rate = fixedRate ?? realtimeRate ?? 0
-      if (!rate) {
-        const lastIncWithRate = [...incomes].reverse().find(i => i.rate && i.rate > 0)
-        if (lastIncWithRate?.rate) rate = Number(lastIncWithRate.rate)
-      }
-
-      const fee = (billIncome * feePercent) / 100
-      const shouldDispatch = billIncome - fee
-      const shouldDispatchUSDT = rate ? Number((shouldDispatch / rate).toFixed(2)) : 0
-
-      totalHistoricalIncome += shouldDispatch
-      totalHistoricalDispatch += billDispatch
-      totalHistoricalIncomeUSDT += shouldDispatchUSDT
-      totalHistoricalDispatchUSDT += rate ? Number((billDispatch / rate).toFixed(2)) : 0
-    }
-
-    const notDispatched = totalHistoricalIncome - totalHistoricalDispatch
-    const notDispatchedUSDT = totalHistoricalIncomeUSDT - totalHistoricalDispatchUSDT
+    const effectiveRate = fixedRate ?? realtimeRate ?? 0
+    const notDispatchedUSDT = effectiveRate > 0 ? Number((notDispatched / effectiveRate).toFixed(2)) : 0
 
     return { notDispatched, notDispatchedUSDT }
   } catch (e) {

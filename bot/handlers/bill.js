@@ -177,7 +177,14 @@ export function registerDeleteBill(bot, ensureChat) {
       chat.current.incomes = []
       chat.current.dispatches = []
       
-      await ctx.reply('✅ 当前账单已清空', { ...(await buildInlineKb(ctx)) })
+      // 🔥 删除账单后，重新显示账单摘要（确保历史未下发正确更新）
+      try {
+        const summary = await formatSummary(ctx, chat, { title: '当前账单' })
+        await ctx.reply(summary, { ...(await buildInlineKb(ctx)), parse_mode: 'Markdown' })
+      } catch (e) {
+        console.error('[删除账单] 显示摘要失败', e)
+        await ctx.reply('✅ 当前账单已清空', { ...(await buildInlineKb(ctx)) })
+      }
     } catch (e) {
       console.error('删除账单失败', e)
       await ctx.reply('❌ 删除账单失败，请稍后重试')

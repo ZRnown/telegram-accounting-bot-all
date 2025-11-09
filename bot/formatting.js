@@ -98,7 +98,9 @@ export async function formatSummary(ctx, chat, options = {}) {
     accountingMode = settings?.accountingMode || 'DAILY_RESET'
     
     if (accountingMode === 'CARRY_OVER') {
-      const historical = await getHistoricalNotDispatched(chatId, settings)
+      // 🔥 获取当前账单的开启时间，用于计算该账单之前的历史未下发
+      const currentBillOpenedAt = billData?.openedAt || null
+      const historical = await getHistoricalNotDispatched(chatId, settings, currentBillOpenedAt)
       previousNotDispatched = historical.notDispatched
       previousNotDispatchedUSDT = historical.notDispatchedUSDT
     }
