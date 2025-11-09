@@ -150,9 +150,33 @@ export async function getOrCreateTodayBill(chatId) {
   const isCumulativeMode = accountingMode === 'CARRY_OVER'
   const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
   
-  // 🔥 所有模式：按日切逻辑查找或创建账单（每天只有一笔账单）
-  const cutoffHour = await getChatDailyCutoffHour(chatId)
   const now = new Date()
+  
+  // 🔥 累计模式：查找最新的 OPEN 账单，如果没有则创建新账单（openedAt 为当前时间）
+  if (isCumulativeMode) {
+    let bill = await prisma.bill.findFirst({ 
+      where: { chatId, status: 'OPEN' }, 
+      orderBy: { openedAt: 'desc' } 
+    })
+    
+    if (!bill) {
+      // 🔥 创建新账单，openedAt 为当前时间
+      bill = await prisma.bill.create({ 
+        data: { 
+          chatId, 
+          status: 'OPEN', 
+          openedAt: now, // 🔥 使用当前时间作为开始时间
+          savedAt: now 
+        } 
+      })
+    }
+    
+    // 🔥 累计模式不需要返回 gte 和 lt，返回空对象
+    return { bill, gte: null, lt: null }
+  }
+  
+  // 🔥 其他模式：按日切逻辑查找或创建账单（每天只有一笔账单）
+  const cutoffHour = await getChatDailyCutoffHour(chatId)
   
   // 🔥 计算今天的日切开始时间
   const todayCutoff = new Date()
