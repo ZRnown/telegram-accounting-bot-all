@@ -36,7 +36,7 @@ function ymd(d: Date) {
   return `${y}-${m}-${day}`
 }
 
-export async function exportToExcel(date: Date, chatId?: string) {
+export async function exportToExcel(date: Date, chatId?: string, billIndex?: number) {
   const day = ymd(date)
   const from = `${day}`
   const toDate = new Date(date)
@@ -44,7 +44,8 @@ export async function exportToExcel(date: Date, chatId?: string) {
   const to = ymd(toDate)
 
   // Load real data
-  const summaryUrl = `/api/stats/today?date=${encodeURIComponent(day)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}`
+  // 🔥 累计模式：如果提供了billIndex，则使用bill参数
+  const summaryUrl = `/api/stats/today?date=${encodeURIComponent(day)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}${billIndex ? `&bill=${billIndex}` : ''}`
   const txIncomeUrl = `/api/transactions?type=income&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}&size=1000`
   const txDispatchUrl = `/api/transactions?type=dispatch&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}&size=1000`
 

@@ -24,6 +24,13 @@ interface DashboardHeaderProps {
   hideGroupButton?: boolean
   showBackHome?: boolean
   isAdmin?: boolean
+  // 🔥 累计模式导航
+  onPreviousBill?: () => void
+  onNextBill?: () => void
+  hasPreviousBill?: boolean
+  hasNextBill?: boolean
+  billStartTime?: string
+  billEndTime?: string
 }
 
 export function DashboardHeader({
@@ -40,12 +47,38 @@ export function DashboardHeader({
   hideGroupButton,
   showBackHome,
   isAdmin,
+  onPreviousBill,
+  onNextBill,
+  hasPreviousBill,
+  hasNextBill,
+  billStartTime,
+  billEndTime,
 }: DashboardHeaderProps) {
   const router = useRouter()
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
+  const [isCumulativeMode, setIsCumulativeMode] = useState(false)
 
   // �� 使用 useMemo 优化日期字符串计算
   const dateStr = useMemo(() => formatDateString(currentDate), [currentDate])
+
+  // 🔥 加载群组设置（判断是否累计模式）
+  useEffect(() => {
+    if (!chatId) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
+        if (res.ok && !cancelled) {
+          const json = await res.json()
+          setIsCumulativeMode(json.settings?.accountingMode === 'CARRY_OVER')
+        }
+      } catch (e) {
+        if (!cancelled) console.error('加载设置失败', e)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [chatId])
 
   // 🔥 从统计API获取实际的日期范围（考虑日切时间）
   useEffect(() => {
@@ -101,7 +134,11 @@ export function DashboardHeader({
   })()
 
   const handleExport = () => {
-    exportToExcel(currentDate, chatId)
+    // 🔥 累计模式：如果提供了billIndex，则传递bill参数
+    const params = new URLSearchParams(window.location.search)
+    const billParam = params.get('bill')
+    const billIndex = billParam ? Number(billParam) : undefined
+    exportToExcel(currentDate, chatId, billIndex)
   }
 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,35 +201,74 @@ export function DashboardHeader({
 
         {!compact && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={onPreviousDay}>
-                <ChevronLeft className="w-4 h-4 mr-1" />
-                上一天
-              </Button>
+            {isCumulativeMode ? (
+              // 🔥 累计模式：上一笔/下一笔账单导航
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={onPreviousBill}
+                  disabled={!hasPreviousBill}
+                >
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  上一笔账单
+                </Button>
 
-              <div className="relative">
-                <input
-                  type="date"
-                  value={formatDateForInput(currentDate)}
-                  onChange={handleDateChange}
-                  className="text-sm font-medium text-slate-700 px-3 py-2 bg-slate-100 rounded-md border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer"
-                />
+                <div className="text-sm font-medium text-slate-700 px-3 py-2 bg-slate-100 rounded-md border border-slate-200">
+                  选择账单
+                </div>
+
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={onNextBill}
+                  disabled={!hasNextBill}
+                >
+                  下一笔账单
+                  <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
               </div>
+            ) : (
+              // 🔥 非累计模式：上一天/下一天导航
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={onPreviousDay}>
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  上一天
+                </Button>
 
-              <Button variant="outline" size="sm" onClick={onNextDay}>
-                下一天
-                <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={formatDateForInput(currentDate)}
+                    onChange={handleDateChange}
+                    max={formatDateForInput(new Date())} // 🔥 限制：不能选择未来日期
+                    className="text-sm font-medium text-slate-700 px-3 py-2 bg-slate-100 rounded-md border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer"
+                  />
+                </div>
+
+                <Button variant="outline" size="sm" onClick={onNextDay}>
+                  下一天
+                  <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
+            )}
 
             <div className="text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-md">
-              数据范围: {formatDateTime(startDate)} — {formatDateTime(endDate)}
+              {isCumulativeMode && billStartTime && billEndTime ? (
+                // 🔥 累计模式：显示账单的开始时间到结束时间
+                <>数据范围: {formatDateTime(new Date(billStartTime))} — {formatDateTime(new Date(billEndTime))}</>
+              ) : (
+                // 🔥 非累计模式：显示日期范围
+                <>数据范围: {formatDateTime(startDate)} — {formatDateTime(endDate)}</>
+              )}
             </div>
 
             <div className="flex gap-2">
-              <Button variant="default" size="sm" onClick={onViewSummary}>
-                查看最近30天汇总
-              </Button>
+              {!isCumulativeMode && (
+                <Button variant="default" size="sm" onClick={onViewSummary}>
+                  查看最近30天汇总
+                </Button>
+              )}
               {!hideGroupButton && (
                 <Button
                   variant="outline"

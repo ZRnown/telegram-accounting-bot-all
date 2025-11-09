@@ -8,12 +8,27 @@ import { formatDateString } from "@/lib/utils"
 interface StatisticsCardsProps {
   currentDate: Date
   chatId?: string
+  onBillDataChange?: (data: any) => void // 🔥 传递账单数据给父组件
 }
 
-export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
+export function StatisticsCards({ currentDate, chatId, onBillDataChange }: StatisticsCardsProps) {
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
   const [settings, setSettings] = useState<any>(null)
+  
+  // 🔥 从URL参数读取账单索引（累计模式）
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const billParam = params.get('bill')
+      if (billParam) {
+        const billIndex = Number(billParam)
+        if (!isNaN(billIndex) && billIndex > 0) {
+          setPick(billIndex)
+        }
+      }
+    }
+  }, [])
 
   // 🔥 加载群组设置（判断是否累计模式）- 使用useMemo缓存结果
   useEffect(() => {
@@ -49,6 +64,10 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
         if (!res.ok) throw new Error('failed')
         const json = await res.json()
         setData(json)
+        // 🔥 传递账单数据给父组件（用于累计模式导航）
+        if (onBillDataChange) {
+          onBillDataChange(json)
+        }
         // 🔥 性能优化：只在没有选择时才自动选择，避免不必要的状态更新
         if (!pick) {
           if (json?.selectedBillIndex) {
@@ -65,7 +84,7 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
     }
     load()
     return () => controller.abort()
-  }, [dateStr, pick, chatId])
+  }, [dateStr, pick, chatId, onBillDataChange])
 
   // 🔥 使用 useMemo 优化计算结果
   const isCumulativeMode = useMemo(() => settings?.accountingMode === 'CARRY_OVER', [settings?.accountingMode])
@@ -107,18 +126,10 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* 🔥 累计模式提醒 */}
-        {isCumulativeMode && hasCarryOver && (
-          <Alert className="bg-amber-50 border-amber-200">
-            <AlertDescription className="text-sm text-amber-800">
-              📊 当前为累计模式，账单包含历史未下发金额。查看下方"账单拆解"了解详情。
-            </AlertDescription>
-          </Alert>
-        )}
         
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-            <span className="text-sm text-slate-600">当日第</span>
+            <span className="text-sm text-slate-600">第</span>
             <div className="flex items-center gap-2">
               <span className="text-lg font-semibold text-slate-900">{(data.billNumber ?? 0)} 笔账单</span>
               {data.billNumber > 0 && (
@@ -178,38 +189,6 @@ export function StatisticsCards({ currentDate, chatId }: StatisticsCardsProps) {
           </div>
         </div>
         
-        {/* 🔥 累计模式账单拆解 - 显示今日入款、历史入款和历史未下发 */}
-        {isCumulativeMode && (
-          <div className="pt-2 border-t border-slate-200">
-            <div className="text-sm font-medium text-slate-700 mb-2">📊 账单拆解（累计模式）</div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                <div className="text-xs text-slate-600 mb-1">今日入款</div>
-                <div className="font-semibold text-slate-900">{(view.todayIncome ?? view.totalIncome ?? 0).toLocaleString()}</div>
-                <div className="text-xs text-green-600">当日切日内的入款金额</div>
-              </div>
-              
-              {(data.historicalIncome || 0) > 0 && (
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <div className="text-xs text-slate-600 mb-1">历史入款</div>
-                  <div className="font-semibold text-slate-900">{(data.historicalIncome || 0).toLocaleString()}</div>
-                  <div className="text-xs text-blue-600">昨天及之前的入款金额</div>
-                </div>
-              )}
-              
-              {hasCarryOver && (
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="text-xs text-slate-600 mb-1">历史未下发</div>
-                  <div className="font-semibold text-slate-900">{(data.carryOver || 0).toLocaleString()}</div>
-                  <div className="text-xs text-amber-600">昨天及之前累计的未下发</div>
-                </div>
-              )}
-            </div>
-            <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
-              💡 提示：应下发 = 今日入款（扣除费率后）{hasCarryOver && ' + 历史未下发'}
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   )

@@ -34,6 +34,8 @@ function DashboardPageInner() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [dateInitialized, setDateInitialized] = useState(false)
   const chatId = (searchParams?.get("chatId") || "").trim()
+  const [billData, setBillData] = useState<any>(null) // 🔥 累计模式账单数据
+  const [currentBillIndex, setCurrentBillIndex] = useState<number>(0) // 🔥 当前账单索引
   const [chatTitle, setChatTitle] = useState<string>("")
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
   const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; invitedBy?: string | null; invitedByUsername?: string | null; bot?: { name: string } }>>([])
@@ -431,11 +433,23 @@ function DashboardPageInner() {
     setCurrentDate(prev => {
       const newDate = new Date(prev)
       newDate.setDate(newDate.getDate() + 1)
+      // 🔥 限制：不能超过今天
+      const today = new Date()
+      today.setHours(23, 59, 59, 999)
+      if (newDate > today) {
+        return prev // 如果超过今天，不更新
+      }
       return newDate
     })
   }, [])
 
   const handleDateChange = useCallback((date: Date) => {
+    // 🔥 限制：不能选择未来日期
+    const today = new Date()
+    today.setHours(23, 59, 59, 999)
+    if (date > today) {
+      return // 如果超过今天，不更新
+    }
     setCurrentDate(date)
   }, [])
 
@@ -447,6 +461,37 @@ function DashboardPageInner() {
     localStorage.removeItem("auth_token")
     router.push("/")
   }, [router])
+
+  // 🔥 累计模式：上一笔/下一笔账单导航
+  const handlePreviousBill = useCallback(() => {
+    if (billData && billData.selectedBillIndex > 1) {
+      const newIndex = billData.selectedBillIndex - 1
+      // 🔥 通过修改URL参数来切换账单
+      const params = new URLSearchParams()
+      if (chatId) params.set('chatId', chatId)
+      params.set('bill', String(newIndex))
+      router.push(`/dashboard?${params.toString()}`)
+    }
+  }, [billData, chatId, router])
+
+  const handleNextBill = useCallback(() => {
+    if (billData && billData.selectedBillIndex < (billData.totalBills || 0)) {
+      const newIndex = billData.selectedBillIndex + 1
+      // 🔥 通过修改URL参数来切换账单
+      const params = new URLSearchParams()
+      if (chatId) params.set('chatId', chatId)
+      params.set('bill', String(newIndex))
+      router.push(`/dashboard?${params.toString()}`)
+    }
+  }, [billData, chatId, router])
+
+  // 🔥 处理账单数据变化
+  const handleBillDataChange = useCallback((data: any) => {
+    setBillData(data)
+    if (data?.selectedBillIndex) {
+      setCurrentBillIndex(data.selectedBillIndex - 1)
+    }
+  }, [])
 
   const showCompact = !chatId
 
@@ -471,6 +516,12 @@ function DashboardPageInner() {
           hideGroupButton={!!chatId}
           showBackHome={!!chatId && isAdmin}
           isAdmin={isAdmin}
+          onPreviousBill={handlePreviousBill}
+          onNextBill={handleNextBill}
+          hasPreviousBill={billData?.hasPreviousBill || false}
+          hasNextBill={billData?.hasNextBill || false}
+          billStartTime={billData?.billStartTime}
+          billEndTime={billData?.billEndTime}
         />
 
         {showCompact ? (
@@ -1309,7 +1360,11 @@ function DashboardPageInner() {
           </div>
         ) : (
           <div className="space-y-6 mt-6">
-            <StatisticsCards currentDate={currentDate} chatId={chatId} />
+            <StatisticsCards 
+              currentDate={currentDate} 
+              chatId={chatId}
+              onBillDataChange={handleBillDataChange}
+            />
             <TransactionTables currentDate={currentDate} chatId={chatId} />
             <CategoryStats currentDate={currentDate} chatId={chatId} />
           </div>

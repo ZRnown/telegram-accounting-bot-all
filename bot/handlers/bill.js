@@ -49,14 +49,17 @@ export function registerSaveBill(bot, ensureChat) {
       }
       
       const { bill } = await getOrCreateTodayBill(chatId)
+      const now = new Date()
+      
+      // 🔥 保存账单：记录closedAt（结束时间），然后创建新账单（以当前时间作为开始时间）
       await prisma.bill.update({
         where: { id: bill.id },
-        data: { status: 'CLOSED', closedAt: new Date(), savedAt: new Date() }
+        data: { status: 'CLOSED', closedAt: now, savedAt: now }
       })
       
       // 清空内存
       chat.history.push({
-        savedAt: new Date(),
+        savedAt: now,
         data: {
           incomes: [...chat.current.incomes],
           dispatches: [...chat.current.dispatches]
@@ -65,9 +68,17 @@ export function registerSaveBill(bot, ensureChat) {
       chat.current.incomes = []
       chat.current.dispatches = []
       
-      // 🔥 累计模式：保存后自动创建新的账单（按日切逻辑）
+      // 🔥 累计模式：保存后自动创建新的账单（以当前时间作为开始时间）
       if (isCumulativeMode) {
-        await getOrCreateTodayBill(chatId)
+        // 🔥 创建新账单，以当前时间作为开始时间
+        await prisma.bill.create({
+          data: {
+            chatId,
+            status: 'OPEN',
+            openedAt: now, // 🔥 以当前时间作为开始时间
+            savedAt: now
+          }
+        })
         await ctx.reply('✅ 账单已保存，已自动创建新的账单', { ...(await buildInlineKb(ctx)) })
       } else {
         await ctx.reply('✅ 账单已保存并清空', { ...(await buildInlineKb(ctx)) })

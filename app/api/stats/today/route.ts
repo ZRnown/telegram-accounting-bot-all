@@ -184,42 +184,31 @@ export async function GET(req: NextRequest) {
     }
 
     // 🔥 重新查询账单（使用正确的日切时间）
-    // 🔥 累计模式：查询当天的所有账单（OPEN和CLOSED），包括已保存的账单
-    // 🔥 同时查询昨日未保存的账单（OPEN状态），放在今日第一笔
+    // 🔥 累计模式：查询所有账单（不限制日期），按openedAt排序
     // 🔥 清零模式：只查询当天的OPEN账单
     const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
     
-    // 🔥 计算昨天的日期范围
-    const yGte = new Date(gte)
-    yGte.setDate(yGte.getDate() - 1)
-    const yLt = new Date(gte) // 今天的开始就是昨天的结束
+    let billsData: any[] = []
     
-    // 🔥 查询昨日未保存的账单（OPEN状态）
-    const yesterdayOpenBills = isCumulativeMode 
-      ? await prisma.bill.findMany({
-          where: { 
-            chatId, 
-            openedAt: { gte: yGte, lt: yLt },
-            status: 'OPEN' // 🔥 只查询OPEN状态的，未保存的
-          },
-          select: { id: true, openedAt: true, status: true },
-          orderBy: { openedAt: 'asc' }
-        })
-      : []
-    
-    // 🔥 查询当天的所有账单
-    const todayBills = await prisma.bill.findMany({
-      where: { 
-        chatId, 
-        openedAt: { gte, lt }, // 🔥 查询当天的所有账单
-        ...(isCumulativeMode ? {} : { status: 'OPEN' }) // 🔥 累计模式：包括CLOSED状态；清零模式：只查询OPEN
-      },
-      select: { id: true, openedAt: true, status: true },
-      orderBy: { openedAt: 'asc' }
-    })
-    
-    // 🔥 合并账单：昨日未保存的账单放在最前面（今日第一笔）
-    const billsData = [...yesterdayOpenBills, ...todayBills]
+    if (isCumulativeMode) {
+      // 🔥 累计模式：查询所有账单（不限制日期）
+      billsData = await prisma.bill.findMany({
+        where: { chatId },
+        select: { id: true, openedAt: true, closedAt: true, status: true },
+        orderBy: { openedAt: 'asc' }
+      })
+    } else {
+      // 🔥 清零模式：只查询当天的OPEN账单
+      billsData = await prisma.bill.findMany({
+        where: { 
+          chatId, 
+          openedAt: { gte, lt },
+          status: 'OPEN'
+        },
+        select: { id: true, openedAt: true, closedAt: true, status: true },
+        orderBy: { openedAt: 'asc' }
+      })
+    }
 
     const billIds = billsData.map((b: any) => b.id)
       const billItems = billIds.length
@@ -440,153 +429,32 @@ export async function GET(req: NextRequest) {
     
     if (isCumulativeMode) {
       try {
-        // 🔥 计算当前选中账单的历史数据（昨天及之前的所有账单，但不包括已删除的）
+        // 🔥 计算当前选中账单的历史数据
         const selectedBill = billsData[selIdx]
         // 🔥 如果没有选中的账单，确保 carryOver 为 0
         if (!selectedBill) {
           carryOver = 0
         } else if (selectedBill) {
-          // 计算昨天的日期范围（用于判断昨日未保存的账单）
-          let yGteForLabel: Date
-          if (dateStr) {
-            const todayStart = startOfDateRange(dateStr, cutoffHour)
-            yGteForLabel = new Date(todayStart)
-            yGteForLabel.setDate(yGteForLabel.getDate() - 1)
-          } else {
-            yGteForLabel = new Date(gte)
-            yGteForLabel.setDate(yGteForLabel.getDate() - 1)
-          }
-          const yLtForLabel = new Date(gte) // 今天的开始就是昨天的结束
-          
-          // 计算昨天的日期范围（用于历史数据计算）
-          let yGte: Date
-          if (dateStr) {
-            const todayStart = startOfDateRange(dateStr, cutoffHour)
-            yGte = new Date(todayStart)
-            yGte.setDate(yGte.getDate() - 1)
-          } else {
-            yGte = new Date(gte)
-            yGte.setDate(yGte.getDate() - 1)
-          }
-          const yLt = new Date(gte) // 今天的开始就是昨天的结束
-          
-          // 🔥 查询昨天的最后一笔账单（用于判断状态）- 性能优化：只查询最后一笔
-          const lastYesterdayBill = await prisma.bill.findFirst({
-            where: { 
-              chatId, 
-              openedAt: { gte: yGte, lt: yLt }
-            },
-            select: { id: true, openedAt: true, status: true },
-            orderBy: { openedAt: 'desc' } // 🔥 降序排列，第一个就是最后一笔
+          // 🔥 累计模式：简单的"第X笔"标签
+          billLabels = billsData.map((bill: any, idx: number) => {
+            return `第 ${idx + 1} 笔`
           })
           
-          // 🔥 判断昨天最后一笔账单的状态
-          const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
-          
-          // 🔥 查询历史账单：昨天及之前的所有账单
-          // 🔥 如果昨天最后一笔是CLOSED，则不包括昨天的账单（因为昨天的账单已经保存，不计入历史未下发）
-          // 🔥 如果是OPEN，则包括（因为昨天的账单未保存，需要计入历史未下发）
-          // 🔥 但是历史入款应该始终显示（包括所有已保存和未保存的历史账单）
-          const historicalBillsWhere: any = {
-            chatId,
-            openedAt: { lt: selectedBill.openedAt }
-          }
-          
-          // 🔥 如果昨天最后一笔是CLOSED，排除昨天的账单（用于计算历史未下发）
-          if (!shouldIncludeYesterday && lastYesterdayBill) {
-            historicalBillsWhere.openedAt = { 
-              lt: yGte // 只查询昨天之前的账单（用于计算历史未下发）
-            }
-          }
-          
-          // 🔥 查询历史账单（用于计算历史未下发）：只包括OPEN状态的账单（未保存的）
-          // 🔥 确保只查询OPEN状态的账单
-          if (!historicalBillsWhere.status) {
-            historicalBillsWhere.status = 'OPEN'
-          }
+          // 🔥 查询当前账单之前的所有OPEN状态账单（用于计算历史未下发）
           const historicalBills = await prisma.bill.findMany({
-            where: historicalBillsWhere,
-            select: { id: true, openedAt: true, status: true },
-            orderBy: { openedAt: 'asc' }
-          })
-          
-          // 🔥 查询所有未CLOSED的历史账单（用于计算历史入款）
-          const allHistoricalBills = await prisma.bill.findMany({
             where: {
               chatId,
               openedAt: { lt: selectedBill.openedAt },
-              status: 'OPEN' // 🔥 只查询OPEN状态的账单
+              status: 'OPEN' // 🔥 只查询OPEN状态的账单（未保存的）
             },
-            select: { id: true, openedAt: true, status: true },
+            select: { id: true },
             orderBy: { openedAt: 'asc' }
           })
           
-          // 🔥 为每个账单生成标签（累计模式：显示开启日期，如果跨天了）
-          const todayStart = dateStr ? startOfDateRange(dateStr, cutoffHour) : gte
-          const todayEnd = dateStr ? endOfDateRange(dateStr, cutoffHour) : lt
-          
-          billLabels = billsData.map((bill: any, idx: number) => {
-            const billDate = new Date(bill.openedAt)
-            const currentTodayStart = new Date(todayStart)
-            const currentTodayEnd = new Date(todayEnd)
-            const isClosed = bill.status === 'CLOSED'
-            
-            // 🔥 判断是否是昨日未保存的账单（OPEN状态，且openedAt在昨天范围内）
-            const isYesterdayOpen = !isClosed && billDate >= yGteForLabel && billDate < yLtForLabel
-            
-            // 🔥 累计模式：如果账单不在今天的日期范围内，显示开启日期
-            if (billDate < currentTodayStart || billDate >= currentTodayEnd) {
-              const billYear = billDate.getFullYear()
-              const billMonth = billDate.getMonth() + 1
-              const billDay = billDate.getDate()
-              const nowYear = new Date().getFullYear()
-              
-              // 如果是今年，只显示月日；否则显示年月日
-              const dateStr = billYear === nowYear 
-                ? `${billMonth}月${billDay}日开启的`
-                : `${billYear}年${billMonth}月${billDay}日开启的`
-              
-              // 🔥 昨日未保存的账单：显示"昨日第X笔订单"
-              if (isYesterdayOpen) {
-                return `昨日第${idx + 1}笔订单（未保存）`
-              }
-              
-              return `${dateStr}第${idx + 1}笔订单${isClosed ? '（已保存）' : ''}`
-            }
-            
-            // 今天的账单：显示"第X笔"，如果已保存则标注
-            return `第 ${idx + 1} 笔${isClosed ? '（已保存）' : ''}`
-          })
-          
-          // 🔥 计算历史入款：使用所有历史账单（包括已保存和未保存的）
-          const allHistoricalBillIds = allHistoricalBills.map((b: any) => b.id)
-          const allHistoricalItems = allHistoricalBillIds.length
-            ? await prisma.billItem.findMany({
-                where: { billId: { in: allHistoricalBillIds } },
-                select: { type: true, amount: true, feeRate: true }
-              })
-            : []
-          
-          // 🔥 计算历史入款（原始金额，用于显示）
-          let hTotalGrossIncome = 0
-          for (const item of allHistoricalItems) {
-            if (item.type === 'INCOME') {
-              const amount = Number(item.amount) || 0
-              const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
-              if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-                // 有单笔费率：amount是扣除费率后的，需要还原原始金额
-                hTotalGrossIncome += amount / itemFeeRate
-              } else {
-                // 没有单笔费率：直接使用金额
-                hTotalGrossIncome += amount
-              }
-            }
-          }
-          historicalIncome = hTotalGrossIncome
-          
-          // 🔥 计算历史未下发：只使用未保存的历史账单（用于计算未下发）
+          // 🔥 计算历史未下发：只使用未保存的历史账单
           if (historicalBills.length === 0) {
             carryOver = 0
+            historicalIncome = 0
           } else {
             const historicalBillIds = historicalBills.map((b: any) => b.id)
             // 🔥 性能优化：一次性查询所有账单项，避免多次查询
@@ -597,6 +465,7 @@ export async function GET(req: NextRequest) {
             
             // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
             let hTotalNetIncome = 0 // 扣除费率后的历史入款（用于计算未下发）
+            let hTotalGrossIncome = 0 // 原始历史入款（用于显示）
             let hTotalDispatched = 0
             
             for (const item of historicalItems) {
@@ -604,9 +473,13 @@ export async function GET(req: NextRequest) {
               if (item.type === 'INCOME') {
                 const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
                 if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-                  hTotalNetIncome += amount // 已经是扣除费率后的
+                  // 有单笔费率：amount已经是扣除费率后的
+                  hTotalNetIncome += amount
+                  hTotalGrossIncome += amount / itemFeeRate // 还原原始金额
                 } else {
+                  // 没有单笔费率：需要扣除费率
                   hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
+                  hTotalGrossIncome += amount
                 }
               } else if (item.type === 'DISPATCH') {
                 hTotalDispatched += amount
@@ -615,36 +488,12 @@ export async function GET(req: NextRequest) {
             
             // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
             carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
+            historicalIncome = hTotalGrossIncome
           }
         }
         
-        // 🔥 计算累计总入款：从最早到现在所有的入款（包括今天）
-        // 注意：已删除的账单不会出现在查询结果中，因为删除是物理删除
-        const allBills = await prisma.bill.findMany({
-          where: { chatId, openedAt: { lt } }, // 所有早于今天结束时间的账单（包含今天）
-          select: { id: true },
-          orderBy: { openedAt: 'asc' }
-        })
-        const allBillIds = allBills.map((b: any) => b.id)
-        // 🔥 只查询存在的账单的账单项（已删除的账单项不会出现在查询结果中）
-        const allItems = allBillIds.length
-          ? await prisma.billItem.findMany({
-              where: { billId: { in: allBillIds }, type: 'INCOME' },
-              select: { amount: true, feeRate: true }
-            })
-          : []
-        
-        // 🔥 计算累计总入款（原始金额，用于显示）
-        cumulativeTotalIncome = 0
-        for (const item of allItems) {
-          const amount = Number(item.amount) || 0
-          const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
-          if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-            cumulativeTotalIncome += amount / itemFeeRate // 还原原始金额
-          } else {
-            cumulativeTotalIncome += amount
-          }
-        }
+        // 🔥 累计模式：不需要计算累计总入款（已移除该功能）
+        cumulativeTotalIncome = selected.totalIncome
       } catch (e) {
         console.error('[累计模式计算错误]', e)
       }
@@ -692,6 +541,16 @@ export async function GET(req: NextRequest) {
       dateRangeStart: gte.toISOString(),
       dateRangeEnd: lt.toISOString(),
       dailyCutoffHour: cutoffHour,
+      // 🔥 累计模式：返回账单的开始和结束时间
+      ...(isCumulativeMode && billsData[selIdx] ? {
+        billStartTime: billsData[selIdx].openedAt.toISOString(),
+        billEndTime: billsData[selIdx].status === 'OPEN' 
+          ? new Date().toISOString() // 🔥 最新账单显示当前服务器时间
+          : (billsData[selIdx].closedAt?.toISOString() || billsData[selIdx].openedAt.toISOString()), // 🔥 已保存账单显示closedAt
+        hasPreviousBill: selIdx > 0, // 🔥 是否有上一笔账单
+        hasNextBill: selIdx < billsData.length - 1, // 🔥 是否有下一笔账单
+        totalBills: billsData.length, // 🔥 总账单数
+      } : {}),
     })
   } catch (e) {
     console.error(e)
