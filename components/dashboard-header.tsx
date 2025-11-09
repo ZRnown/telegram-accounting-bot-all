@@ -210,8 +210,16 @@ export function DashboardHeader({
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={onPreviousBill}
-                  disabled={!hasPreviousBill}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    console.log('[按钮点击] 上一笔账单, onPreviousBill:', onPreviousBill)
+                    if (onPreviousBill) {
+                      onPreviousBill()
+                    } else {
+                      console.warn('[按钮点击] onPreviousBill 未定义')
+                    }
+                  }}
+                  disabled={!hasPreviousBill || !onPreviousBill}
                 >
                   <ChevronLeft className="w-4 h-4 mr-1" />
                   上一笔账单
@@ -220,8 +228,16 @@ export function DashboardHeader({
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={onNextBill}
-                  disabled={!hasNextBill}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    console.log('[按钮点击] 下一笔账单, onNextBill:', onNextBill)
+                    if (onNextBill) {
+                      onNextBill()
+                    } else {
+                      console.warn('[按钮点击] onNextBill 未定义')
+                    }
+                  }}
+                  disabled={!hasNextBill || !onNextBill}
                 >
                   下一笔账单
                   <ChevronRight className="w-4 h-4 ml-1" />

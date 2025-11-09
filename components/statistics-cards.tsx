@@ -84,6 +84,7 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
         setData(json)
         // 🔥 传递账单数据给父组件（用于累计模式导航）
         if (onBillDataChange) {
+          console.log('[StatisticsCards] 传递账单数据:', json)
           onBillDataChange(json)
         }
         // 🔥 性能优化：只在没有选择时才自动选择，避免不必要的状态更新

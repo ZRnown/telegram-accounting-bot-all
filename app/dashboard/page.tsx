@@ -34,8 +34,9 @@ function DashboardPageInner() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [dateInitialized, setDateInitialized] = useState(false)
   const chatId = (searchParams?.get("chatId") || "").trim()
+  const billParam = searchParams?.get("bill")
   const [billData, setBillData] = useState<any>(null) // 🔥 累计模式账单数据
-  const [currentBillIndex, setCurrentBillIndex] = useState<number>(0) // 🔥 当前账单索引
+  const [currentBillIndex, setCurrentBillIndex] = useState<number>(billParam ? Number(billParam) : 0) // 🔥 当前账单索引
   const [chatTitle, setChatTitle] = useState<string>("")
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
   const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; invitedBy?: string | null; invitedByUsername?: string | null; bot?: { name: string } }>>([])
@@ -464,29 +465,56 @@ function DashboardPageInner() {
 
   // 🔥 累计模式：上一笔/下一笔账单导航
   const handlePreviousBill = useCallback(() => {
-    if (billData && billData.selectedBillIndex && billData.selectedBillIndex > 1) {
-      const newIndex = billData.selectedBillIndex - 1
+    // 🔥 优先使用 billData，如果没有则从 URL 参数获取
+    const currentIndex = billData?.selectedBillIndex || (billParam ? Number(billParam) : null)
+    console.log('[上一笔账单] currentIndex:', currentIndex, 'billData:', billData)
+    
+    if (currentIndex && currentIndex > 1) {
+      const newIndex = currentIndex - 1
+      console.log('[上一笔账单] 切换到:', newIndex)
       // 🔥 通过修改URL参数来切换账单
-      const params = new URLSearchParams(window.location.search)
+      const params = new URLSearchParams()
       if (chatId) params.set('chatId', chatId)
       params.set('bill', String(newIndex))
-      router.push(`/dashboard?${params.toString()}`)
+      const newUrl = `/dashboard?${params.toString()}`
+      console.log('[上一笔账单] 导航到:', newUrl)
+      router.push(newUrl)
+    } else {
+      console.log('[上一笔账单] 条件不满足:', { 
+        currentIndex,
+        canGoPrevious: currentIndex > 1 
+      })
     }
-  }, [billData, chatId, router])
+  }, [billData, billParam, chatId, router])
 
   const handleNextBill = useCallback(() => {
-    if (billData && billData.selectedBillIndex && billData.totalBills && billData.selectedBillIndex < billData.totalBills) {
-      const newIndex = billData.selectedBillIndex + 1
+    // 🔥 优先使用 billData，如果没有则从 URL 参数获取
+    const currentIndex = billData?.selectedBillIndex || (billParam ? Number(billParam) : null)
+    const totalBills = billData?.totalBills || billData?.billNumber || 0
+    console.log('[下一笔账单] currentIndex:', currentIndex, 'totalBills:', totalBills, 'billData:', billData)
+    
+    if (currentIndex && totalBills > 0 && currentIndex < totalBills) {
+      const newIndex = currentIndex + 1
+      console.log('[下一笔账单] 切换到:', newIndex)
       // 🔥 通过修改URL参数来切换账单
-      const params = new URLSearchParams(window.location.search)
+      const params = new URLSearchParams()
       if (chatId) params.set('chatId', chatId)
       params.set('bill', String(newIndex))
-      router.push(`/dashboard?${params.toString()}`)
+      const newUrl = `/dashboard?${params.toString()}`
+      console.log('[下一笔账单] 导航到:', newUrl)
+      router.push(newUrl)
+    } else {
+      console.log('[下一笔账单] 条件不满足:', { 
+        currentIndex,
+        totalBills: totalBills,
+        canGoNext: currentIndex < totalBills 
+      })
     }
-  }, [billData, chatId, router])
+  }, [billData, billParam, chatId, router])
 
   // 🔥 处理账单数据变化
   const handleBillDataChange = useCallback((data: any) => {
+    console.log('[账单数据变化]', data)
     setBillData(data)
     if (data?.selectedBillIndex) {
       setCurrentBillIndex(data.selectedBillIndex - 1)
@@ -516,10 +544,17 @@ function DashboardPageInner() {
           hideGroupButton={!!chatId}
           showBackHome={!!chatId && isAdmin}
           isAdmin={isAdmin}
-          onPreviousBill={handlePreviousBill || undefined}
-          onNextBill={handleNextBill || undefined}
-          hasPreviousBill={billData?.hasPreviousBill || false}
-          hasNextBill={billData?.hasNextBill || false}
+          onPreviousBill={handlePreviousBill}
+          onNextBill={handleNextBill}
+          hasPreviousBill={billData?.hasPreviousBill ?? (() => {
+            const idx = billData?.selectedBillIndex || (billParam ? Number(billParam) : null)
+            return idx ? idx > 1 : false
+          })()}
+          hasNextBill={billData?.hasNextBill ?? (() => {
+            const idx = billData?.selectedBillIndex || (billParam ? Number(billParam) : null)
+            const total = billData?.totalBills || billData?.billNumber || 0
+            return idx && total > 0 ? idx < total : false
+          })()}
           billStartTime={billData?.billStartTime}
           billEndTime={billData?.billEndTime}
         />
