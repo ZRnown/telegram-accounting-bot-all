@@ -502,8 +502,9 @@ export async function performAutoDailyCutoff(getChat) {
         const settings = settingsMap.get(chatId)
         const accountingMode = settings?.accountingMode || 'DAILY_RESET'
         
-        // 🔥 所有模式：日切时关闭昨天的账单，确保每天只有一笔账单
-        if (accountingMode === 'CARRY_OVER' || accountingMode === 'DAILY_RESET' || accountingMode === 'SINGLE_BILL_PER_DAY') {
+        // 🔥 所有模式：不再自动关闭账单，必须手动关闭
+        // 只有 SINGLE_BILL_PER_DAY 模式在日切时自动关闭（这是该模式的特性）
+        if (accountingMode === 'SINGLE_BILL_PER_DAY') {
           // 🔥 修复：优先使用群组级别的日切时间
           const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
             ? settings.dailyCutoffHour
@@ -526,6 +527,7 @@ export async function performAutoDailyCutoff(getChat) {
           })
           
           // 🔥 性能优化：批量更新账单状态，而不是逐个更新
+          // 🔥 注意：自动关闭时不设置 closedAt，只有手动关闭时才设置 closedAt
           if (billsToClose.length > 0) {
             const billIds = billsToClose.map(b => b.id)
             await prisma.bill.updateMany({
@@ -533,6 +535,7 @@ export async function performAutoDailyCutoff(getChat) {
               data: {
                 status: 'CLOSED',
                 savedAt: new Date()
+                // 🔥 不设置 closedAt，因为这是自动关闭，不是手动关闭
               }
             })
           }
@@ -563,6 +566,10 @@ export async function performAutoDailyCutoff(getChat) {
           
           processedCount++
           console.log(`[自动日切] 已关闭群组 ${chatId} 的昨日账单，共 ${billsToClose.length} 个账单`)
+        } else {
+          // 🔥 累计模式和每日清零模式：不自动关闭，必须手动关闭
+          // 跳过，不处理
+          continue
         }
       } catch (e) {
         console.error(`[自动日切] 处理群组 ${bill.chatId} 失败:`, e)

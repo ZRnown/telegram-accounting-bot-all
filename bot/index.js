@@ -933,6 +933,7 @@ bot.on('my_chat_member', async (ctx) => {
       // 🔥 如果该群聊绑定的机器人就是当前机器人，或者没有绑定机器人
       // 需要检查是否还有其他机器人也在该群中
       let hasOtherBots = false
+      let otherBotId = null // 🔥 记录其他机器人的 botId
       if (currentBotId) {
         // 查询所有启用的机器人（排除当前机器人）
         const otherBots = await prisma.bot.findMany({
@@ -956,6 +957,7 @@ bot.on('my_chat_member', async (ctx) => {
               const json = await resp.json().catch(() => null)
               if (json?.ok) {
                 hasOtherBots = true
+                otherBotId = bot.id // 🔥 记录第一个找到的其他机器人的 botId
                 break
               }
             }
@@ -972,7 +974,21 @@ bot.on('my_chat_member', async (ctx) => {
         await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
         console.log('[机器人退群] 已删除群聊记录', { chatId, currentBotId })
       } else {
-        console.log('[机器人退群] 群中还有其他机器人，保留群聊记录', { chatId, currentBotId })
+        // 🔥 如果还有其他机器人，更新 Chat 记录的 botId 为其他机器人的 botId
+        // 这样其他机器人就可以继续使用这条记录
+        if (otherBotId) {
+          await prisma.chat.update({
+            where: { id: chatId },
+            data: { botId: otherBotId }
+          }).catch(() => {})
+          console.log('[机器人退群] 群中还有其他机器人，更新 botId 并保留群聊记录', { 
+            chatId, 
+            currentBotId, 
+            newBotId: otherBotId 
+          })
+        } else {
+          console.log('[机器人退群] 群中还有其他机器人，保留群聊记录', { chatId, currentBotId })
+        }
       }
     }
   } catch (e) {
