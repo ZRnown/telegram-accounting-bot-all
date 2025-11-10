@@ -318,8 +318,11 @@ export function registerIncome(bot, ensureChat) {
 
     const chatId = await ensureDbChat(ctx, chat)
     
-    // 🔥 检查计算器是否启用
-    const setting = await prisma.setting.findUnique({ where: { chatId }, select: { calculatorEnabled: true } })
+    // 🔥 性能优化：一次性查询所有需要的设置
+    const setting = await prisma.setting.findUnique({ 
+      where: { chatId }, 
+      select: { calculatorEnabled: true, featureWarningMode: true } 
+    })
     const calculatorEnabled = setting?.calculatorEnabled !== false // 默认开启
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
@@ -333,22 +336,67 @@ export function registerIncome(bot, ensureChat) {
     // 🔥 提取备注（如果有）
     let remark = null
     const remarkMatch = text.match(/^备注\s*(.+)$/i)
+    let checkText = text
     if (remarkMatch) {
-      const restText = remarkMatch[1].trim()
-      // 检查是否包含计算表达式（+、-、*、/）
-      if (!calculatorEnabled && /[+\-*\/]/.test(restText)) {
-        return ctx.reply('⚠️ 计算器功能已关闭，不支持数学计算。请使用简单数字格式。')
-      }
+      checkText = remarkMatch[1].trim()
       // 提取金额部分（去掉备注）
-      const amountMatch = restText.match(/^([+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?)/i)
+      const amountMatch = checkText.match(/^([+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?)/i)
       if (amountMatch) {
-        remark = restText.substring(amountMatch[0].length).trim() || null
+        remark = checkText.substring(amountMatch[0].length).trim() || null
+        checkText = amountMatch[0] // 只检查金额部分
       }
-    } else {
-      // 没有备注前缀，检查计算器
-      if (!calculatorEnabled && /[+\-*\/]/.test(text)) {
+    }
+    
+    // 🔥 检查是否是计算表达式（需要包含运算符且不是简单的正负号）
+    // 规则：如果包含运算符，且不是简单的 +数字 或 -数字 格式，则认为是计算表达式
+    const hasOperator = /[+\-*\/]/.test(checkText)
+    const isSimpleNumber = /^[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?$/i.test(checkText.replace(/\s+/g, ''))
+    const isCalculation = hasOperator && !isSimpleNumber
+    
+    // 🔥 如果是计算表达式且计算器已关闭，需要检查功能提示设置
+    if (isCalculation && !calculatorEnabled) {
+      // 🔥 使用功能提示逻辑（类似记账开关）
+      const warningMode = setting?.featureWarningMode || 'always'
+      let shouldWarn = false
+      
+      if (warningMode === 'always') {
+        shouldWarn = true
+        await prisma.featureWarningLog.deleteMany({
+          where: { chatId, feature: 'calculator_disabled' }
+        }).catch(() => {})
+      } else if (warningMode === 'once') {
+        const existingLog = await prisma.featureWarningLog.findUnique({
+          where: { chatId_feature: { chatId, feature: 'calculator_disabled' } }
+        })
+        if (!existingLog) {
+          shouldWarn = true
+          await prisma.featureWarningLog.upsert({
+            where: { chatId_feature: { chatId, feature: 'calculator_disabled' } },
+            create: { chatId, feature: 'calculator_disabled' },
+            update: { warnedAt: new Date() }
+          }).catch(() => {})
+        }
+      } else if (warningMode === 'daily') {
+        const existingLog = await prisma.featureWarningLog.findUnique({
+          where: { chatId_feature: { chatId, feature: 'calculator_disabled' } }
+        })
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        if (!existingLog || existingLog.warnedAt < today) {
+          shouldWarn = true
+          await prisma.featureWarningLog.upsert({
+            where: { chatId_feature: { chatId, feature: 'calculator_disabled' } },
+            create: { chatId, feature: 'calculator_disabled' },
+            update: { warnedAt: now }
+          }).catch(() => {})
+        }
+      }
+      // warningMode === 'silent' 时不提醒
+      
+      if (shouldWarn) {
         return ctx.reply('⚠️ 计算器功能已关闭，不支持数学计算。请使用简单数字格式。')
       }
+      return // 不提醒，直接返回
     }
 
     if (ctx.from?.id && ctx.from?.username) {

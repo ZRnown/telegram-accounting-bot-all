@@ -412,7 +412,17 @@ export default function ChatSettingsPage() {
               <option value="once">1️⃣ 只提示一次</option>
               <option value="silent">🔇 静默模式（多机器人协作）</option>
             </select>
-            <p className="text-xs text-gray-500 mt-2">💡 适合多机器人群组，减少打扰</p>
+            <p className="text-xs text-gray-500 mt-2">
+              💡 控制功能关闭时的提醒频率。例如：计算器关闭、记账暂停等功能提示的显示方式。
+              <br />
+              • 每次提示：每次使用都会提醒
+              <br />
+              • 每天一次：每天只提醒一次
+              <br />
+              • 只提示一次：只提醒一次，之后不再提醒
+              <br />
+              • 静默模式：不提醒，适合多机器人群组
+            </p>
           </div>
 
           {/* 日切时间 */}

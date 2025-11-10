@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { formatDateString } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 
@@ -18,6 +19,7 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
   const [pick, setPick] = useState<number | ''>('')
   const [settings, setSettings] = useState<any>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const { toast } = useToast()
   // 🔥 使用 useRef 保存回调，避免依赖变化导致重新渲染
   const onBillDataChangeRef = useRef(onBillDataChange)
@@ -125,11 +127,15 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
       return
     }
     
-    if (!confirm('确定要删除当前账单吗？此操作不可恢复！')) {
-      return
-    }
+    setDeleteDialogOpen(true)
+  }, [data, pick, toast])
+  
+  // 🔥 确认删除
+  const handleConfirmDelete = useCallback(async () => {
+    if (!data?.selectedBillId) return
     
     setDeleting(true)
+    setDeleteDialogOpen(false)
     try {
       const res = await fetch(`/api/bills/${encodeURIComponent(data.selectedBillId)}`, { method: 'DELETE' })
       if (res.status === 204) {
@@ -145,7 +151,7 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
     } finally {
       setDeleting(false)
     }
-  }, [data, pick, toast])
+  }, [data, toast])
 
   if (!data || !view) return null
   
@@ -240,6 +246,26 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
         </div>
         
       </CardContent>
+      
+      {/* 🔥 删除确认对话框 */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除当前账单吗？此操作不可恢复！
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteDialogOpen(false)}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} disabled={deleting}>
+              {deleting ? '删除中...' : '确认删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

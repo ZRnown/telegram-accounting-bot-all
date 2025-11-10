@@ -1097,6 +1097,67 @@ bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
     return // 静默忽略不包含运算符的
   }
   
+  // 🔥 检查是否是简单数字（如 +1000、-1000），不是计算表达式
+  const isSimpleNumber = /^[+\-]?\s*\d+(?:\.\d+)?$/i.test(text.replace(/\s+/g, ''))
+  if (isSimpleNumber) {
+    return // 简单数字不是计算表达式，让记账处理器处理
+  }
+  
+  // 🔥 检查计算器是否启用
+  const chatId = await ensureDbChat(ctx)
+  if (chatId) {
+    // 🔥 性能优化：一次性查询所有需要的设置
+    const setting = await prisma.setting.findUnique({ 
+      where: { chatId }, 
+      select: { calculatorEnabled: true, featureWarningMode: true } 
+    })
+    const calculatorEnabled = setting?.calculatorEnabled !== false // 默认开启
+    
+    if (!calculatorEnabled) {
+      // 🔥 使用功能提示逻辑
+      const warningMode = setting?.featureWarningMode || 'always'
+      let shouldWarn = false
+      
+      if (warningMode === 'always') {
+        shouldWarn = true
+        await prisma.featureWarningLog.deleteMany({
+          where: { chatId, feature: 'calculator_disabled' }
+        }).catch(() => {})
+      } else if (warningMode === 'once') {
+        const existingLog = await prisma.featureWarningLog.findUnique({
+          where: { chatId_feature: { chatId, feature: 'calculator_disabled' } }
+        })
+        if (!existingLog) {
+          shouldWarn = true
+          await prisma.featureWarningLog.upsert({
+            where: { chatId_feature: { chatId, feature: 'calculator_disabled' } },
+            create: { chatId, feature: 'calculator_disabled' },
+            update: { warnedAt: new Date() }
+          }).catch(() => {})
+        }
+      } else if (warningMode === 'daily') {
+        const existingLog = await prisma.featureWarningLog.findUnique({
+          where: { chatId_feature: { chatId, feature: 'calculator_disabled' } }
+        })
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        if (!existingLog || existingLog.warnedAt < today) {
+          shouldWarn = true
+          await prisma.featureWarningLog.upsert({
+            where: { chatId_feature: { chatId, feature: 'calculator_disabled' } },
+            create: { chatId, feature: 'calculator_disabled' },
+            update: { warnedAt: now }
+          }).catch(() => {})
+        }
+      }
+      
+      if (shouldWarn) {
+        return ctx.reply('⚠️ 计算器功能已关闭，不支持数学计算。请使用简单数字格式。')
+      }
+      return // 不提醒，直接返回
+    }
+  }
+  
   // 计算表达式
   const result = safeCalculate(text)
   
