@@ -112,19 +112,8 @@ export async function ensureDefaultFeatures(chatId: string, prisma: any, force: 
       return true
     }
     
-    // 🔥 检查是否有功能被禁用，如果有则启用
-    const disabledFeatures = existingFlags.filter((f: any) => !f.enabled)
-    if (disabledFeatures.length > 0) {
-      await prisma.chatFeatureFlag.updateMany({
-        where: { 
-          chatId,
-          feature: { in: disabledFeatures.map((f: any) => f.feature) }
-        },
-        data: { enabled: true }
-      })
-      console.log('[ensureDefaultFeatures] 🔄 启用被禁用的功能', { chatId, count: disabledFeatures.length })
-      return true
-    }
+    // 🔥 移除自动启用被禁用功能的逻辑，允许用户手动关闭功能
+    // 如果用户手动关闭了功能，不应该自动重新启用
     
     console.log('[ensureDefaultFeatures] ⏭️  已存在且完整', { chatId, count: existingFlags.length })
     return false

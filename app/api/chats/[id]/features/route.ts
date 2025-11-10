@@ -68,14 +68,25 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
     // 删除所有现有的功能开关（包括不需要的）
     await prisma.chatFeatureFlag.deleteMany({ where: { chatId } })
     
-    // 只创建基础记账功能开关
-    if (validFeaturesToSave.length) {
-      await prisma.chatFeatureFlag.createMany({
-        data: validFeaturesToSave.map((f) => ({
+    // 🔥 确保基础记账功能始终有记录（即使关闭也要创建 enabled: false 记录）
+    const accountingBasicFeature = validFeaturesToSave.find(f => f.feature === 'accounting_basic')
+    if (accountingBasicFeature) {
+      // 如果请求中包含基础记账功能，使用请求的值
+      await prisma.chatFeatureFlag.create({
+        data: {
           chatId,
-          feature: f.feature,
-          enabled: Boolean(f.enabled),
-        })),
+          feature: accountingBasicFeature.feature,
+          enabled: Boolean(accountingBasicFeature.enabled),
+        },
+      })
+    } else {
+      // 🔥 如果请求中没有基础记账功能，说明用户关闭了它，创建 enabled: false 记录
+      await prisma.chatFeatureFlag.create({
+        data: {
+          chatId,
+          feature: 'accounting_basic',
+          enabled: false,
+        },
       })
     }
 

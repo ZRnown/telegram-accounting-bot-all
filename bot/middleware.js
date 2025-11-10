@@ -14,7 +14,7 @@ export async function isFeatureEnabled(ctx, feature) {
   try {
     const chatId = await ensureDbChat(ctx)
     if (!chatId) {
-      if (feature === 'accounting_basic') return true
+      // 🔥 如果没有 chatId，默认不允许任何功能（包括基础记账）
       return false
     }
     
@@ -29,18 +29,14 @@ export async function isFeatureEnabled(ctx, feature) {
       select: { feature: true, enabled: true } 
     })
     
+    // 🔥 只返回明确启用（enabled: true）的功能，移除默认允许逻辑
     const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
-    
-    // 如果没有任何功能开关记录，默认允许基础记账
-    if (flags.length === 0 && feature === 'accounting_basic') {
-      set.add('accounting_basic')
-    }
     
     featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
     return set.has(feature)
   } catch (e) {
     console.error('[isFeatureEnabled] 异常', { feature, error: e.message })
-    if (feature === 'accounting_basic') return true
+    // 🔥 异常时默认不允许，确保安全
     return false
   }
 }
