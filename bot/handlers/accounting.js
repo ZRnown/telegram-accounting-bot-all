@@ -44,12 +44,19 @@ export function registerStopAccounting(bot, ensureChat) {
 }
 
 /**
- * 🔥 备注入账：李四+10000
- * 注意：不能匹配@用户名+金额格式（那个由registerIncomeWithTarget处理）
- * 🔥 排除数字开头的情况（如32132+21应该计算，不是备注）
+ * 🔥 备注入账：备注 +10000 或 李四+10000
+ * 注意：
+ * - "备注 +1000" 格式：备注和金额之间必须有空格
+ * - "李四+10000" 格式：传统格式（兼容旧版本）
+ * - 不能匹配@用户名+金额格式（那个由registerIncomeWithTarget处理）
+ * - 不能匹配计算表达式（如+3232+323应该计算，不是备注）
  */
 export function registerIncomeWithRemark(bot, ensureChat) {
-  bot.hears(/^([^@\s\d][^@]*?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i, async (ctx) => {
+  // 🔥 匹配两种格式：
+  // 1. "备注 +1000" - 备注和金额之间必须有空格
+  // 2. "李四+10000" - 传统格式（非数字开头，非@开头，非+/-开头）
+  // 🔥 排除以+/-开头的计算表达式（如+3232+323）
+  bot.hears(/^(备注\s+[+\-]\s*\d+(?:\.\d+)?(?:u|U)?|[^@\s\d+\-][^@]*?\+(\d+(?:\.\d+)?)(?:u|U)?)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
@@ -70,12 +77,40 @@ export function registerIncomeWithRemark(bot, ensureChat) {
     }
     
     const text = ctx.message.text.trim()
-    const match = text.match(/^(.+?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
-    if (!match) return
     
-    const remark = match[1].trim() // 备注（如"李四"）
-    const amountStr = match[2]
-    const isUSDT = /[uU]/.test(text)
+    // 🔥 优先匹配 "备注 +1000" 格式（备注和金额之间必须有空格）
+    let remark = null
+    let amountStr = null
+    let isUSDT = false
+    
+    if (/^备注\s+/i.test(text)) {
+      // "备注 +1000" 格式
+      const remarkMatch = text.match(/^备注\s+([+\-]\s*\d+(?:\.\d+)?(?:u|U)?)(?:\s+(.+))?$/i)
+      if (remarkMatch) {
+        amountStr = remarkMatch[1].replace(/\s+/g, '') // 去掉空格
+        remark = remarkMatch[2]?.trim() || null // 可选的额外备注
+        isUSDT = /[uU]/.test(amountStr)
+        // 去掉u/U后缀
+        amountStr = amountStr.replace(/[uU]/g, '')
+      } else {
+        return // 格式不匹配，让其他处理器处理
+      }
+    } else {
+      // "李四+10000" 传统格式（非数字开头，非@开头，非+/-开头）
+      // 🔥 排除以+/-开头的计算表达式（如+3232+323）
+      if (/^[+\-]/.test(text)) {
+        return // 以+/-开头的是计算表达式，不是备注，让其他处理器处理
+      }
+      
+      const match = text.match(/^([^@\s\d+\-][^@]*?)\+(\d+(?:\.\d+)?)(?:u|U)?$/i)
+      if (!match) return
+      
+      remark = match[1].trim() // 备注（如"李四"）
+      amountStr = match[2]
+      isUSDT = /[uU]/.test(text)
+    }
+    
+    if (!amountStr) return
     
     // 🔥 优化：使用统一的汇率获取函数
     const rate = await getEffectiveRate(chatId, chat)
