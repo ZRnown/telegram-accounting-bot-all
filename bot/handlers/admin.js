@@ -142,8 +142,8 @@ export function registerAdminInfo(bot) {
       ])
       
       // 🔥 分类：群主、管理员、操作员
-      const creators: any[] = []
-      const adminsList: any[] = []
+      const creators = []
+      const adminsList = []
       const operatorUsernames = new Set(operators.map(op => op.username))
       
       admins
