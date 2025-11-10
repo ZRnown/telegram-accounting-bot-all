@@ -14,7 +14,8 @@ import {
   registerSetRealtimeRate,
   registerRefreshRate,
   registerShowRate,
-  registerOverDepositLimit
+  registerOverDepositLimit,
+  registerCalculatorToggle
 } from './settings.js'
 import {
   registerShowBill,
@@ -27,7 +28,7 @@ import {
   registerMyBill,
   registerAllBill
 } from './bill.js'
-import { registerZ0, registerLZ, registerLW, registerLK } from './okx.js'
+import { registerZ0, registerZAmount, registerLZ, registerLW, registerLK } from './okx.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo } from './admin.js'
 import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
 
@@ -73,9 +74,11 @@ export function registerAllHandlers(bot, ensureChat) {
   registerShowRate(bot, ensureChat)
   // registerGlobalCutoff - 已删除，改为后台设置
   registerOverDepositLimit(bot, ensureChat)
+  registerCalculatorToggle(bot, ensureChat)
   
   // OKX相关
   registerZ0(bot)
+  registerZAmount(bot, ensureChat) // 🔥 z1000功能：计算金额换算USDT
   registerLZ(bot)
   registerLW(bot)
   registerLK(bot)

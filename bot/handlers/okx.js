@@ -33,6 +33,47 @@ function formatOKXPrice(sellers, methodName) {
 }
 
 /**
+ * z1000命令 - 计算金额换算USDT（z1000计算1000元，z20计算20元）
+ */
+export function registerZAmount(bot, ensureChat) {
+  bot.hears(/^z(\d+(?:\.\d+)?)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    const chatId = await ensureDbChat(ctx, chat)
+    const match = ctx.message.text.match(/^z(\d+(?:\.\d+)?)$/i)
+    if (!match) return
+    
+    const amount = parseFloat(match[1])
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return ctx.reply('❌ 无效的金额')
+    }
+    
+    try {
+      // 🔥 获取当前汇率
+      const { getEffectiveRate } = await import('../helpers.js')
+      const rate = await getEffectiveRate(chatId, chat)
+      
+      if (!rate || rate <= 0) {
+        return ctx.reply('❌ 未设置汇率，无法计算USDT。请先设置汇率。')
+      }
+      
+      const usdt = Number((amount / rate).toFixed(2))
+      await ctx.reply(
+        `💰 金额换算\n\n` +
+        `金额：${amount.toLocaleString()} 元\n` +
+        `汇率：${rate}\n` +
+        `USDT：${usdt.toLocaleString()} U`,
+        { ...(await buildInlineKb(ctx)) }
+      )
+    } catch (e) {
+      console.error('[z金额命令]', e)
+      await ctx.reply('❌ 计算失败，请稍后重试')
+    }
+  })
+}
+
+/**
  * z0命令 - 查询OKX C2C价格
  */
 export function registerZ0(bot) {

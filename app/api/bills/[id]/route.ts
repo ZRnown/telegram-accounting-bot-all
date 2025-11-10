@@ -240,3 +240,22 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return new Response('Server error', { status: 500 })
   }
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const id = params.id
+    const bill = await prisma.bill.findUnique({ where: { id }, select: { id: true, chatId: true, status: true } })
+    if (!bill) return new Response('Not Found', { status: 404 })
+    
+    // 🔥 删除账单和所有账单项（使用事务确保原子性）
+    await prisma.$transaction(async (tx) => {
+      await tx.billItem.deleteMany({ where: { billId: id } })
+      await tx.bill.delete({ where: { id } })
+    })
+    
+    return new Response(null, { status: 204 })
+  } catch (e) {
+    console.error(e)
+    return new Response('Server error', { status: 500 })
+  }
+}

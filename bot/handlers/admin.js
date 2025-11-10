@@ -141,26 +141,53 @@ export function registerAdminInfo(bot) {
         prisma.setting.findUnique({ where: { chatId }, select: { everyoneAllowed: true } })
       ])
       
-      const adminList = admins
+      // 🔥 分类：群主、管理员、操作员
+      const creators: any[] = []
+      const adminsList: any[] = []
+      const operatorUsernames = new Set(operators.map(op => op.username))
+      
+      admins
         .filter(a => !a.user.is_bot)
-        .map(a => {
+        .forEach(a => {
           const name = a.user.username 
             ? `@${a.user.username}` 
             : `${a.user.first_name || ''} ${a.user.last_name || ''}`.trim() || `用户${a.user.id}`
           const status = a.status === 'creator' ? '👑 群主' : '👤 管理员'
-          return `• ${name} (${status})`
+          const item = { name, status, isCreator: a.status === 'creator' }
+          
+          if (a.status === 'creator') {
+            creators.push(item)
+          } else {
+            adminsList.push(item)
+          }
         })
+      
+      // 🔥 过滤出非群主和管理员的操作员
+      const otherOperators = operators
+        .filter(op => {
+          const username = op.username.startsWith('@') ? op.username : `@${op.username}`
+          return !creators.some(c => c.name === username) && 
+                 !adminsList.some(a => a.name === username)
+        })
+        .map(op => op.username)
       
       let text = ' 👥 群组权限信息 \n\n'
       
-      if (adminList.length > 0) {
-        text += `【👑 群主/管理员】\n${adminList.join('\n')}\n\n`
+      // 🔥 群主最上面
+      if (creators.length > 0) {
+        text += `【👑 群主】\n${creators.map(c => `• ${c.name}`).join('\n')}\n\n`
       }
       
+      // 🔥 然后管理员
+      if (adminsList.length > 0) {
+        text += `【👤 管理员】\n${adminsList.map(a => `• ${a.name}`).join('\n')}\n\n`
+      }
+      
+      // 🔥 然后其他操作员
       if (setting?.everyoneAllowed) {
         text += `【✅ 权限设置】\n• 所有人可操作\n\n`
-      } else if (operators.length > 0) {
-        text += `【👤 操作员】\n${operators.map(op => `• ${op.username}`).join('\n')}\n\n`
+      } else if (otherOperators.length > 0) {
+        text += `【👤 操作员】\n${otherOperators.map(op => `• ${op}`).join('\n')}\n\n`
       } else {
         text += `【👤 操作员】\n• 仅管理员可操作\n\n`
       }

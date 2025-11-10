@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { formatDateString } from "@/lib/utils"
 
@@ -13,6 +14,11 @@ interface TransactionTablesProps {
 export function TransactionTables({ currentDate, chatId }: TransactionTablesProps) {
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
+  const [incomePaged, setIncomePaged] = useState(true) // 🔥 入款记录是否分页
+  const [dispatchPaged, setDispatchPaged] = useState(true) // 🔥 下发记录是否分页
+  const [incomePage, setIncomePage] = useState(1) // 🔥 入款记录当前页
+  const [dispatchPage, setDispatchPage] = useState(1) // 🔥 下发记录当前页
+  const PAGE_SIZE = 10 // 🔥 每页10条记录
   // 🔥 删除无用的 incomeRefs，不再需要高亮功能
 
   // 🔥 使用 useMemo 优化日期字符串和是否今天的判断
@@ -85,11 +91,36 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
 
   if (!data) return null
 
+  // 🔥 计算分页数据
+  const incomeRecords = data.incomeRecords || []
+  const dispatchRecords = data.dispatchRecords || []
+  const incomeTotalPages = Math.ceil(incomeRecords.length / PAGE_SIZE)
+  const dispatchTotalPages = Math.ceil(dispatchRecords.length / PAGE_SIZE)
+  const incomeDisplayRecords = incomePaged 
+    ? incomeRecords.slice((incomePage - 1) * PAGE_SIZE, incomePage * PAGE_SIZE)
+    : incomeRecords
+  const dispatchDisplayRecords = dispatchPaged
+    ? dispatchRecords.slice((dispatchPage - 1) * PAGE_SIZE, dispatchPage * PAGE_SIZE)
+    : dispatchRecords
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">入款记录</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-lg">入款记录</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIncomePaged(!incomePaged)
+                setIncomePage(1)
+              }}
+              className="text-xs h-7"
+            >
+              {incomePaged ? '取消分页' : '启用分页'}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -104,8 +135,8 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.incomeRecords.length > 0 ? (
-                  data.incomeRecords.map((record: any, index: number) => (
+                {incomeDisplayRecords.length > 0 ? (
+                  incomeDisplayRecords.map((record: any, index: number) => (
                     <TableRow key={index}>
                       <TableCell className="text-xs">{record.time}</TableCell>
                       <TableCell className="text-xs font-medium">{record.amount}</TableCell>
@@ -123,13 +154,51 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
                 )}
               </TableBody>
             </Table>
+            {incomePaged && incomeTotalPages > 1 && (
+              <div className="flex justify-between items-center mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIncomePage(p => Math.max(1, p - 1))}
+                  disabled={incomePage === 1}
+                  className="text-xs h-7"
+                >
+                  上一页
+                </Button>
+                <span className="text-xs text-slate-600">
+                  第 {incomePage} / {incomeTotalPages} 页（共 {incomeRecords.length} 条）
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIncomePage(p => Math.min(incomeTotalPages, p + 1))}
+                  disabled={incomePage === incomeTotalPages}
+                  className="text-xs h-7"
+                >
+                  下一页
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">下发记录</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-lg">下发记录</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setDispatchPaged(!dispatchPaged)
+                setDispatchPage(1)
+              }}
+              className="text-xs h-7"
+            >
+              {dispatchPaged ? '取消分页' : '启用分页'}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -138,29 +207,56 @@ export function TransactionTables({ currentDate, chatId }: TransactionTablesProp
                 <TableRow>
                   <TableHead>时间</TableHead>
                   <TableHead>金额</TableHead>
+                  <TableHead>备注</TableHead>
                   <TableHead>回复人</TableHead>
                   <TableHead>操作人</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.dispatchRecords.length > 0 ? (
-                  data.dispatchRecords.map((record: any, index: number) => (
+                {dispatchDisplayRecords.length > 0 ? (
+                  dispatchDisplayRecords.map((record: any, index: number) => (
                     <TableRow key={index}>
                       <TableCell className="text-xs">{record.time}</TableCell>
                       <TableCell className="text-xs font-medium">{record.amount}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{record.remark || '-'}</TableCell>
                       <TableCell className="text-xs">{record.replier}</TableCell>
                       <TableCell className="text-xs">{record.operator}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-slate-500">
+                    <TableCell colSpan={5} className="text-center text-slate-500">
                       暂无数据
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
+            {dispatchPaged && dispatchTotalPages > 1 && (
+              <div className="flex justify-between items-center mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDispatchPage(p => Math.max(1, p - 1))}
+                  disabled={dispatchPage === 1}
+                  className="text-xs h-7"
+                >
+                  上一页
+                </Button>
+                <span className="text-xs text-slate-600">
+                  第 {dispatchPage} / {dispatchTotalPages} 页（共 {dispatchRecords.length} 条）
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDispatchPage(p => Math.min(dispatchTotalPages, p + 1))}
+                  disabled={dispatchPage === dispatchTotalPages}
+                  className="text-xs h-7"
+                >
+                  下一页
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -34,6 +34,7 @@ export function registerSetFee(bot, ensureChat) {
  * 设置汇率
  */
 export function registerSetRate(bot, ensureChat) {
+  // 🔥 支持有无空格：设置汇率 7.2 或 设置汇率7.2
   bot.hears(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
@@ -44,6 +45,7 @@ export function registerSetRate(bot, ensureChat) {
     }
     
     const chatId = await ensureDbChat(ctx, chat)
+    // 🔥 支持有无空格：设置汇率 7.2 或 设置汇率7.2
     const m = ctx.message.text.match(/^设置汇率\s*(\d+(?:\.\d+)?)?$/i)
     const val = m && m[1] ? Number(m[1]) : null
     
@@ -136,7 +138,8 @@ export function registerShowRate(bot, ensureChat) {
  * 设置超押提醒额度
  */
 export function registerOverDepositLimit(bot, ensureChat) {
-  bot.hears(/^设置额度\s+(\d+(?:\.\d+)?)$/i, async (ctx) => {
+  // 🔥 支持有无空格：设置额度 10000 或 设置额度10000
+  bot.hears(/^设置额度\s*(\d+(?:\.\d+)?)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
     
@@ -145,7 +148,8 @@ export function registerOverDepositLimit(bot, ensureChat) {
       return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
     }
     
-    const limit = parseFloat(ctx.match[1])
+    const m = ctx.message.text.match(/^设置额度\s*(\d+(?:\.\d+)?)$/i)
+    const limit = m && m[1] ? parseFloat(m[1]) : 0
     const chatId = await ensureDbChat(ctx, chat)
     
     try {
@@ -158,6 +162,38 @@ export function registerOverDepositLimit(bot, ensureChat) {
       }
     } catch (e) {
       console.error('[设置额度]', e)
+      await ctx.reply('❌ 设置失败，请稍后重试')
+    }
+  })
+}
+
+/**
+ * 打开/关闭计算器功能
+ */
+export function registerCalculatorToggle(bot, ensureChat) {
+  bot.hears(/^(打开计算器|关闭计算器)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+    
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+    
+    const chatId = await ensureDbChat(ctx, chat)
+    const text = ctx.message.text.trim()
+    const enabled = /^打开计算器$/i.test(text)
+    
+    try {
+      await updateSettings(chatId, { calculatorEnabled: enabled })
+      await ctx.reply(
+        enabled 
+          ? '✅ 已打开计算器功能，现在支持数学计算（如：288-32、288*2、288/2、288+21）' 
+          : '⏸️ 已关闭计算器功能，不再支持数学计算',
+        { ...(await buildInlineKb(ctx)) }
+      )
+    } catch (e) {
+      console.error('[计算器开关]', e)
       await ctx.reply('❌ 设置失败，请稍后重试')
     }
   })

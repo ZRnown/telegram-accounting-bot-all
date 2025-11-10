@@ -1,9 +1,11 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { formatDateString } from "@/lib/utils"
+import { useToast } from "@/hooks/use-toast"
 
 interface StatisticsCardsProps {
   currentDate: Date
@@ -15,6 +17,8 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
   const [data, setData] = useState<any | null>(null)
   const [pick, setPick] = useState<number | ''>('')
   const [settings, setSettings] = useState<any>(null)
+  const [deleting, setDeleting] = useState(false)
+  const { toast } = useToast()
   // 🔥 使用 useRef 保存回调，避免依赖变化导致重新渲染
   const onBillDataChangeRef = useRef(onBillDataChange)
   useEffect(() => {
@@ -114,6 +118,35 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
     }
   }, [])
 
+  // 🔥 删除当前账单
+  const handleDeleteBill = useCallback(async () => {
+    if (!data?.selectedBillId || !pick) {
+      toast({ title: '错误', description: '请先选择要删除的账单', variant: 'destructive' })
+      return
+    }
+    
+    if (!confirm('确定要删除当前账单吗？此操作不可恢复！')) {
+      return
+    }
+    
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/bills/${encodeURIComponent(data.selectedBillId)}`, { method: 'DELETE' })
+      if (res.status === 204) {
+        toast({ title: '成功', description: '账单已删除' })
+        // 🔥 刷新数据
+        window.location.reload()
+      } else {
+        const msg = await res.text().catch(() => '')
+        toast({ title: '错误', description: `删除失败：${msg || 'Server error'}`, variant: 'destructive' })
+      }
+    } catch (e) {
+      toast({ title: '错误', description: '删除失败：网络错误', variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }, [data, pick, toast])
+
   if (!data || !view) return null
   
   return (
@@ -137,22 +170,35 @@ export function StatisticsCards({ currentDate, chatId, onBillDataChange }: Stati
             <div className="flex items-center gap-2">
               <span className="text-lg font-semibold text-slate-900">{(data.billNumber ?? 0)} 笔账单</span>
               {data.billNumber > 0 && (
-                <select
-                  className="text-xs border border-slate-300 rounded px-2 py-1"
-                  value={pick as any}
-                  onChange={handleBillChange}
-                >
-                  <option value="">选择第几笔</option>
-                  {Array.from({ length: data.billNumber }, (_, i) => {
-                    const n = i + 1
-                    const label = Array.isArray(data.billLabels) && data.billLabels[i] 
-                      ? data.billLabels[i] 
-                      : `第 ${n} 笔`
-                    return (
-                      <option key={n} value={n}>{label}</option>
-                    )
-                  })}
-                </select>
+                <>
+                  <select
+                    className="text-xs border border-slate-300 rounded px-2 py-1"
+                    value={pick as any}
+                    onChange={handleBillChange}
+                  >
+                    <option value="">选择第几笔</option>
+                    {Array.from({ length: data.billNumber }, (_, i) => {
+                      const n = i + 1
+                      const label = Array.isArray(data.billLabels) && data.billLabels[i] 
+                        ? data.billLabels[i] 
+                        : `第 ${n} 笔`
+                      return (
+                        <option key={n} value={n}>{label}</option>
+                      )
+                    })}
+                  </select>
+                  {pick && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDeleteBill}
+                      disabled={deleting}
+                      className="text-xs h-7 px-2"
+                    >
+                      {deleting ? '删除中...' : '删除当前账单'}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>

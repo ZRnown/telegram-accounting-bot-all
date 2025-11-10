@@ -302,7 +302,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
  * 入款命令处理器（增强版：支持汇率、费率、组合格式）
  */
 export function registerIncome(bot, ensureChat) {
-  bot.hears(/^[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
+  // 🔥 支持备注格式：备注 +1000 或 备注+1000
+  bot.hears(/^(备注\s*)?[+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
@@ -317,6 +318,10 @@ export function registerIncome(bot, ensureChat) {
 
     const chatId = await ensureDbChat(ctx, chat)
     
+    // 🔥 检查计算器是否启用
+    const setting = await prisma.setting.findUnique({ where: { chatId }, select: { calculatorEnabled: true } })
+    const calculatorEnabled = setting?.calculatorEnabled !== false // 默认开启
+    
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
@@ -324,6 +329,27 @@ export function registerIncome(bot, ensureChat) {
       await syncSettingsToMemory(ctx, chat, chatId)
     }
     const text = ctx.message.text.trim()
+    
+    // 🔥 提取备注（如果有）
+    let remark = null
+    const remarkMatch = text.match(/^备注\s*(.+)$/i)
+    if (remarkMatch) {
+      const restText = remarkMatch[1].trim()
+      // 检查是否包含计算表达式（+、-、*、/）
+      if (!calculatorEnabled && /[+\-*\/]/.test(restText)) {
+        return ctx.reply('⚠️ 计算器功能已关闭，不支持数学计算。请使用简单数字格式。')
+      }
+      // 提取金额部分（去掉备注）
+      const amountMatch = restText.match(/^([+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?)/i)
+      if (amountMatch) {
+        remark = restText.substring(amountMatch[0].length).trim() || null
+      }
+    } else {
+      // 没有备注前缀，检查计算器
+      if (!calculatorEnabled && /[+\-*\/]/.test(text)) {
+        return ctx.reply('⚠️ 计算器功能已关闭，不支持数学计算。请使用简单数字格式。')
+      }
+    }
 
     if (ctx.from?.id && ctx.from?.username) {
       const uname = `@${ctx.from.username}`
@@ -331,8 +357,23 @@ export function registerIncome(bot, ensureChat) {
       chat.userIdByUsername.set(ctx.from.username, ctx.from.id)
     }
 
-    const isUSDT = /[uU]/.test(text)
-    const cleanText = text.replace(/[uU]/g, '').replace(/\s+/g, '')
+    // 🔥 提取金额部分（去掉"备注"前缀）
+    let amountText = text
+    if (text.startsWith('备注')) {
+      amountText = text.replace(/^备注\s*/i, '').trim()
+      // 如果还有备注内容，提取出来
+      const amountMatch = amountText.match(/^([+\-]\s*[\d+\-*/.()]+(?:u|U)?(?:\s*\/\s*\d+(?:\.\d+)?)?(?:\s*\*\s*\d+(?:\.\d+)?)?)/i)
+      if (amountMatch) {
+        const remaining = amountText.substring(amountMatch[0].length).trim()
+        if (remaining && !remark) {
+          remark = remaining
+        }
+        amountText = amountMatch[0]
+      }
+    }
+
+    const isUSDT = /[uU]/.test(amountText)
+    const cleanText = amountText.replace(/[uU]/g, '').replace(/\s+/g, '')
     const parsed = parseAmountAndRate(cleanText)
     if (!parsed) {
       return ctx.reply('❌ 无效的金额格式')
@@ -390,6 +431,7 @@ export function registerIncome(bot, ensureChat) {
           rate: rate ? Number(rate) : null,
           feeRate: feeRate ? Number(feeRate) : null, // 🔥 保存费率
           usdt: usdt ? Number(usdt) : null,
+          remark: remark || null, // 🔥 保存备注
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
           createdAt: new Date(),
@@ -626,7 +668,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
  * 下发命令处理器（增强版：使用当前汇率）
  */
 export function registerDispatch(bot, ensureChat) {
-  bot.hears(/^下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
+  // 🔥 支持备注格式：备注 下发1000 或 备注下发1000
+  bot.hears(/^(备注\s*)?下发\s*[+\-]?\s*\d+(?:\.\d+)?(?:u|U)?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
@@ -648,8 +691,25 @@ export function registerDispatch(bot, ensureChat) {
       await syncSettingsToMemory(ctx, chat, chatId)
     }
     const text = ctx.message.text.trim()
-    const isUSDT = /[uU]/.test(text)
-    const m = text.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)/i)
+    
+    // 🔥 提取备注（如果有）
+    let remark = null
+    let dispatchText = text
+    if (text.startsWith('备注')) {
+      dispatchText = text.replace(/^备注\s*/i, '').trim()
+      // 提取金额部分
+      const amountMatch = dispatchText.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?(?:u|U)?)/i)
+      if (amountMatch) {
+        const remaining = dispatchText.substring(amountMatch[0].length).trim()
+        if (remaining) {
+          remark = remaining
+        }
+        dispatchText = amountMatch[0]
+      }
+    }
+    
+    const isUSDT = /[uU]/.test(dispatchText)
+    const m = dispatchText.match(/^下发\s*([+\-]?\s*\d+(?:\.\d+)?)/i)
     if (!m) return
     
     const inputValue = Number(m[1].replace(/\s+/g, ''))
@@ -688,6 +748,7 @@ export function registerDispatch(bot, ensureChat) {
           type: 'DISPATCH',
           amount: Number(amountRMB),
           usdt: Number(usdtValue),
+          remark: remark || null, // 🔥 保存备注
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
           createdAt: new Date(),

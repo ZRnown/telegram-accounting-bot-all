@@ -332,6 +332,7 @@ export async function GET(req: NextRequest) {
       const dispatchRecordsSaved = disps.map((d: any) => ({
         time: formatTimeLocal(d.createdAt as Date),
         amount: `${d.amount}`,
+        remark: d.remark || '', // 🔥 添加备注字段
         replier: d.replier || '',
         operator: d.operator || '',
       }))
@@ -402,6 +403,7 @@ export async function GET(req: NextRequest) {
     const incomeByOperator: Record<string, number> = {}
     const incomeByRate: Record<string, number> = {}
     const selectedBillId = billsData[selIdx]?.id
+    const selectedBill = billsData[selIdx] // 🔥 添加选中的账单信息
     const selItems = selectedBillId ? (itemsByBillId.get(selectedBillId) || []) : []
     // 🔥 性能优化：单次遍历同时分类和统计，减少内存分配
     const dispatchByOperator: Record<string, number> = {}
@@ -530,6 +532,7 @@ export async function GET(req: NextRequest) {
           }
         : {}),
       selectedBillIndex: selIdx + 1,
+      selectedBillId: selectedBillId, // 🔥 添加选中的账单ID，用于删除
       incomeRecords,
       dispatchRecords,
       incomeByReplier,

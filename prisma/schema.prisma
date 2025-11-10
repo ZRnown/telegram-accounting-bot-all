@@ -78,6 +78,7 @@ model Setting {
   lastOverDepositWarning     DateTime? // 上次超押提醒时间
   deleteBillConfirm          Boolean        @default(false) // 🔥 删除账单确认功能（发送删除账单后会有二次确认）
   accountingEnabled          Boolean        @default(true) // 🔥 记账功能开关，默认开启
+  calculatorEnabled          Boolean        @default(true) // 🔥 计算器功能开关，默认开启
   chat                       Chat           @relation(fields: [chatId], references: [id])
 }
 
