@@ -1813,11 +1813,24 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   
   const chatId = await ensureDbChat(ctx)
   
-  // 🔥 关闭所有功能开关
-  await prisma.chatFeatureFlag.updateMany({
-    where: { chatId },
-    data: { enabled: false }
-  })
+  // 🔥 关闭所有功能开关（确保即使记录不存在也创建 enabled: false 的记录）
+  const { DEFAULT_FEATURES } = await import('./constants.ts')
+  for (const feature of DEFAULT_FEATURES) {
+    await prisma.chatFeatureFlag.upsert({
+      where: {
+        chatId_feature: {
+          chatId,
+          feature
+        }
+      },
+      update: { enabled: false },
+      create: {
+        chatId,
+        feature,
+        enabled: false
+      }
+    })
+  }
   
   // 🔥 清除功能开关缓存，确保立即生效
   clearFeatureCache(chatId)

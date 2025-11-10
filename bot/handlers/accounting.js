@@ -6,7 +6,7 @@ import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermiss
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
 import { getUsername } from '../helpers.js'
-import { isAccountingEnabled, clearAccountingCache } from '../middleware.js'
+import { isAccountingEnabled, isFeatureEnabled, clearAccountingCache } from '../middleware.js'
 
 /**
  * 开始记账（激活机器人并开始记录）
@@ -62,6 +62,11 @@ export function registerIncomeWithRemark(bot, ensureChat) {
 
     // 🔥 检查记账是否启用（由中间件统一处理提醒逻辑）
     if (!(await isAccountingEnabled(ctx))) {
+      return // 中间件已处理提醒
+    }
+
+    // 🔥 检查基础记账功能是否启用
+    if (!(await isFeatureEnabled(ctx, 'accounting_basic'))) {
       return // 中间件已处理提醒
     }
 
@@ -178,6 +183,11 @@ export function registerIncomeWithTarget(bot, ensureChat) {
 
     // 🔥 检查记账是否启用（由中间件统一处理提醒逻辑）
     if (!(await isAccountingEnabled(ctx))) {
+      return // 中间件已处理提醒
+    }
+
+    // 🔥 检查基础记账功能是否启用
+    if (!(await isFeatureEnabled(ctx, 'accounting_basic'))) {
       return // 中间件已处理提醒
     }
 
@@ -344,6 +354,11 @@ export function registerIncome(bot, ensureChat) {
 
     // 🔥 检查记账是否启用（由中间件统一处理提醒逻辑）
     if (!(await isAccountingEnabled(ctx))) {
+      return // 中间件已处理提醒
+    }
+
+    // 🔥 检查基础记账功能是否启用
+    if (!(await isFeatureEnabled(ctx, 'accounting_basic'))) {
       return // 中间件已处理提醒
     }
 
@@ -586,11 +601,16 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     if (!(await isAccountingEnabled(ctx))) {
       return // 中间件已处理提醒
     }
+
+    // 🔥 检查基础记账功能是否启用
+    if (!(await isFeatureEnabled(ctx, 'accounting_basic'))) {
+      return // 中间件已处理提醒
+    }
     
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
     const isNewDay = await checkAndClearIfNewDay(chat, chatId)
     // 🔥 修复：跨日后重新同步设置到内存（确保操作人、汇率、费率不丢失）
@@ -760,11 +780,16 @@ export function registerDispatch(bot, ensureChat) {
     if (!(await isAccountingEnabled(ctx))) {
       return // 中间件已处理提醒
     }
+
+    // 🔥 检查基础记账功能是否启用
+    if (!(await isFeatureEnabled(ctx, 'accounting_basic'))) {
+      return // 中间件已处理提醒
+    }
     
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以记账。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
     
     // 🔥 检查是否跨日，如果是每日清零模式则清空内存数据
