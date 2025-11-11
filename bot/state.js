@@ -221,27 +221,18 @@ function calcUSDT(amountRMB, rate) {
 /**
  * 汇总当前账单
  * @param {object} chat - 内存中的聊天状态
- * @param {object} options - 选项
- * @param {number} options.previousNotDispatched - 历史未下发金额（RMB）（用于累计模式）
- * @param {number} options.previousNotDispatchedUSDT - 历史未下发USDT（用于累计模式）
  */
-function summarize(chat, options = {}) {
-  const { previousNotDispatched = 0, previousNotDispatchedUSDT = 0 } = options
-
+function summarize(chat) {
   const totalIncome = chat.current.incomes.reduce((s, i) => s + i.amount, 0)
   const totalDispatched = chat.current.dispatches.reduce((s, d) => s + d.amount, 0)
 
   const effectiveRate = chat.fixedRate ?? chat.realtimeRate ?? 0
   const fee = Number(((totalIncome * chat.feePercent) / 100).toFixed(2))
   // 移除 Math.max，允许负数入款也计入应下发
-  const shouldDispatchToday = totalIncome - fee
+  const shouldDispatch = totalIncome - fee
 
-  // 计算今日应下发的 USDT
-  const shouldDispatchTodayUSDT = calcUSDT(shouldDispatchToday, effectiveRate)
-
-  // 累计模式：加上历史未下发
-  const shouldDispatch = shouldDispatchToday + previousNotDispatched
-  const shouldDispatchUSDT = shouldDispatchTodayUSDT + previousNotDispatchedUSDT
+  // 计算应下发的 USDT
+  const shouldDispatchUSDT = calcUSDT(shouldDispatch, effectiveRate)
 
   const dispatchedUSDT = calcUSDT(totalDispatched, effectiveRate)
   // 允许负数：当下发超过收入时显示负数
@@ -258,10 +249,6 @@ function summarize(chat, options = {}) {
     dispatchedUSDT,
     notDispatched,
     notDispatchedUSDT,
-    // 额外返回今日和历史的分解数据
-    shouldDispatchToday,
-    previousNotDispatched,
-    previousNotDispatchedUSDT,
   }
 }
 

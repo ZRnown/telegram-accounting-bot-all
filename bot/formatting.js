@@ -2,7 +2,7 @@
 import { prisma } from '../lib/db.ts'
 import { summarize } from './state.js'
 import { formatMoney, getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
-import { getHistoricalNotDispatched, checkAndClearIfNewDay } from './database.js'
+import { checkAndClearIfNewDay } from './database.js'
 
 /**
  * 格式化账单摘要
@@ -13,8 +13,6 @@ export async function formatSummary(ctx, chat, options = {}) {
   // 🔥 首先检查是否跨日，如果是每日清零模式则清空内存数据
   await checkAndClearIfNewDay(chat, chatId)
   
-  let previousNotDispatched = 0
-  let previousNotDispatchedUSDT = 0
   let accountingMode = 'DAILY_RESET'
   let settings = null // 🔥 初始化 settings 变量
   
@@ -97,13 +95,7 @@ export async function formatSummary(ctx, chat, options = {}) {
     settings = settingsResult // 🔥 赋值给外部变量
     accountingMode = settings?.accountingMode || 'DAILY_RESET'
     
-    if (accountingMode === 'CARRY_OVER') {
-      // 🔥 获取当前账单的开启时间，用于计算该账单之前的历史未下发
-      const currentBillOpenedAt = billData?.openedAt || null
-      const historical = await getHistoricalNotDispatched(chatId, settings, currentBillOpenedAt)
-      previousNotDispatched = historical.notDispatched
-      previousNotDispatchedUSDT = historical.notDispatchedUSDT
-    }
+    // 🔥 累计模式不再需要历史未下发计算
     
     if (needsSync && billData?.items) {
       const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => ({
@@ -162,7 +154,7 @@ export async function formatSummary(ctx, chat, options = {}) {
   const isFixedRate = currentFixedRate != null
   const rateLabel = isFixedRate ? '固定汇率' : '实时汇率'
   
-  const s = summarize(chat, { previousNotDispatched, previousNotDispatchedUSDT })
+  const s = summarize(chat)
   const rateVal = s.effectiveRate || 0
 
   const incCount = chat.current.incomes.length
@@ -233,10 +225,6 @@ export async function formatSummary(ctx, chat, options = {}) {
   const header = chat.headerText ? `${chat.headerText}\n` : ''
   const modeTag = accountingMode === 'CARRY_OVER' ? '【累计模式】' : ''
 
-  let historicalInfo = ''
-  if (accountingMode === 'CARRY_OVER' && (previousNotDispatched !== 0 || previousNotDispatchedUSDT !== 0)) {
-    historicalInfo = `\n账单拆解：\n今日入款：${formatMoney(s.totalIncome)}\n历史未下发：${formatMoney(previousNotDispatched)} | ${formatMoney(previousNotDispatchedUSDT)}U`
-  }
 
   return [
     header + `${modeTag}${options.title || '账单状态'}`,
@@ -247,7 +235,6 @@ export async function formatSummary(ctx, chat, options = {}) {
     `\n总入款金额：${formatMoney(s.totalIncome)}${s.effectiveRate ? ` | ${formatMoney(s.totalIncome / s.effectiveRate)}U` : ''}`, // 🔥 显示总入款的U
     `费率：${s.feePercent}%`,
     `${rateLabel}：${rateVal || '未设置'}`,
-    historicalInfo,
     ...(chat.rmbMode
       ? [
           `应下发：${formatMoney(s.shouldDispatch)}`,

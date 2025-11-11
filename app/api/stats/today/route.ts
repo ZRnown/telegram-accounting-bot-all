@@ -423,82 +423,16 @@ export async function GET(req: NextRequest) {
 
     const selected = selectedBillAgg
 
-    // 🔥 累计模式：每个账单独立计算自己的历史数据
-    let carryOver = 0
-    let historicalIncome = 0 // 🔥 历史入款（原始金额，用于显示）
+    // 🔥 累计模式：每个账单独立计算
     let cumulativeTotalIncome = selected.totalIncome // 默认等于今日入款（非累计模式）
-    let billLabels: string[] = [] // 🔥 账单标签（用于显示"昨日第X笔订单"）
+    let billLabels: string[] = [] // 🔥 账单标签（用于显示"第X笔"）
     
     if (isCumulativeMode) {
-      try {
-        // 🔥 计算当前选中账单的历史数据
-        const selectedBill = billsData[selIdx]
-        // 🔥 如果没有选中的账单，确保 carryOver 为 0
-        if (!selectedBill) {
-          carryOver = 0
-        } else if (selectedBill) {
-          // 🔥 累计模式：简单的"第X笔"标签
-          billLabels = billsData.map((bill: any, idx: number) => {
-            return `第 ${idx + 1} 笔`
-          })
-          
-          // 🔥 查询当前账单之前的所有OPEN状态账单（用于计算历史未下发）
-          const historicalBills = await prisma.bill.findMany({
-            where: {
-              chatId,
-              openedAt: { lt: selectedBill.openedAt },
-              status: 'OPEN' // 🔥 只查询OPEN状态的账单（未保存的）
-            },
-            select: { id: true },
-            orderBy: { openedAt: 'asc' }
-          })
-          
-          // 🔥 计算历史未下发：只使用未保存的历史账单
-          if (historicalBills.length === 0) {
-            carryOver = 0
-            historicalIncome = 0
-          } else {
-            const historicalBillIds = historicalBills.map((b: any) => b.id)
-            // 🔥 性能优化：一次性查询所有账单项，避免多次查询
-            const historicalItems = await prisma.billItem.findMany({
-              where: { billId: { in: historicalBillIds } },
-              select: { type: true, amount: true, feeRate: true }
-            })
-            
-            // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
-            let hTotalNetIncome = 0 // 扣除费率后的历史入款（用于计算未下发）
-            let hTotalGrossIncome = 0 // 原始历史入款（用于显示）
-            let hTotalDispatched = 0
-            
-            for (const item of historicalItems) {
-              const amount = Number(item.amount) || 0
-              if (item.type === 'INCOME') {
-                const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
-                if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-                  // 有单笔费率：amount已经是扣除费率后的
-                  hTotalNetIncome += amount
-                  hTotalGrossIncome += amount / itemFeeRate // 还原原始金额
-                } else {
-                  // 没有单笔费率：需要扣除费率
-                  hTotalNetIncome += amount - (amount * (feePercent || 0)) / 100
-                  hTotalGrossIncome += amount
-                }
-              } else if (item.type === 'DISPATCH') {
-                hTotalDispatched += amount
-              }
-            }
-            
-            // 🔥 确保历史未下发不为负数（如果历史下发超过历史入款，则为0）
-            carryOver = Math.max(0, hTotalNetIncome - hTotalDispatched)
-            historicalIncome = hTotalGrossIncome
-          }
-        }
-        
-        // 🔥 累计模式：不需要计算累计总入款（已移除该功能）
-        cumulativeTotalIncome = selected.totalIncome
-      } catch (e) {
-        console.error('[累计模式计算错误]', e)
-      }
+      // 🔥 累计模式：简单的"第X笔"标签
+      billLabels = billsData.map((bill: any, idx: number) => {
+        return `第 ${idx + 1} 笔`
+      })
+      cumulativeTotalIncome = selected.totalIncome
     } else {
       // 非累计模式，生成普通标签
       billLabels = billsData.map((_: any, idx: number) => `第 ${idx + 1} 笔`)
@@ -514,21 +448,10 @@ export async function GET(req: NextRequest) {
             // 🔥 累计模式：返回这个账单的总入款和今日入款
             todayIncome: selected.todayIncome ?? selected.totalIncome, // 🔥 今日入款（当日切日内的入款）
             totalIncome: selected.totalIncome, // 🔥 这个账单的总入款金额（不是累计总入款）
-            historicalIncome: historicalIncome, // 🔥 历史入款（原始金额，用于显示）
-            shouldDispatch: (selected.shouldDispatch || 0) + carryOver, // 这个账单的应下发 + 历史未下发
-            shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
-            notDispatched: (selected.notDispatched || 0) + carryOver, // 这个账单的未下发 + 历史未下发
-            notDispatchedUSDT: (selected.notDispatchedUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
-            carryOver,
-          }
-        : carryOver > 0
-        ? {
-            // 非累计模式，但有历史数据（兼容旧逻辑）
-            shouldDispatch: (selected.shouldDispatch || 0) + carryOver,
-            shouldDispatchUSDT: (selected.shouldDispatchUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
-            notDispatched: (selected.notDispatched || 0) + carryOver,
-            notDispatchedUSDT: (selected.notDispatchedUSDT || 0) + (selected.exchangeRate ? Number((carryOver / selected.exchangeRate).toFixed(2)) : 0),
-            carryOver,
+            shouldDispatch: selected.shouldDispatch || 0,
+            shouldDispatchUSDT: selected.shouldDispatchUSDT || 0,
+            notDispatched: selected.notDispatched || 0,
+            notDispatchedUSDT: selected.notDispatchedUSDT || 0,
           }
         : {}),
       selectedBillIndex: selIdx + 1,

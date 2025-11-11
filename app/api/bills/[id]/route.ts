@@ -1,108 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 
-// 🔥 计算历史未下发金额（用于累计模式）- 每个账单独立计算自己的历史数据
-async function getHistoricalNotDispatched(chatId: string, billOpenedAt: Date, feePercent: number = 0, cutoffHour: number = 0) {
-  try {
-    // 🔥 计算昨天的日期范围（用于判断昨天最后一笔账单的状态）
-    const todayCutoff = new Date(billOpenedAt)
-    todayCutoff.setHours(cutoffHour, 0, 0, 0)
-    const yGte = new Date(todayCutoff)
-    yGte.setDate(yGte.getDate() - 1)
-    const yLt = new Date(todayCutoff)
-    
-    // 🔥 查询昨天的最后一笔账单（用于判断状态）
-    const yesterdayBills = await prisma.bill.findMany({
-      where: { 
-        chatId, 
-        openedAt: { gte: yGte, lt: yLt }
-      },
-      select: { id: true, openedAt: true, status: true },
-      orderBy: { openedAt: 'desc' },
-      take: 1 // 🔥 性能优化：只查询最后一笔
-    })
-    
-    // 🔥 判断昨天最后一笔账单的状态
-    const lastYesterdayBill = yesterdayBills.length > 0 ? yesterdayBills[0] : null
-    const shouldIncludeYesterday = lastYesterdayBill?.status === 'OPEN'
-    
-    // 🔥 查询历史账单：只包括OPEN状态的账单（未保存的）
-    // 🔥 不包括CLOSED状态的账单（已保存的）
-    const historicalBillsWhere: any = {
-      chatId,
-      status: 'OPEN', // 🔥 只查询OPEN状态的账单（未保存的）
-      openedAt: { lt: billOpenedAt }
-    }
-    
-    if (!shouldIncludeYesterday && lastYesterdayBill) {
-      historicalBillsWhere.openedAt = { lt: yGte }
-    }
-    
-    // 🔥 性能优化：先查询账单ID，再批量查询账单项，避免N+1查询
-    const historicalBills = await prisma.bill.findMany({
-      where: historicalBillsWhere,
-      select: { id: true },
-      orderBy: { openedAt: 'asc' }
-    })
-    
-    if (historicalBills.length === 0) {
-      return {
-        historicalIncome: 0,
-        historicalDispatch: 0,
-        historicalNotDispatched: 0,
-        historicalNotDispatchedUSDT: 0
-      }
-    }
-    
-    const historicalBillIds = historicalBills.map((b: any) => b.id)
-    
-    // 🔥 性能优化：一次性查询所有账单项，避免N+1查询
-    const historicalItems = await prisma.billItem.findMany({
-      where: { billId: { in: historicalBillIds } },
-      select: {
-        type: true,
-        amount: true,
-        feeRate: true
-      }
-    })
-    
-    // 🔥 性能优化：使用单次遍历计算，避免多次filter和reduce
-    let totalHistoricalNetIncome = 0
-    let totalHistoricalDispatch = 0
-    
-    for (const item of historicalItems) {
-      const amount = Number(item.amount || 0)
-      if (item.type === 'INCOME') {
-        const itemFeeRate = item.feeRate ? Number(item.feeRate) : null
-        if (itemFeeRate && itemFeeRate > 0 && itemFeeRate <= 1) {
-          totalHistoricalNetIncome += amount
-        } else {
-          totalHistoricalNetIncome += amount - (amount * (feePercent || 0)) / 100
-        }
-      } else if (item.type === 'DISPATCH') {
-        totalHistoricalDispatch += amount
-      }
-    }
-    
-    const historicalNotDispatched = Math.max(totalHistoricalNetIncome - totalHistoricalDispatch, 0)
-    
-    return {
-      historicalIncome: totalHistoricalNetIncome,
-      historicalDispatch: totalHistoricalDispatch,
-      historicalNotDispatched: historicalNotDispatched,
-      historicalNotDispatchedUSDT: 0 // USDT计算在调用处处理
-    }
-  } catch (e) {
-    console.error('计算历史未下发失败', e)
-    return {
-      historicalIncome: 0,
-      historicalDispatch: 0,
-      historicalNotDispatched: 0,
-      historicalNotDispatchedUSDT: 0
-    }
-  }
-}
-
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = params.id
@@ -168,39 +66,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const notDispatched = shouldDispatch - totalDispatch
     const notDispatchedUSDT = effectiveRate ? Number((notDispatched / effectiveRate).toFixed(1)) : 0
 
-    // 🔥 如果是累计模式，计算历史未下发（每个账单独立计算）
-    let historicalData = null
-    const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-    
-    if (isCumulativeMode) {
-      // 🔥 获取日切时间（优先使用群组级别，否则使用全局配置）
-      let cutoffHour = 0
-      if (settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23) {
-        cutoffHour = settings.dailyCutoffHour
-      } else {
-        // 查询全局配置
-        try {
-          const globalConfig = await prisma.globalConfig.findUnique({
-            where: { key: 'daily_cutoff_hour' },
-            select: { value: true }
-          })
-          if (globalConfig?.value) {
-            const hour = parseInt(globalConfig.value, 10)
-            if (!isNaN(hour) && hour >= 0 && hour <= 23) {
-              cutoffHour = hour
-            }
-          }
-        } catch (e) {
-          console.error('查询全局日切时间失败:', e)
-        }
-      }
-      
-      historicalData = await getHistoricalNotDispatched(bill.chatId, bill.openedAt, feePercent, cutoffHour)
-      // 🔥 计算USDT
-      if (effectiveRate > 0 && historicalData.historicalNotDispatched > 0) {
-        historicalData.historicalNotDispatchedUSDT = Number((historicalData.historicalNotDispatched / effectiveRate).toFixed(2))
-      }
-    }
 
     return Response.json({
       bill,
@@ -222,18 +87,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         notDispatchedUSDT,
         fee,
       },
-      // 🔥 累计模式数据
-      ...(isCumulativeMode && historicalData ? {
-        cumulative: {
-          todayIncome: totalIncome,
-          historicalNotDispatched: historicalData.historicalNotDispatched,
-          historicalNotDispatchedUSDT: Number(historicalData.historicalNotDispatchedUSDT.toFixed(1)),
-          totalShouldDispatch: shouldDispatch + historicalData.historicalNotDispatched,
-          totalShouldDispatchUSDT: Number((shouldDispatchUSDT + historicalData.historicalNotDispatchedUSDT).toFixed(1)),
-          totalNotDispatched: notDispatched + historicalData.historicalNotDispatched,
-          totalNotDispatchedUSDT: Number((notDispatchedUSDT + historicalData.historicalNotDispatchedUSDT).toFixed(1)),
-        }
-      } : {})
     })
   } catch (e) {
     console.error(e)
@@ -248,7 +101,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!bill) return new Response('Not Found', { status: 404 })
     
     // 🔥 删除账单和所有账单项（使用事务确保原子性）
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       await tx.billItem.deleteMany({ where: { billId: id } })
       await tx.bill.delete({ where: { id } })
     })

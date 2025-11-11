@@ -523,7 +523,7 @@ function ensureChat(ctx) {
 // 🔥 已删除未使用的 ensureDbChatWithSync 函数，优化性能
 
 // 🔥 所有重复函数已移至对应模块：
-// - getOrCreateTodayBill, getHistoricalNotDispatched, deleteLastIncome, deleteLastDispatch -> database.js
+// - getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch -> database.js
 // - startOfDay, endOfDay, formatMoney, formatDuration -> utils.js
 // - isAdmin, hasOperatorPermission -> helpers.js
 // - isFeatureEnabled, ensureFeature -> middleware.js
