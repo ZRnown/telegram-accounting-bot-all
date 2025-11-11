@@ -1847,7 +1847,7 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   clearFeatureCache(chatId)
   
-  await ctx.reply('✅ 已开启所有功能开关（包括计算器）！', { ...(await buildInlineKb(ctx)) })
+  await ctx.reply('✅ 已开启所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[开启所有功能]', { chatId, featuresCreated })
   }
@@ -1894,7 +1894,7 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
   // 🔥 清除功能开关缓存，确保立即生效
   clearFeatureCache(chatId)
   
-  await ctx.reply('⭕ 已关闭所有功能开关（包括计算器）！', { ...(await buildInlineKb(ctx)) })
+  await ctx.reply('⭕ 已关闭所有功能开关！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[关闭所有功能]', { chatId })
   }
@@ -2164,7 +2164,6 @@ bot.launch().then(async () => {
         '• 基础记账：+金额、下发金额、显示账单、备注支持\n' +
         '• 数学计算：支持288-32、288*2、288/2、288+21等（需打开计算器）\n' +
           '• 实时汇率：自动获取USDT到CNY汇率、OKX C2C价格查询\n' +
-          '• 金额换算：z1000计算1000元换算USDT（z20计算20元）\n' +
           '• 查询汇率：查看点位汇率映射关系，支持自定义查询\n' +
           '• 超押提醒：设置额度后自动提醒入款超限\n' +
           '• 记账模式：支持每日清零、累计模式、单笔订单三种模式\n' +

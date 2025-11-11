@@ -1204,20 +1204,38 @@ function DashboardPageInner() {
                                     onClick={async () => {
                                       setExpandedRows((r) => ({ ...r, [it.id]: !r[it.id] }))
                                       const chatId = it.id
-                                      if (!expandedRows[it.id] && !featureCache[chatId]) {
-                                        setFeatureCache((c) => ({ ...c, [chatId]: { items: [], loading: true } }))
-                                        try {
-                                          const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`)
-                                          if (res.ok) {
-                                            const json = await res.json()
-                                            const items = Array.isArray(json?.items) ? json.items : []
-                                            setFeatureCache((c) => ({ ...c, [chatId]: { items } }))
-                                          } else {
-                                            setFeatureCache((c) => ({ ...c, [chatId]: { items: [] } }))
-                                          }
-                                        } catch {
+                                      // 总是重新拉取，避免命令操作与UI不同步
+                                      setFeatureCache((c) => ({ ...c, [chatId]: { items: [], loading: true } }))
+                                      try {
+                                        const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`)
+                                        if (res.ok) {
+                                          const json = await res.json()
+                                          const items = Array.isArray(json?.items) ? json.items : []
+                                          setFeatureCache((c) => ({ ...c, [chatId]: { items } }))
+                                        } else {
                                           setFeatureCache((c) => ({ ...c, [chatId]: { items: [] } }))
                                         }
+                                      } catch {
+                                        setFeatureCache((c) => ({ ...c, [chatId]: { items: [] } }))
+                                      }
+                                      // 同步拉取快捷设置（计算器等）
+                                      setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: true } }))
+                                      try {
+                                        const sres = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
+                                        if (sres.ok) {
+                                          const json = await sres.json()
+                                          const settings = json?.settings || {}
+                                          setQuickSettingsCache((c) => ({ ...c, [chatId]: {
+                                            addressVerificationEnabled: settings.addressVerificationEnabled ?? false,
+                                            deleteBillConfirm: settings.deleteBillConfirm ?? false,
+                                            calculatorEnabled: settings.calculatorEnabled ?? true,
+                                            loading: false
+                                          }}))
+                                        } else {
+                                          setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: false } }))
+                                        }
+                                      } catch {
+                                        setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: false } }))
                                       }
                                     }}
                                   >{expandedRows[it.id] ? '⬆️ 收起' : '⚙️ 功能'}</button>

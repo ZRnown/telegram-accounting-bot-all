@@ -1,7 +1,5 @@
 // OKX相关命令处理器
 import { getOKXC2CSellers } from '../../lib/okx-api.ts'
-import { buildInlineKb } from '../helpers.js'
-import { formatMoney } from '../utils.js'
 
 /**
  * 格式化OKX价格显示
@@ -32,47 +30,7 @@ function formatOKXPrice(sellers, methodName) {
   return lines.join('\n')
 }
 
-/**
- * z1000命令 - 计算金额换算USDT（z1000计算1000元，z20计算20元）
- */
-export function registerZAmount(bot, ensureChat) {
-  // 🔥 修复：排除z0，只匹配z+数字（非0）
-  bot.hears(/^z([1-9]\d*(?:\.\d+)?)$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) return
-    
-    const chatId = await ensureDbChat(ctx, chat)
-    const match = ctx.message.text.match(/^z([1-9]\d*(?:\.\d+)?)$/i)
-    if (!match) return
-    
-    const amount = parseFloat(match[1])
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return ctx.reply('❌ 无效的金额')
-    }
-    
-    try {
-      // 🔥 获取当前汇率
-      const { getEffectiveRate } = await import('../helpers.js')
-      const rate = await getEffectiveRate(chatId, chat)
-      
-      if (!rate || rate <= 0) {
-        return ctx.reply('❌ 未设置汇率，无法计算USDT。请先设置汇率。')
-      }
-      
-      const usdt = Number((amount / rate).toFixed(2))
-      await ctx.reply(
-        `💰 金额换算\n\n` +
-        `金额：${amount.toLocaleString()} 元\n` +
-        `汇率：${rate}\n` +
-        `USDT：${usdt.toLocaleString()} U`,
-        { ...(await buildInlineKb(ctx)) }
-      )
-    } catch (e) {
-      console.error('[z金额命令]', e)
-      await ctx.reply('❌ 计算失败，请稍后重试')
-    }
-  })
-}
+// 已删除：z金额换算命令（z1000 / z20）
 
 /**
  * z0命令 - 查询OKX C2C价格
