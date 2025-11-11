@@ -46,6 +46,9 @@ function DashboardPageInner() {
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({})
   const [featureCache, setFeatureCache] = useState<Record<string, { items: Array<{ feature: string; enabled: boolean }>; loading?: boolean }>>({})
   const [featureSaving, setFeatureSaving] = useState<Record<string, boolean>>({})
+  // 🔥 快捷设置缓存（地址验证、删除账单确认、计算器）
+  const [quickSettingsCache, setQuickSettingsCache] = useState<Record<string, { addressVerificationEnabled: boolean; deleteBillConfirm: boolean; calculatorEnabled: boolean; loading?: boolean }>>({})
+  const [quickSettingsSaving, setQuickSettingsSaving] = useState<Record<string, boolean>>({})
   const [showCreateBot, setShowCreateBot] = useState<boolean>(false)
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
   const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
@@ -932,6 +935,22 @@ function DashboardPageInner() {
                             </div>
                             
                             <div>
+                              <h3 className="font-semibold text-slate-900 mb-2">⚙️ 快捷设置</h3>
+                              <p className="text-sm text-slate-600 mb-2">
+                                点击群组行左侧的展开按钮（▶），可以展开该群组的快捷设置，包括：
+                              </p>
+                              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
+                                <li><strong>功能开关：</strong>基础记账等功能的启用/禁用</li>
+                                <li><strong>地址验证：</strong>启用后检测钱包地址变更并提醒</li>
+                                <li><strong>删除账单确认：</strong>启用后删除账单需要二次确认</li>
+                                <li><strong>计算器：</strong>启用后支持数学计算功能（如288-32、288*2等）</li>
+                              </ul>
+                              <p className="text-sm text-slate-600 mt-2">
+                                快捷设置与群组设置页面的设置保持同步，修改后会立即生效。
+                              </p>
+                            </div>
+                            
+                            <div>
                               <h3 className="font-semibold text-slate-900 mb-2">➕ 手动添加群组</h3>
                               <p className="text-sm text-slate-600 mb-2">
                                 如果机器人已经在群组中，但群组管理中没有显示，可以使用"手动添加群"功能：
@@ -1266,56 +1285,137 @@ function DashboardPageInner() {
                             {expandedRows[it.id] && (
                               <tr>
                                 <td colSpan={7} className="bg-slate-50 p-3">
-                                  <div>
-                                    <div className="text-sm text-slate-700 mb-2">功能开关（群组 {it.title || it.id}）</div>
-                                    <div className="flex flex-wrap gap-4 items-center">
-                                      {((featureCache[it.id]?.items) || []).map((f, idx) => (
-                                        <label key={f.feature + idx} className="inline-flex items-center gap-2 text-sm">
+                                  <div className="space-y-4">
+                                    {/* 功能开关 */}
+                                    <div>
+                                      <div className="text-sm text-slate-700 mb-2">功能开关（群组 {it.title || it.id}）</div>
+                                      <div className="flex flex-wrap gap-4 items-center">
+                                        {((featureCache[it.id]?.items) || []).map((f, idx) => (
+                                          <label key={f.feature + idx} className="inline-flex items-center gap-2 text-sm">
+                                            <input
+                                              type="checkbox"
+                                              checked={!!f.enabled}
+                                              onChange={(e) => {
+                                                const enabled = e.target.checked
+                                                const chatId = it.id
+                                                setFeatureCache((c) => ({
+                                                  ...c,
+                                                  [chatId]: { items: (c[chatId]?.items || []).map(x => x.feature === f.feature ? { ...x, enabled } : x) },
+                                                }))
+                                              }}
+                                            />
+                                            <span>{FEATURE_NAME_MAP[f.feature] || f.feature}</span>
+                                          </label>
+                                        ))}
+                                        <button
+                                          className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                                          disabled={featureSaving[it.id]}
+                                          onClick={async () => {
+                                            const chatId = it.id
+                                            const payload = { features: (featureCache[chatId]?.items || []) }
+                                            setFeatureSaving((s) => ({ ...s, [chatId]: true }))
+                                            try {
+                                              const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`, {
+                                                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                                              })
+                                              if (!res.ok) {
+                                                const msg = await res.text().catch(() => '')
+                                                throw new Error(msg || '保存功能开关失败')
+                                              }
+                                              const fres = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`)
+                                              if (fres.ok) {
+                                                const json = await fres.json().catch(() => ({}))
+                                                const items = Array.isArray(json?.items) ? json.items : []
+                                                setFeatureCache((c) => ({ ...c, [chatId]: { items } }))
+                                              }
+                                              toast({ title: '成功', description: '已保存功能开关' })
+                                            } catch (e) {
+                                              toast({ title: '错误', description: (e as Error).message, variant: 'destructive' })
+                                            } finally {
+                                              setFeatureSaving((s) => ({ ...s, [chatId]: false }))
+                                            }
+                                          }}
+                                        >{featureSaving[it.id] ? '保存中...' : '保存功能'}</button>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* 🔥 快捷设置 */}
+                                    <div>
+                                      <div className="text-sm text-slate-700 mb-2">快捷设置</div>
+                                      <div className="flex flex-wrap gap-4 items-center">
+                                        <label className="inline-flex items-center gap-2 text-sm">
                                           <input
                                             type="checkbox"
-                                            checked={!!f.enabled}
+                                            checked={quickSettingsCache[it.id]?.addressVerificationEnabled ?? false}
                                             onChange={(e) => {
-                                              const enabled = e.target.checked
                                               const chatId = it.id
-                                              setFeatureCache((c) => ({
+                                              setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { items: (c[chatId]?.items || []).map(x => x.feature === f.feature ? { ...x, enabled } : x) },
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), addressVerificationEnabled: e.target.checked }
                                               }))
                                             }}
                                           />
-                                          <span>{FEATURE_NAME_MAP[f.feature] || f.feature}</span>
+                                          <span>地址验证</span>
                                         </label>
-                                      ))}
-                                      <button
-                                        className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
-                                        disabled={featureSaving[it.id]}
-                                        onClick={async () => {
-                                          const chatId = it.id
-                                          const payload = { features: (featureCache[chatId]?.items || []) }
-                                          setFeatureSaving((s) => ({ ...s, [chatId]: true }))
-                                          try {
-                                            const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`, {
-                                              method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-                                            })
-                                            if (!res.ok) {
-                                              const msg = await res.text().catch(() => '')
-                                              throw new Error(msg || '保存功能开关失败')
+                                        <label className="inline-flex items-center gap-2 text-sm">
+                                          <input
+                                            type="checkbox"
+                                            checked={quickSettingsCache[it.id]?.deleteBillConfirm ?? false}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), deleteBillConfirm: e.target.checked }
+                                              }))
+                                            }}
+                                          />
+                                          <span>删除账单确认</span>
+                                        </label>
+                                        <label className="inline-flex items-center gap-2 text-sm">
+                                          <input
+                                            type="checkbox"
+                                            checked={quickSettingsCache[it.id]?.calculatorEnabled ?? true}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), calculatorEnabled: e.target.checked }
+                                              }))
+                                            }}
+                                          />
+                                          <span>计算器</span>
+                                        </label>
+                                        <button
+                                          className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                                          disabled={quickSettingsSaving[it.id]}
+                                          onClick={async () => {
+                                            const chatId = it.id
+                                            const settings = quickSettingsCache[chatId]
+                                            if (!settings) return
+                                            setQuickSettingsSaving((s) => ({ ...s, [chatId]: true }))
+                                            try {
+                                              const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`, {
+                                                method: 'PATCH',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                  addressVerificationEnabled: settings.addressVerificationEnabled,
+                                                  deleteBillConfirm: settings.deleteBillConfirm,
+                                                  calculatorEnabled: settings.calculatorEnabled
+                                                })
+                                              })
+                                              if (!res.ok) {
+                                                const msg = await res.text().catch(() => '')
+                                                throw new Error(msg || '保存快捷设置失败')
+                                              }
+                                              toast({ title: '成功', description: '已保存快捷设置' })
+                                            } catch (e) {
+                                              toast({ title: '错误', description: (e as Error).message, variant: 'destructive' })
+                                            } finally {
+                                              setQuickSettingsSaving((s) => ({ ...s, [chatId]: false }))
                                             }
-                                            // reload features back to cache
-                                            const fres = await fetch(`/api/chats/${encodeURIComponent(chatId)}/features`)
-                                            if (fres.ok) {
-                                              const json = await fres.json().catch(() => ({}))
-                                              const items = Array.isArray(json?.items) ? json.items : []
-                                              setFeatureCache((c) => ({ ...c, [chatId]: { items } }))
-                                            }
-                                            toast({ title: '成功', description: '已保存功能开关' })
-                                          } catch (e) {
-                                            toast({ title: '错误', description: (e as Error).message, variant: 'destructive' })
-                                          } finally {
-                                            setFeatureSaving((s) => ({ ...s, [chatId]: false }))
-                                          }
-                                        }}
-                                      >{featureSaving[it.id] ? '保存中...' : '保存功能'}</button>
+                                          }}
+                                        >{quickSettingsSaving[it.id] ? '保存中...' : '保存设置'}</button>
+                                      </div>
                                     </div>
                                   </div>
                                 </td>

@@ -1666,21 +1666,66 @@ bot.hears(/^(双显模式|显示两列)$/i, async (ctx) => {
   await ctx.reply('已切换为双显模式（RMB | USDT）')
 })
 
-// 记账模式切换
+// 记账模式切换（兼容旧指令）
 bot.hears(/^(累计模式|结转模式)$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+  }
   const chatId = await ensureDbChat(ctx)
   await updateSettings(chatId, { accountingMode: 'CARRY_OVER' })
   await ctx.reply('已切换为【累计模式】\n未下发金额将累计到次日，持续统计直到完全下发。')
 })
 
+// 🔥 单笔订单模式（兼容旧指令）
+bot.hears(/^(单笔订单|单笔订单模式)$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+  }
+  const chatId = await ensureDbChat(ctx)
+  await updateSettings(chatId, { accountingMode: 'SINGLE_BILL_PER_DAY' })
+  await ctx.reply('已切换为【单笔订单模式】\n每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单。')
+})
+
 bot.hears(/^(清零模式|按日清零)$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+  }
   const chatId = await ensureDbChat(ctx)
   await updateSettings(chatId, { accountingMode: 'DAILY_RESET' })
   await ctx.reply('已切换为【清零模式】\n每日账单独立计算，不结转历史未下发金额。')
+})
+
+// 🔥 设置记账模式指令（管理员/白名单用户）
+bot.hears(/^设置记账模式\s+(累计模式|清零模式|单笔订单)$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+  }
+  const chatId = await ensureDbChat(ctx)
+  const mode = ctx.match[1]
+  let accountingMode = 'DAILY_RESET'
+  let modeName = '清零模式'
+  let desc = '每日账单独立计算，不结转历史未下发金额。'
+  
+  if (mode === '累计模式') {
+    accountingMode = 'CARRY_OVER'
+    modeName = '累计模式'
+    desc = '未下发金额将累计到次日，持续统计直到完全下发。'
+  } else if (mode === '单笔订单') {
+    accountingMode = 'SINGLE_BILL_PER_DAY'
+    modeName = '单笔订单模式'
+    desc = '每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单。'
+  }
+  
+  await updateSettings(chatId, { accountingMode })
+  await ctx.reply(`✅ 已切换为【${modeName}】\n${desc}`, { ...(await buildInlineKb(ctx)) })
 })
 
 bot.hears(/^查看记账模式$/i, async (ctx) => {
@@ -1792,10 +1837,17 @@ bot.hears(/^开启所有功能$/i, async (ctx) => {
     data: { enabled: true }
   })
   
+  // 🔥 开启计算器功能
+  await prisma.setting.upsert({
+    where: { chatId },
+    update: { calculatorEnabled: true },
+    create: { chatId, calculatorEnabled: true }
+  })
+  
   // 🔥 清除功能开关缓存，确保立即生效
   clearFeatureCache(chatId)
   
-  await ctx.reply('✅ 已开启所有功能开关！', { ...(await buildInlineKb(ctx)) })
+  await ctx.reply('✅ 已开启所有功能开关（包括计算器）！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[开启所有功能]', { chatId, featuresCreated })
   }
@@ -1832,10 +1884,17 @@ bot.hears(/^关闭所有功能$/i, async (ctx) => {
     })
   }
   
+  // 🔥 关闭计算器功能
+  await prisma.setting.upsert({
+    where: { chatId },
+    update: { calculatorEnabled: false },
+    create: { chatId, calculatorEnabled: false }
+  })
+  
   // 🔥 清除功能开关缓存，确保立即生效
   clearFeatureCache(chatId)
   
-  await ctx.reply('⭕ 已关闭所有功能开关！', { ...(await buildInlineKb(ctx)) })
+  await ctx.reply('⭕ 已关闭所有功能开关（包括计算器）！', { ...(await buildInlineKb(ctx)) })
   if (process.env.DEBUG_BOT === 'true') {
     console.log('[关闭所有功能]', { chatId })
   }

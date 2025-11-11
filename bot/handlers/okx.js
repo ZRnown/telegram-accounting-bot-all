@@ -36,12 +36,13 @@ function formatOKXPrice(sellers, methodName) {
  * z1000命令 - 计算金额换算USDT（z1000计算1000元，z20计算20元）
  */
 export function registerZAmount(bot, ensureChat) {
-  bot.hears(/^z(\d+(?:\.\d+)?)$/i, async (ctx) => {
+  // 🔥 修复：排除z0，只匹配z+数字（非0）
+  bot.hears(/^z([1-9]\d*(?:\.\d+)?)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
     
     const chatId = await ensureDbChat(ctx, chat)
-    const match = ctx.message.text.match(/^z(\d+(?:\.\d+)?)$/i)
+    const match = ctx.message.text.match(/^z([1-9]\d*(?:\.\d+)?)$/i)
     if (!match) return
     
     const amount = parseFloat(match[1])
