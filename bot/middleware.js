@@ -2,6 +2,7 @@
 import { prisma } from '../lib/db.ts'
 import { ensureDbChat } from './database.js'
 import { LRUCache } from './lru-cache.js'
+import { DEFAULT_FEATURES } from './constants.ts'
 
 // 功能开关缓存（🔥 内存优化：减少缓存大小）
 const featureCache = new LRUCache(100)
@@ -14,8 +15,8 @@ export async function isFeatureEnabled(ctx, feature) {
   try {
     const chatId = await ensureDbChat(ctx)
     if (!chatId) {
-      // 🔥 如果没有 chatId，默认不允许任何功能（包括基础记账）
-      return false
+      // 🔥 如果没有 chatId，默认允许使用（确保新群组可以正常使用）
+      return true
     }
     
     const now = Date.now()
@@ -29,15 +30,23 @@ export async function isFeatureEnabled(ctx, feature) {
       select: { feature: true, enabled: true } 
     })
     
-    // 🔥 只返回明确启用（enabled: true）的功能，移除默认允许逻辑
+    // 🔥 如果没有功能开关记录，默认允许使用（确保默认可用）
+    // 缓存所有默认功能，避免重复查询
+    if (flags.length === 0) {
+      const defaultSet = new Set(DEFAULT_FEATURES)
+      featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set: defaultSet })
+      return true // 默认全部启用
+    }
+    
+    // 🔥 只返回明确启用（enabled: true）的功能
     const set = new Set(flags.filter(f => f.enabled).map(f => f.feature))
     
     featureCache.set(chatId, { expires: now + FEATURE_TTL_MS, set })
     return set.has(feature)
   } catch (e) {
     console.error('[isFeatureEnabled] 异常', { feature, error: e.message })
-    // 🔥 异常时默认不允许，确保安全
-    return false
+    // 🔥 异常时默认允许，确保可用性
+    return true
   }
 }
 
