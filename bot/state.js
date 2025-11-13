@@ -228,19 +228,34 @@ function summarize(chat) {
 
   const effectiveRate = chat.fixedRate ?? chat.realtimeRate ?? 0
   const fee = Number(((totalIncome * chat.feePercent) / 100).toFixed(2))
-  // 移除 Math.max，允许负数入款也计入应下发
+  // 允许负数：当有负数入款时也计入
   const shouldDispatch = totalIncome - fee
 
-  // 计算应下发的 USDT
-  const shouldDispatchUSDT = calcUSDT(shouldDispatch, effectiveRate)
+  // 逐笔按指定汇率计算入款USDT总和（若该笔无rate则回退到当前有效汇率）
+  const incomeUSDTTotal = chat.current.incomes.reduce((sum, i) => {
+    const rateUsed = (i.rate != null ? i.rate : effectiveRate)
+    if (!rateUsed || rateUsed <= 0) return sum
+    return sum + (i.amount / rateUsed)
+  }, 0)
 
-  const dispatchedUSDT = calcUSDT(totalDispatched, effectiveRate)
-  // 允许负数：当下发超过收入时显示负数
+  // 费用在USDT层面按比例扣减：等同于 incomeUSDTTotal * (1 - feePercent/100)
+  const shouldDispatchUSDT = Number((incomeUSDTTotal * (1 - (chat.feePercent || 0) / 100)).toFixed(2))
+
+  // 下发USDT优先使用每条记录自带usdt字段，缺失则回退用有效汇率换算
+  const dispatchedUSDT = chat.current.dispatches.reduce((sum, d) => {
+    if (typeof d.usdt === 'number' && Number.isFinite(d.usdt)) {
+      return sum + d.usdt
+    }
+    return sum + calcUSDT(d.amount, effectiveRate)
+  }, 0)
+
+  // 允许负数：当下发超过应下发时为负
   const notDispatched = shouldDispatch - totalDispatched
-  const notDispatchedUSDT = shouldDispatchUSDT - dispatchedUSDT
+  const notDispatchedUSDT = Number((shouldDispatchUSDT - dispatchedUSDT).toFixed(2))
 
   return {
     totalIncome,
+    totalIncomeUSDT: Number(incomeUSDTTotal.toFixed(2)),
     feePercent: chat.feePercent,
     effectiveRate,
     shouldDispatch,

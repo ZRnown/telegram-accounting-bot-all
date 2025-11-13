@@ -232,7 +232,7 @@ export async function formatSummary(ctx, chat, options = {}) {
     incPart,
     `\n已下发（${disCount}笔）：`,
     disPart,
-    `\n总入款金额：${formatMoney(s.totalIncome)}${s.effectiveRate ? ` | ${formatMoney(s.totalIncome / s.effectiveRate)}U` : ''}`, // 🔥 显示总入款的U
+    `\n总入款金额：${formatMoney(s.totalIncome)}${(s.totalIncomeUSDT && s.totalIncomeUSDT !== 0) ? ` | ${formatMoney(s.totalIncomeUSDT)}U` : ''}`, // 🔥 显示总入款的U（逐笔汇率聚合）
     `费率：${s.feePercent}%`,
     `${rateLabel}：${rateVal || '未设置'}`,
     ...(chat.rmbMode
