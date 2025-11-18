@@ -55,6 +55,10 @@ function DashboardPageInner() {
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
+  // 命令别名配置（管理员）
+  const [aliasConfigText, setAliasConfigText] = useState<string>('')
+  const [aliasLoading, setAliasLoading] = useState<boolean>(false)
+  const [aliasSaving, setAliasSaving] = useState<boolean>(false)
   
   // 🔥 确认对话框状态
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -408,6 +412,28 @@ function DashboardPageInner() {
     }
   }, [mounted, chatId])
 
+  // 加载全局命令别名配置（仅管理员且在首页时）
+  useEffect(() => {
+    if (!mounted) return
+    if (chatId) return
+    if (!isAdmin) return
+    (async () => {
+      setAliasLoading(true)
+      try {
+        const res = await fetch('/api/global-config/commands')
+        if (res.ok) {
+          const j = await res.json().catch(() => ({}))
+          const pretty = JSON.stringify({ exact_map: j?.exact_map || {}, prefix_map: j?.prefix_map || {} }, null, 2)
+          setAliasConfigText(pretty)
+        }
+      } catch (e) {
+        console.error('[alias-config] load failed', e)
+      } finally {
+        setAliasLoading(false)
+      }
+    })()
+  }, [mounted, isAdmin, chatId])
+
   // 🔥 使用 useMemo 优化计算（必须在所有条件返回之前）
   const manualAddedSet = useMemo(() => getManualAddedSet(), [groups])
   const inviterOptions = useMemo(() => {
@@ -502,6 +528,81 @@ function DashboardPageInner() {
 
         {showCompact ? (
           <div className="mt-6 space-y-6">
+            {/* 命令别名配置（管理员） */}
+            {isAdmin && (
+              <div className="bg-white border rounded-lg p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <div className="text-lg font-semibold text-slate-900">⚙️ 全局命令别名配置</div>
+                    <div className="text-sm text-slate-600 mt-1">仅管理员可见。支持 exact_map（整句映射）与 prefix_map（前缀映射）。保存后约5分钟内全局生效。</div>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs text-slate-600">配置 JSON</label>
+                  <textarea
+                    className="w-full min-h-[180px] border rounded px-3 py-2 text-sm font-mono"
+                    value={aliasConfigText}
+                    onChange={(e) => setAliasConfigText(e.target.value)}
+                    placeholder='{"exact_map": {"清除全部账单": "删除全部账单"}, "prefix_map": {"派发": "下发"}}'
+                    disabled={aliasLoading || aliasSaving}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                      disabled={aliasLoading}
+                      onClick={async () => {
+                        // 重新加载
+                        try {
+                          setAliasLoading(true)
+                          const res = await fetch('/api/global-config/commands')
+                          if (res.ok) {
+                            const j = await res.json().catch(() => ({}))
+                            const pretty = JSON.stringify({ exact_map: j?.exact_map || {}, prefix_map: j?.prefix_map || {} }, null, 2)
+                            setAliasConfigText(pretty)
+                            toast({ title: '已刷新', description: '最新配置已加载' })
+                          }
+                        } catch (e) {
+                          toast({ title: '错误', description: '刷新失败', variant: 'destructive' })
+                        } finally {
+                          setAliasLoading(false)
+                        }
+                      }}
+                    >{aliasLoading ? '刷新中...' : '刷新'}</button>
+                    <button
+                      className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                      disabled={aliasSaving}
+                      onClick={async () => {
+                        try {
+                          let obj
+                          try {
+                            obj = JSON.parse(aliasConfigText)
+                          } catch (e) {
+                            toast({ title: '错误', description: 'JSON 解析失败，请检查格式', variant: 'destructive' })
+                            return
+                          }
+                          setAliasSaving(true)
+                          const token = localStorage.getItem('auth_token') || ''
+                          const res = await fetch('/api/global-config/commands', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+                            body: JSON.stringify(obj)
+                          })
+                          if (!res.ok) {
+                            const msg = await res.text().catch(() => '')
+                            throw new Error(msg || '保存失败')
+                          }
+                          toast({ title: '成功', description: '命令别名配置已保存（约5分钟内生效）' })
+                        } catch (e) {
+                          toast({ title: '错误', description: (e as Error).message || '保存失败', variant: 'destructive' })
+                        } finally {
+                          setAliasSaving(false)
+                        }
+                      }}
+                    >{aliasSaving ? '保存中...' : '保存'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* 白名单用户管理 */}
             <div className="bg-white border rounded-lg p-6">
               <div className="flex items-start justify-between mb-4">

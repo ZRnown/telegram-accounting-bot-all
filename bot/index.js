@@ -22,6 +22,7 @@ import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } fr
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
+import { createAliasMiddleware } from './alias-middleware.js'
 
 const BOT_TOKEN = process.env.BOT_TOKEN
 if (!BOT_TOKEN) {
@@ -724,11 +725,9 @@ bot.on('my_chat_member', async (ctx) => {
           botId,
           status: autoAllowed ? 'APPROVED' : undefined,
           allowed: autoAllowed ? true : undefined,
-          // 🔥 新加入时总是更新邀请人信息（确保能获取到最新的邀请人）
-          ...(inviterId && inviterUsername ? {
-            invitedBy: inviterId,
-            invitedByUsername: inviterUsername
-          } : {})
+          // 🔥 新加入时总是更新邀请人信息（允许仅有ID时也更新）
+          ...(inviterId ? { invitedBy: inviterId } : {}),
+          ...(inviterUsername ? { invitedByUsername: inviterUsername } : {})
         },
       })
       
@@ -842,6 +841,9 @@ bot.on('my_chat_member', async (ctx) => {
     }
   } catch {}
 })
+
+// 🔥 注册别名中间件（需在注册 handlers 之前）
+bot.use(createAliasMiddleware())
 
 // 🔥 注册所有命令处理器（模块化）
 registerAllHandlers(bot, ensureChat)
