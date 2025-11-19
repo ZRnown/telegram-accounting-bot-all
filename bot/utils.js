@@ -1,5 +1,5 @@
 // 工具函数
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
 import { getChat } from './state.js'
 
 // LRU 缓存用于全局配置
@@ -132,7 +132,23 @@ export function isPublicUrl(u) {
     const url = new URL(u)
     const host = url.hostname
     if (!/^https?:$/.test(url.protocol)) return false
+    // 拒绝本地与常见内网主机名
     if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return false
+    // IPv4 判定
+    const ipv4 = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/
+    const isIPv4 = ipv4.test(host)
+    if (isIPv4) {
+      // 排除常见内网网段
+      const parts = host.split('.').map(n => parseInt(n, 10))
+      const [a, b] = parts
+      const isPrivate =
+        a === 10 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168)
+      return !isPrivate
+    }
+    // 非 IP：要求域名包含点，避免像 'ip' 这样的伪域名
+    if (!host.includes('.')) return false
     return true
   } catch {
     return false

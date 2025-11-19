@@ -1,28 +1,49 @@
-// 全局命令别名中间件
+// 全局命令别名中间件（按机器人配置）
 import { getGlobalConfig } from './utils.js'
+import { prisma } from '../lib/db.js'
 
 const TTL_MS = 5 * 60 * 1000
-let cache = { data: null, expires: 0 }
+let cache = { data: null, expires: 0, botId: null }
+let botIdCache = { id: null, expires: 0 }
+
+async function getCurrentBotId() {
+  const now = Date.now()
+  if (botIdCache.id && botIdCache.expires > now) return botIdCache.id
+  try {
+    const token = (process.env.BOT_TOKEN || '').trim()
+    if (!token) return null
+    const row = await prisma.bot.findFirst({ where: { token }, select: { id: true } })
+    const id = row?.id || null
+    botIdCache = { id, expires: now + TTL_MS }
+    return id
+  } catch {
+    return null
+  }
+}
 
 async function loadAliasConfig() {
-  if (cache.data && cache.expires > Date.now()) return cache.data
+  const now = Date.now()
+  const botId = await getCurrentBotId()
+  if (cache.data && cache.expires > now && cache.botId === botId) return cache.data
   try {
-    const raw = await getGlobalConfig('command_alias_map', '{}')
-    let obj
-    try {
-      obj = JSON.parse(raw)
-    } catch {
-      obj = {}
+    let raw = '{}'
+    if (botId) {
+      raw = await getGlobalConfig(`command_alias_map:${botId}`, '{}')
+    } else {
+      // 兼容旧全局键（无botId时）
+      raw = await getGlobalConfig('command_alias_map', '{}')
     }
+    let obj
+    try { obj = JSON.parse(raw) } catch { obj = {} }
     const cfg = {
       exact_map: obj?.exact_map && typeof obj.exact_map === 'object' ? obj.exact_map : {},
       prefix_map: obj?.prefix_map && typeof obj.prefix_map === 'object' ? obj.prefix_map : {},
     }
-    cache = { data: cfg, expires: Date.now() + TTL_MS }
+    cache = { data: cfg, expires: now + TTL_MS, botId }
     return cfg
   } catch {
     const empty = { exact_map: {}, prefix_map: {} }
-    cache = { data: empty, expires: Date.now() + TTL_MS }
+    cache = { data: empty, expires: now + TTL_MS, botId }
     return empty
   }
 }
@@ -78,6 +99,7 @@ export function createAliasMiddleware() {
 
 export async function __aliasRefreshForTest() {
   // 测试用途：主动刷新缓存
-  cache = { data: null, expires: 0 }
+  cache = { data: null, expires: 0, botId: null }
+  botIdCache = { id: null, expires: 0 }
   return loadAliasConfig()
 }

@@ -1,5 +1,9 @@
 // Minimal Telegraf bot with Chinese commands and local proxy support
 import 'dotenv/config'
+// 默认使用中国时区（如未由环境变量指定）
+if (!process.env.TZ) {
+  process.env.TZ = 'Asia/Shanghai'
+}
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,8 +13,8 @@ import dotenv from 'dotenv'
 import { Telegraf, Markup } from 'telegraf'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { getChat, safeCalculate, cleanupInactiveChats } from './state.js'
-import { prisma } from '../lib/db.ts'
-import { ensureDefaultFeatures } from './constants.ts'
+import { prisma } from '../lib/db.js'
+import { ensureDefaultFeatures } from './constants.js'
 import { 
   getGlobalDailyCutoffHour, 
   formatMoney, 
@@ -23,7 +27,10 @@ import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPer
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
 import { createAliasMiddleware } from './alias-middleware.js'
+import logger from './logger.js'
 
+logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
+logger.hijackConsole()
 const BOT_TOKEN = process.env.BOT_TOKEN
 if (!BOT_TOKEN) {
   // fallback: try load config/env next to repo root
@@ -358,7 +365,7 @@ bot.on('message', async (ctx, next) => {
             // ⚠️ 不在这里创建邀请记录，避免与 my_chat_member 事件重复
             // 邀请记录只在 my_chat_member 事件中创建
             
-            // 自动授权（并行执行，优化性能）
+            // 自动授权：先确保 Chat 与 Setting 存在，再为群聊创建功能开关，避免外键错误
             await Promise.all([
               prisma.chat.upsert({
                 where: { id: chatId },
@@ -380,9 +387,12 @@ bot.on('message', async (ctx, next) => {
                 where: { chatId },
                 create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
                 update: {},
-              }),
-              ensureDefaultFeatures(chatId, prisma) // 🔥 自动开启所有功能开关
+              })
             ])
+            // 仅对群聊创建默认功能开关（chatId 以 '-' 开头），避免私聊外键冲突
+            if (String(chatId).startsWith('-')) {
+              await ensureDefaultFeatures(chatId, prisma)
+            }
             
             console.log('[message][auto-authorized]', { chatId, userId })
           } else {
@@ -570,7 +580,14 @@ bot.use(async (ctx, next) => {
   try {
     if (chatState && ctx.from?.id) {
       const uname = ctx.from?.username ? `@${ctx.from.username}` : null
-      if (uname) chatState.userIdByUsername.set(uname, ctx.from.id)
+      if (uname) {
+        if (chatState.userIdByUsername.size > 5000) {
+          const it = chatState.userIdByUsername.keys()
+          const first = it.next().value
+          if (first) chatState.userIdByUsername.delete(first)
+        }
+        chatState.userIdByUsername.set(uname, ctx.from.id)
+      }
       if (uname && chatState.operators.has(uname)) chatState.operatorIds.add(ctx.from.id)
     }
   } catch {}
@@ -621,6 +638,63 @@ bot.use(async (ctx, next) => {
     return
   }
   return next()
+})
+
+// ===== 自定义指令触发（按 bot 维度） =====
+const CUSTOM_CMDS_CACHE = {
+  map: null, // Record<string, { text?: string; imageUrl?: string }>
+  ts: 0,
+}
+
+async function loadCustomCommandsForBot(botId) {
+  // 5分钟缓存
+  const now = Date.now()
+  if (CUSTOM_CMDS_CACHE.map && now - CUSTOM_CMDS_CACHE.ts < 5 * 60 * 1000) return CUSTOM_CMDS_CACHE.map
+  try {
+    const key = `customcmds:bot:${botId}`
+    const row = await prisma.globalConfig.findUnique({ where: { key } })
+    let map = {}
+    if (row?.value) {
+      try { map = JSON.parse(String(row.value) || '{}') } catch {}
+    }
+    CUSTOM_CMDS_CACHE.map = map
+    CUSTOM_CMDS_CACHE.ts = now
+    return map
+  } catch {
+    return {}
+  }
+}
+
+bot.on('text', async (ctx, next) => {
+  try {
+    const text = (ctx.message?.text || '').trim()
+    if (!text) return next()
+    const botId = await ensureCurrentBotId()
+    const map = await loadCustomCommandsForBot(botId)
+    if (!map || typeof map !== 'object') return next()
+    const key = text.toLowerCase()
+    const item = map[key]
+    if (!item) return next()
+
+    const chatId = String(ctx.chat?.id || '')
+    // 简洁日志（命中）
+    console.log('[customcmd][hit]', { chatId, name: key })
+
+    if (item.imageUrl && item.text) {
+      await ctx.replyWithPhoto(item.imageUrl, { caption: item.text })
+      return
+    } else if (item.imageUrl) {
+      await ctx.replyWithPhoto(item.imageUrl)
+      return
+    } else if (item.text) {
+      await ctx.reply(item.text)
+      return
+    }
+    return next()
+  } catch (e) {
+    console.error('[customcmd][error]', e?.message || e)
+    return next()
+  }
 })
 
 // 机器人成员状态变更：加入/被移除群
@@ -1382,23 +1456,7 @@ bot.hears(/^显示操作人$/i, async (ctx) => {
   await ctx.reply('操作人列表：\n' + list.join('\n'))
 })
 
-// 模式相关（显示模式、人民币模式、佣金模式）
-bot.hears(/^显示模式[123456]$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const m = ctx.message.text.match(/(\d)/)
-  const mode = Number(m[1])
-  chat.displayMode = mode
-  const modeDesc = {
-    1: '最近3笔',
-    2: '最近5笔',
-    3: '仅总计',
-    4: '最近10笔',
-    5: '最近20笔',
-    6: '显示全部'
-  }
-  await ctx.reply(`显示模式已切换为 ${mode}（${modeDesc[mode] || '未知模式'}）`)
-})
+// 模式相关已迁移至 handlers/modes.js
 
 // 🔥 撤销入款：撤销最近一条入款记录
 bot.hears(/^撤销入款$/i, async (ctx) => {
@@ -1654,109 +1712,9 @@ bot.use(async (ctx, next) => {
   return next()
 })
 
-bot.hears(/^人民币模式$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  chat.rmbMode = true
-  await ctx.reply('已切换为人民币模式（仅显示 RMB）')
-})
+// 单显/双显模式已迁移至 handlers/modes.js
 
-bot.hears(/^(双显模式|显示两列)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  chat.rmbMode = false
-  await ctx.reply('已切换为双显模式（RMB | USDT）')
-})
-
-// 记账模式切换（兼容旧指令）
-bot.hears(/^(累计模式|结转模式)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-  }
-  const chatId = await ensureDbChat(ctx)
-  await updateSettings(chatId, { accountingMode: 'CARRY_OVER' })
-  await ctx.reply('已切换为【累计模式】\n未下发金额将累计到次日，持续统计直到完全下发。')
-})
-
-// 🔥 单笔订单模式（兼容旧指令）
-bot.hears(/^(单笔订单|单笔订单模式)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-  }
-  const chatId = await ensureDbChat(ctx)
-  await updateSettings(chatId, { accountingMode: 'SINGLE_BILL_PER_DAY' })
-  await ctx.reply('已切换为【单笔订单模式】\n每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单。')
-})
-
-bot.hears(/^(清零模式|按日清零)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-  }
-  const chatId = await ensureDbChat(ctx)
-  await updateSettings(chatId, { accountingMode: 'DAILY_RESET' })
-  await ctx.reply('已切换为【清零模式】\n每日账单独立计算，不结转历史未下发金额。')
-})
-
-// 🔥 设置记账模式指令（管理员/白名单用户）
-bot.hears(/^设置记账模式\s+(累计模式|清零模式|单笔订单)$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-    return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-  }
-  const chatId = await ensureDbChat(ctx)
-  const mode = ctx.match[1]
-  let accountingMode = 'DAILY_RESET'
-  let modeName = '清零模式'
-  let desc = '每日账单独立计算，不结转历史未下发金额。'
-  
-  if (mode === '累计模式') {
-    accountingMode = 'CARRY_OVER'
-    modeName = '累计模式'
-    desc = '未下发金额将累计到次日，持续统计直到完全下发。'
-  } else if (mode === '单笔订单') {
-    accountingMode = 'SINGLE_BILL_PER_DAY'
-    modeName = '单笔订单模式'
-    desc = '每天只有一笔订单，不支持保存账单，但支持删除账单。日切时会自动关闭昨天的账单。'
-  }
-  
-  await updateSettings(chatId, { accountingMode })
-  await ctx.reply(`✅ 已切换为【${modeName}】\n${desc}`, { ...(await buildInlineKb(ctx)) })
-})
-
-bot.hears(/^查看记账模式$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  const chatId = await ensureDbChat(ctx)
-  const settings = await prisma.setting.findUnique({ where: { chatId } })
-  const mode = settings?.accountingMode || 'DAILY_RESET'
-  let modeName = '清零模式（按日清零）'
-  let desc = '当前模式：每日账单独立计算，不结转历史'
-  
-  if (mode === 'CARRY_OVER') {
-    modeName = '累计模式（结转未下发）'
-    desc = '当前模式：未下发金额会累计到次日继续统计'
-  } else if (mode === 'SINGLE_BILL_PER_DAY') {
-    modeName = '单笔订单模式'
-    desc = '当前模式：每天只有一笔订单，不支持保存，但支持删除。日切时会自动关闭昨天的账单。'
-  }
-  
-  await ctx.reply(`${modeName}\n${desc}`)
-})
-
-bot.hears(/^佣金\s*模式$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  chat.commissionMode = true
-  await ensureDbChat(ctx)
-  await ctx.reply('已开启佣金模式（在回复某人消息时输入 +N 或 -N 调整佣金）')
-})
+// 记账/佣金模式已迁移至 handlers/modes.js
 
 // 在"回复某个用户的消息"时，用 +N/-N 调整佣金
 bot.on('text', async (ctx, next) => {
@@ -2027,49 +1985,56 @@ bot.hears(/^机器人退群$/i, async (ctx) => {
 
 // 🔥 action 处理器已移至 handlers/core.js
 
-// 🔥 每小时自动更新实时汇率的定时任务
+// 🔥 每小时自动更新实时汇率的定时任务（按币种聚合，USDT为基准）
 async function updateAllRealtimeRates() {
   try {
-    // 🔥 优化：提前获取 botId，避免在循环中重复查询
     const botId = await ensureCurrentBotId()
-    
-    // 获取最新实时汇率
-    const rate = await fetchRealtimeRateUSDTtoCNY()
-    if (!rate) {
-      return
-    }
-    
-    // 🔥 获取所有群组（包括没有设置实时汇率的）
+    // 获取所有群组设置
     const allSettings = await prisma.setting.findMany({
-      select: { chatId: true, fixedRate: true, realtimeRate: true }
+      select: { chatId: true, fixedRate: true }
     })
-    
-    // 🔥 更新所有使用实时汇率的群组（fixedRate为null的）
-    const chatIdsToUpdate = allSettings
-      .filter(s => !s.fixedRate) // 只有没有固定汇率的才更新
-      .map(s => s.chatId)
-    
-    if (chatIdsToUpdate.length > 0) {
-      await prisma.setting.updateMany({
-        where: { 
-          chatId: { in: chatIdsToUpdate }
-        },
-        data: { realtimeRate: rate }
-      })
-      
-      // 🔥 批量更新内存中的汇率
-      for (const setting of allSettings) {
-        if (!setting.fixedRate) {
-          const chat = getChat(botId, setting.chatId)
-          if (chat) {
-            chat.realtimeRate = rate
-          }
-        }
+    if (!allSettings || allSettings.length === 0) return
+
+    // 查出每个 chat 的 currencyCode（GlobalConfig），默认 cny
+    const codes = new Map() // chatId -> code
+    const uniqueCodes = new Set()
+    for (const s of allSettings) {
+      try {
+        const row = await prisma.globalConfig.findUnique({ where: { key: `currency:${s.chatId}` }, select: { value: true } })
+        const code = (row?.value || 'cny').toString().trim().toLowerCase() || 'cny'
+        codes.set(s.chatId, code)
+        if (!s.fixedRate) uniqueCodes.add(code)
+      } catch {
+        codes.set(s.chatId, 'cny')
+        if (!s.fixedRate) uniqueCodes.add('cny')
       }
     }
-    
+
+    // 为每种币种获取一次 USDT->fiat 汇率
+    const { fetchUsdtToFiatRate } = await import('./helpers.js')
+    const rateByCode = new Map()
+    for (const code of uniqueCodes) {
+      const r = await fetchUsdtToFiatRate(code)
+      if (r) rateByCode.set(code, r)
+    }
+
+    // 批量更新数据库与内存
+    let updated = 0
+    for (const s of allSettings) {
+      if (s.fixedRate) continue
+      const code = codes.get(s.chatId) || 'cny'
+      const r = rateByCode.get(code)
+      if (!r) continue
+      await prisma.setting.update({ where: { chatId: s.chatId }, data: { realtimeRate: r } })
+      const chat = getChat(botId, s.chatId)
+      if (chat) {
+        chat.realtimeRate = r
+      }
+      updated++
+    }
+
     if (process.env.DEBUG_BOT === 'true') {
-      console.log(`[定时任务] 汇率更新完成，新汇率: ${rate}，更新了 ${chatIdsToUpdate.length} 个群组`)
+      console.log(`[定时任务] 汇率更新完成，按币种更新 ${updated} 个群组`)
     }
   } catch (e) {
     console.error('[定时任务] 更新汇率失败:', e)

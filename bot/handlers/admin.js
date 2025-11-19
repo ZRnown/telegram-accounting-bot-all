@@ -1,7 +1,7 @@
 // 管理员相关命令处理器
-import { prisma } from '../../lib/db.ts'
+import { prisma } from '../../lib/db.js'
 import { ensureDbChat } from '../database.js'
-import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, getEffectiveRate } from '../helpers.js'
+import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, getEffectiveRate, getDisplayCurrencySymbol } from '../helpers.js'
 import { setGlobalDailyCutoffHour } from '../utils.js'
 import { getChat } from '../state.js'
 
@@ -45,6 +45,45 @@ export function registerBotLeave(bot) {
 }
 
 /**
+ * 群列表：列出当前机器人所在的群
+ */
+export function registerListGroups(bot) {
+  bot.hears(/^群列表$/i, async (ctx) => {
+    // 仅在私聊或群内管理员/白名单可用
+    try {
+      const isPrivate = ctx.chat?.type === 'private'
+      if (!isPrivate) {
+        // 在群聊中，要求有权限
+        const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
+        if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+          return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
+        }
+      }
+
+      // 查询已允许运行的群
+      const chats = await prisma.chat.findMany({
+        where: { allowed: true },
+        select: { id: true, title: true, status: true },
+        orderBy: [{ title: 'asc' }]
+      })
+
+      if (!chats || chats.length === 0) {
+        return ctx.reply('当前机器人尚未加入任何已授权的群。')
+      }
+
+      // 限制输出长度，最多显示前 50 个（仅展示群名称）
+      const list = chats.slice(0, 50).map(c => `• ${c.title || '(无标题)'}`)
+      let text = ' 📜 群列表（前50）\n\n' + list.join('\n')
+      if (chats.length > 50) text += `\n\n... 以及其他 ${chats.length - 50} 个群`
+      await ctx.reply(text)
+    } catch (e) {
+      console.error('[群列表] 失败', e)
+      await ctx.reply('❌ 查询失败，请稍后重试')
+    }
+  })
+}
+
+/**
  * 查询汇率/映射表
  */
 export function registerQueryRate(bot, ensureChat) {
@@ -69,11 +108,13 @@ export function registerQueryRate(bot, ensureChat) {
       if (query) {
         const rate = parseFloat(query)
         if (!isNaN(rate) && rate > 0) {
-          rateText = `查询汇率 ${rate} 的映射关系：\n` +
-            `• 1 USDT = ${rate} CNY\n` +
-            `• 1 CNY = ${(1 / rate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / rate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * rate).toFixed(2)} CNY`
+          const code = (ensureChat(ctx)?.currencyCode || 'cny')
+          const sym = getDisplayCurrencySymbol(code)
+          rateText = `查询汇率 ${rate.toFixed(2)} 的映射关系：\n` +
+            `• 1 USDT = ${rate.toFixed(2)} ${sym}\n` +
+            `• 1 ${code.toUpperCase()} = ${(1 / rate).toFixed(6)} USDT\n` +
+            `• 100 ${code.toUpperCase()} = ${(100 / rate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * rate).toFixed(2)} ${sym}`
         } else {
           rateText = `❌ 无效的汇率值：${query}`
         }
@@ -83,27 +124,28 @@ export function registerQueryRate(bot, ensureChat) {
         const realtimeRate = chat?.realtimeRate ?? null
         const feePercent = setting?.feePercent || 0
         const displayRate = effectiveRate ?? null
-        
+        const code = (chat?.currencyCode || 'cny')
+        const sym = getDisplayCurrencySymbol(code)
         rateText = ' 💱 汇率映射表 \n\n'
         
         if (fixedRate && displayRate) {
           rateText += `【固定汇率】\n` +
-            `• 1 USDT = ${displayRate} CNY\n` +
-            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
+            `• 1 USDT = ${Number(displayRate).toFixed(2)} ${sym}\n` +
+            `• 1 ${code.toUpperCase()} = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 ${code.toUpperCase()} = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} ${sym}\n\n`
         } else if (realtimeRate && displayRate) {
           rateText += `【实时汇率】\n` +
-            `• 1 USDT = ${displayRate} CNY\n` +
-            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
+            `• 1 USDT = ${Number(displayRate).toFixed(2)} ${sym}\n` +
+            `• 1 ${code.toUpperCase()} = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 ${code.toUpperCase()} = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} ${sym}\n\n`
         } else if (displayRate) {
           rateText += `【当前汇率】\n` +
-            `• 1 USDT = ${displayRate} CNY\n` +
-            `• 1 CNY = ${(1 / displayRate).toFixed(6)} USDT\n` +
-            `• 100 CNY = ${(100 / displayRate).toFixed(2)} USDT\n` +
-            `• 100 USDT = ${(100 * displayRate).toFixed(2)} CNY\n\n`
+            `• 1 USDT = ${Number(displayRate).toFixed(2)} ${sym}\n` +
+            `• 1 ${code.toUpperCase()} = ${(1 / displayRate).toFixed(6)} USDT\n` +
+            `• 100 ${code.toUpperCase()} = ${(100 / displayRate).toFixed(2)} USDT\n` +
+            `• 100 USDT = ${(100 * displayRate).toFixed(2)} ${sym}\n\n`
         } else {
           rateText += `⚠️ 未设置汇率\n\n`
         }

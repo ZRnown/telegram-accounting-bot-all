@@ -1,40 +1,77 @@
 // 辅助函数模块
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
 import { formatMoney, isPublicUrl } from './utils.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 
 /**
- * 获取实时汇率（简化版本）
+ * 获取货币符号或简码
  */
-export async function fetchRealtimeRateUSDTtoCNY() {
-  try {
-    const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny', { 
-      method: 'GET',
-      signal: AbortSignal.timeout(5000)
-    })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    const rate = Number(data?.tether?.cny)
-    if (!rate || !Number.isFinite(rate)) throw new Error('Invalid rate')
-    return Number(rate.toFixed(2))
-  } catch (e) {
-    // 备用方案
-    try {
-      const resp = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=CNY', { 
-        method: 'GET',
-        signal: AbortSignal.timeout(5000)
-      })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const data = await resp.json()
-      const rate = Number(data?.rates?.CNY)
-      if (!rate || !Number.isFinite(rate)) throw new Error('Invalid rate')
-      return Number(rate.toFixed(2))
-    } catch {
-      return null
-    }
+export function getDisplayCurrencySymbol(code = 'cny') {
+  const lc = String(code || '').toLowerCase()
+  switch (lc) {
+    case 'cny': return '¥'
+    case 'usd': return '$'
+    case 'hkd': return 'HK$'
+    case 'eur': return '€'
+    case 'jpy': return '¥'
+    case 'twd': return 'NT$'
+    case 'krw': return '₩'
+    case 'gbp': return '£'
+    case 'aud': return 'A$'
+    case 'chf': return 'CHF'
+    case 'cad': return 'C$'
+    case 'nzd': return 'NZ$'
+    default: return lc.toUpperCase()
   }
 }
+
+/**
+ * 获取 USDT -> 目标法币 的汇率，保留两位小数
+ * 主源：jsdelivr；备源：Cloudflare
+ */
+export async function fetchUsdtToFiatRate(code = 'cny') {
+  const lc = String(code || 'cny').toLowerCase()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const url = 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usdt.json'
+    const resp = await fetch(url, { method: 'GET', signal: controller.signal })
+    if (resp.ok) {
+      const data = await resp.json()
+      const rate = Number(data?.usdt?.[lc])
+      if (Number.isFinite(rate) && rate > 0) return Number(rate.toFixed(2))
+    }
+    // fallthrough to fallback
+  } catch {
+    // ignore and try fallback
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  const controller2 = new AbortController()
+  const timeout2 = setTimeout(() => controller2.abort(), 5000)
+  try {
+    const url2 = 'https://latest.currency-api.pages.dev/v1/currencies/usdt.json'
+    const resp2 = await fetch(url2, { method: 'GET', signal: controller2.signal })
+    if (resp2.ok) {
+      const data2 = await resp2.json()
+      const rate2 = Number(data2?.usdt?.[lc])
+      if (Number.isFinite(rate2) && rate2 > 0) return Number(rate2.toFixed(2))
+    }
+  } catch {
+    // ignore
+  } finally {
+    clearTimeout(timeout2)
+  }
+  return null
+}
+
+export async function fetchRealtimeRateUSDTtoCNY() {
+  return await fetchUsdtToFiatRate('cny')
+}
+
+ 
 
 /**
  * 🔥 优化：获取群组的有效汇率（优先使用内存，避免重复查询）

@@ -1,5 +1,5 @@
 // 账单相关命令处理器
-import { prisma } from '../../lib/db.ts'
+import { prisma } from '../../lib/db.js'
 import { getChat } from '../state.js'
 import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, getChatDailyCutoffHour } from '../database.js'
 import { buildInlineKb, hasPermissionWithWhitelist } from '../helpers.js'

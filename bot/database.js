@@ -1,5 +1,5 @@
 // 数据库操作模块
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
 import { getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
 
 /**
@@ -234,7 +234,7 @@ export async function updateSettings(chatId, data) {
  */
 export async function syncSettingsToMemory(ctx, chat, chatId) {
   try {
-    const [settings, needOperators] = await Promise.all([
+    const [settings, needOperators, currencyCfg] = await Promise.all([
       prisma.setting.findUnique({ 
         where: { chatId },
         select: {
@@ -250,10 +250,14 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
         const lastSyncTime = chat._operatorsLastSync || 0
         const now = Date.now()
         return (now - lastSyncTime > 5 * 60 * 1000 || chat.operators.size === 0)
-      })() : Promise.resolve(false)
+      })() : Promise.resolve(false),
+      prisma.globalConfig.findUnique({ where: { key: `currency:${chatId}` } }).catch(() => null)
     ])
     
     if (settings && chat) {
+      // 货币代码（默认 cny）
+      const code = (currencyCfg?.value || 'cny').toString().trim().toLowerCase() || 'cny'
+      chat.currencyCode = code
       if (typeof settings.feePercent === 'number') chat.feePercent = settings.feePercent
       // 🔥 修复：优先使用数据库中的汇率，确保重启后能恢复
       if (settings.fixedRate != null) {
@@ -265,8 +269,8 @@ export async function syncSettingsToMemory(ctx, chat, chatId) {
       } else {
         // 🔥 新增：如果数据库中没有汇率（既没有fixedRate也没有realtimeRate），自动获取实时汇率并保存
         try {
-          const { fetchRealtimeRateUSDTtoCNY } = await import('./helpers.js')
-          const rate = await fetchRealtimeRateUSDTtoCNY()
+          const { fetchUsdtToFiatRate } = await import('./helpers.js')
+          const rate = await fetchUsdtToFiatRate(code)
           if (rate) {
             chat.realtimeRate = rate
             chat.fixedRate = null
@@ -468,3 +472,25 @@ export async function performAutoDailyCutoff(getChat) {
   }
 }
 
+
+/**
+ * 读取/写入群组货币代码（使用 GlobalConfig）
+ */
+export async function getChatCurrencyCode(chatId) {
+  try {
+    const row = await prisma.globalConfig.findUnique({ where: { key: `currency:${chatId}` }, select: { value: true } })
+    const code = (row?.value || 'cny').toString().trim().toLowerCase() || 'cny'
+    return code
+  } catch {
+    return 'cny'
+  }
+}
+
+export async function setChatCurrencyCode(chatId, code) {
+  const val = (code || 'cny').toString().trim().toLowerCase() || 'cny'
+  await prisma.globalConfig.upsert({
+    where: { key: `currency:${chatId}` },
+    create: { key: `currency:${chatId}`, value: val, description: `Currency code for chat ${chatId}`, updatedBy: 'system' },
+    update: { value: val, description: `Currency code for chat ${chatId}`, updatedBy: 'system', updatedAt: new Date() },
+  })
+}

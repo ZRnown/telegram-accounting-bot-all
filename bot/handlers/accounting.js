@@ -1,5 +1,5 @@
 // 记账相关命令处理器
-import { prisma } from '../../lib/db.ts'
+import { prisma } from '../../lib/db.js'
 import { parseAmountAndRate } from '../state.js'
 import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettings, syncSettingsToMemory } from '../database.js'
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
@@ -130,7 +130,7 @@ export function registerIncomeWithRemark(bot, ensureChat) {
       if (amount < 0) amountRMB = -amountRMB
     } else {
       amountRMB = amount
-      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
+      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(2)) : undefined
     }
     
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
@@ -222,7 +222,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       amountRMB = rate ? Number((usdt * rate).toFixed(2)) : 0
     } else {
       amountRMB = amount
-      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : undefined
+      usdt = rate ? Number((Math.abs(amountRMB) / rate).toFixed(2)) : undefined
     }
     
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
@@ -502,7 +502,7 @@ export function registerIncome(bot, ensureChat) {
       finalAmountRMB = Number((amountRMB * feeRate).toFixed(2))
       // 如果输入的是USDT，也相应调整
       if (isUSDT && rate) {
-        usdt = Number((Math.abs(finalAmountRMB) / rate).toFixed(1))
+        usdt = Number((Math.abs(finalAmountRMB) / rate).toFixed(2))
       }
     } else {
       finalAmountRMB = amountRMB
@@ -639,7 +639,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       if (usdtValue < 0) amountRMB = -amountRMB
     } else {
       amountRMB = inputValue
-      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
+      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(2)) : 0
       if (amountRMB < 0) usdtValue = -usdtValue
     }
     
@@ -727,7 +727,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       if (usdtValue < 0) amountRMB = -amountRMB
     } else {
       amountRMB = inputValue
-      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(1)) : 0
+      usdtValue = rate ? Number((Math.abs(amountRMB) / rate).toFixed(2)) : 0
       if (amountRMB < 0) usdtValue = -usdtValue
     }
     

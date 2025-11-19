@@ -1,5 +1,5 @@
 // OKX相关命令处理器
-import { getOKXC2CSellers } from '../../lib/okx-api.ts'
+import { getOKXC2CSellers } from '../../lib/okx-api.js'
 
 /**
  * 格式化OKX价格显示

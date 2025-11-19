@@ -1,8 +1,8 @@
 // 中间件模块
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
 import { ensureDbChat } from './database.js'
 import { LRUCache } from './lru-cache.js'
-import { DEFAULT_FEATURES } from './constants.ts'
+import { DEFAULT_FEATURES } from './constants.js'
 
 // 功能开关缓存（🔥 内存优化：减少缓存大小）
 const featureCache = new LRUCache(100)

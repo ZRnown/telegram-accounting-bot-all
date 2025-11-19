@@ -1,5 +1,5 @@
 // 格式化函数模块
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
 import { summarize } from './state.js'
 import { formatMoney, getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
 import { checkAndClearIfNewDay } from './database.js'

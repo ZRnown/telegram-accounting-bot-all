@@ -34,6 +34,7 @@ function createInitialChatState() {
     feePercent: 0, // 0-100
     displayMode: 1, // 1 | 2 | 3
     rmbMode: false,
+    currencyCode: 'cny',
     commissionMode: false,
     commissions: new Map(), // username -> number - 会定期清理
     muteMode: false,

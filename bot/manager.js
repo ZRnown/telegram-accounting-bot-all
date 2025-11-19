@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import dotenv from 'dotenv'
-import { prisma } from '../lib/db.ts'
+import { prisma } from '../lib/db.js'
+import logger from './logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -17,6 +18,8 @@ if (!process.env.DATABASE_URL) {
   }
 }
 
+logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
+logger.hijackConsole()
 console.log('[manager] DATABASE_URL=', process.env.DATABASE_URL)
 
 const children = new Map() // botId -> ChildProcess

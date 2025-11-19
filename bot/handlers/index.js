@@ -14,6 +14,9 @@ import {
   registerSetRealtimeRate,
   registerRefreshRate,
   registerShowRate,
+  registerSetCurrency,
+  registerShowCurrency,
+  registerSetDailyCutoff,
   registerOverDepositLimit,
   registerCalculatorToggle
 } from './settings.js'
@@ -29,7 +32,9 @@ import {
   registerAllBill
 } from './bill.js'
 import { registerZ0, registerLZ, registerLW, registerLK } from './okx.js'
-import { registerBotLeave, registerQueryRate, registerAdminInfo } from './admin.js'
+import { registerCustomCommands } from './custom.js'
+import { registerDisplayMode, registerAccountingModes, registerCommissionMode } from './modes.js'
+import { registerBotLeave, registerQueryRate, registerAdminInfo, registerListGroups } from './admin.js'
 import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
 
 /**
@@ -43,6 +48,8 @@ export function registerAllHandlers(bot, ensureChat) {
   registerDashboard(bot)
   registerCommandMenuAction(bot)
   registerViewBill(bot, ensureChat)
+  // 自定义指令（文本+图片）
+  registerCustomCommands(bot, ensureChat)
   
   // 记账相关
   registerStartAccounting(bot, ensureChat)
@@ -72,9 +79,16 @@ export function registerAllHandlers(bot, ensureChat) {
   registerSetRealtimeRate(bot, ensureChat)
   registerRefreshRate(bot, ensureChat)
   registerShowRate(bot, ensureChat)
+  registerSetCurrency(bot, ensureChat)
+  registerShowCurrency(bot, ensureChat)
+  registerSetDailyCutoff(bot, ensureChat)
   // registerGlobalCutoff - 已删除，改为后台设置
   registerOverDepositLimit(bot, ensureChat)
   registerCalculatorToggle(bot, ensureChat)
+  // 模式相关
+  registerDisplayMode(bot, ensureChat)
+  registerAccountingModes(bot, ensureChat)
+  registerCommissionMode(bot, ensureChat)
   
   // OKX相关
   registerZ0(bot)
@@ -86,5 +100,6 @@ export function registerAllHandlers(bot, ensureChat) {
   registerBotLeave(bot)
   registerQueryRate(bot, ensureChat)
   registerAdminInfo(bot)
+  registerListGroups(bot)
 }
 
