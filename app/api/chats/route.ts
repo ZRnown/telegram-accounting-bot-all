@@ -1,8 +1,11 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const { searchParams } = new URL(req.url)
     const botId = searchParams.get('botId') || undefined
     const status = searchParams.get('status') || undefined
@@ -65,9 +68,9 @@ export async function GET(req: NextRequest) {
     // 🔥 移除实时验证，直接返回数据（提升加载速度）
     // 验证逻辑已移除，避免阻塞响应和导致群组消失
     
-    return Response.json({ items: chats })
+    return NextResponse.json({ items: chats })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

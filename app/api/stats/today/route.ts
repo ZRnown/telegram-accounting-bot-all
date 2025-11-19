@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 /**
  * 日切时间函数 - 支持自定义小时
@@ -100,6 +101,10 @@ function formatTimeLocal(d: Date) {
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'stats_today', 60, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { searchParams } = new URL(req.url)
     const dateStr = searchParams.get('date') // YYYY-MM-DD
     const chatIdParam = searchParams.get('chatId')
@@ -114,7 +119,7 @@ export async function GET(req: NextRequest) {
       chatId = latestBill?.chatId || ''
     }
     if (!chatId) {
-      return Response.json({
+      return NextResponse.json({
         billNumber: 0,
         totalIncome: 0,
         exchangeRate: 0,
@@ -438,7 +443,7 @@ export async function GET(req: NextRequest) {
       billLabels = billsData.map((_: any, idx: number) => `第 ${idx + 1} 笔`)
     }
 
-    return Response.json({
+    return NextResponse.json({
       billNumber: billsAgg.length,
       bills: billsAgg,
       billLabels: billLabels, // 🔥 账单标签（用于显示"昨日第X笔订单"）
@@ -480,6 +485,6 @@ export async function GET(req: NextRequest) {
     })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

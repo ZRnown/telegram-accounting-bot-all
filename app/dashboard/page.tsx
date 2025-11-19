@@ -98,15 +98,23 @@ function DashboardPageInner() {
   useEffect(() => {
     setMounted(true)
     // Require auth only for admin homepage (no chatId)
-    const token = localStorage.getItem("auth_token")
-    setIsAdmin(!!token)
-    if (!chatId && !token) {
-      router.push("/")
-    }
-    // 加载白名单
-    if (!chatId && token) {
-      loadWhitelistedUsers()
-    }
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' })
+        if (res.ok) {
+          setIsAdmin(true)
+          if (!chatId) {
+            loadWhitelistedUsers()
+          }
+        } else {
+          setIsAdmin(false)
+          if (!chatId) router.push('/')
+        }
+      } catch {
+        setIsAdmin(false)
+        if (!chatId) router.push('/')
+      }
+    })()
   }, [router, chatId])
 
   // 🔥 初始化时根据日切时间获取当前应该查看的日期
@@ -591,9 +599,9 @@ function DashboardPageInner() {
     router.push('/summary')
   }, [router])
 
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem("auth_token")
-    router.push("/")
+  const handleLogout = useCallback(async () => {
+    try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {}
+    router.push('/')
   }, [router])
 
   // 🔥 处理账单数据变化（仅保存时间数据）

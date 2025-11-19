@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db.js'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 function normalizeName(name: string) {
   return (name || '').trim().toLowerCase()
@@ -11,6 +12,10 @@ function buildKey(botId: string) {
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'cc_get', 60, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { searchParams } = new URL(req.url)
     const botId = (searchParams.get('botId') || '').trim()
     if (!botId) return NextResponse.json({ error: 'botId is required' }, { status: 400 })
@@ -32,6 +37,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'cc_post', 30, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const body = await req.json().catch(() => ({}))
     const botId = String(body.botId || '').trim()
     const rawName = String(body.name || '')
@@ -63,6 +72,10 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'cc_del', 30, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const body = await req.json().catch(() => ({}))
     const botId = String(body.botId || '').trim()
     const rawName = String(body.name || '')

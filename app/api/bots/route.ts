@@ -1,8 +1,11 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     // 🔥 内存优化：减少查询字段，移除 featureFlags（已废弃，改用 chatFeatureFlags）
     // 减少 chats 字段查询深度
     const bots = await prisma.bot.findMany({
@@ -23,7 +26,7 @@ export async function GET() {
     
     // 🔥 尝试从Telegram API获取机器人真实名字
     const botsWithRealName = await Promise.all(
-      bots.map(async (bot) => {
+      bots.map(async (bot: any) => {
         if (!bot.token) {
           return { ...bot, realName: null }
         }
@@ -49,10 +52,10 @@ export async function GET() {
       })
     )
     
-    return Response.json({ items: botsWithRealName })
+    return NextResponse.json({ items: botsWithRealName })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
 

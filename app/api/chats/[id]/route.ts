@@ -1,9 +1,14 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 import { ProxyAgent } from 'undici'
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'chat_patch', 30, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { id } = await params
     const body = await req.json().catch(() => ({})) as {
       allowed?: boolean
@@ -32,12 +37,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           where: { id: body.botId }, 
           select: { token: true, featureFlags: { select: { feature: true, enabled: true } } } 
         })
-        if (!bot?.token) return new Response('机器人不存在', { status: 400 })
+        if (!bot?.token) return new NextResponse('机器人不存在', { status: 400 })
         const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
         const resp = await fetch(getChatUrl, { method: 'GET' })
-        if (!resp.ok) return new Response('机器人未加入该群，无法绑定', { status: 400 })
+        if (!resp.ok) return new NextResponse('机器人未加入该群，无法绑定', { status: 400 })
         const json = await resp.json().catch(() => null)
-        if (!json?.ok) return new Response('机器人未加入该群，无法绑定', { status: 400 })
+        if (!json?.ok) return new NextResponse('机器人未加入该群，无法绑定', { status: 400 })
         data.bot = { connect: { id: body.botId } }
         
         // 自动为该群启用该机器人的所有功能
@@ -59,7 +64,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
     }
-    if (Object.keys(data).length === 0) return new Response('Bad Request', { status: 400 })
+    if (Object.keys(data).length === 0) return new NextResponse('Bad Request', { status: 400 })
 
     const updated = await prisma.chat.update({
       where: { id },
@@ -72,15 +77,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         botId: true,
       },
     })
-    return Response.json(updated)
+    return NextResponse.json(updated)
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const { id } = await params
     const chat = await prisma.chat.findUnique({
       where: { id },
@@ -95,20 +102,24 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
         featureFlags: { select: { feature: true, enabled: true } },
       },
     })
-    if (!chat) return new Response('Not Found', { status: 404 })
-    return Response.json(chat)
+    if (!chat) return new NextResponse('Not Found', { status: 404 })
+    return NextResponse.json(chat)
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
 
-export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'chat_delete', 10, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { id } = await params
     // Ensure chat exists
     const exists = await prisma.chat.findUnique({ where: { id }, select: { id: true } })
-    if (!exists) return new Response('Not Found', { status: 404 })
+    if (!exists) return new NextResponse('Not Found', { status: 404 })
 
     // 🔥 查询所有启用的机器人，检查它们是否在该群中，如果是则让它们退群
     const bots = await prisma.bot.findMany({
@@ -117,7 +128,7 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
     })
     
     // 🔥 并发让所有在该群中的机器人退群
-    const leavePromises = bots.map(async (bot) => {
+    const leavePromises = bots.map(async (bot: any) => {
       if (!bot.token) return
       try {
         // 先检查机器人是否在该群中
@@ -162,9 +173,9 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
 
     // Finally delete chat
     await prisma.chat.delete({ where: { id } })
-    return new Response(null, { status: 204 })
+    return new NextResponse(null, { status: 204 })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

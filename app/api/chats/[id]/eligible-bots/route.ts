@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 // 简易内存缓存：key=chatId，值为 { expires, items }
 type EligibleItem = { id: string; name: string }
@@ -8,13 +9,17 @@ const TTL_MS = 5 * 60_000 // 🔥 增加到5分钟缓存，减少验证频率
 const CONCURRENCY = 3 // 🔥 适度增加并发数，提升速度
 const REQUEST_TIMEOUT_MS = 1000 // 🔥 1秒超时，快速失败
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'eligible_bots', 60, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { id } = await params
     const now = Date.now()
     const hit = cache.get(id)
     if (hit && hit.expires > now) {
-      return Response.json({ items: hit.items })
+      return NextResponse.json({ items: hit.items })
     }
     // 仅考虑启用中的机器人
     const bots = await prisma.bot.findMany({
@@ -54,9 +59,9 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
       cache.set(id, { expires: now + TTL_MS, items: result })
     }
 
-    return Response.json({ items: result })
+    return NextResponse.json({ items: result })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

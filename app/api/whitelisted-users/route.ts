@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 // GET: 获取白名单用户列表
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     // 🔥 优化：直接返回数据，移除 N+1 查询
     const users = await prisma.whitelistedUser.findMany({
       orderBy: { createdAt: 'desc' },
@@ -27,6 +30,10 @@ export async function GET(req: NextRequest) {
 // POST: 添加白名单用户
 export async function POST(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'wlu_post', 20, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const body = await req.json()
     let { userId, username, note } = body
 
@@ -96,6 +103,10 @@ export async function POST(req: NextRequest) {
 // DELETE: 删除白名单用户
 export async function DELETE(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'wlu_del', 20, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const body = await req.json()
     const { userId } = body
 

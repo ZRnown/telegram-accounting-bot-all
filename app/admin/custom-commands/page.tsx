@@ -16,6 +16,8 @@ export default function CustomCommandsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const botId = useMemo(() => (searchParams?.get('botId') || '').trim(), [searchParams])
+  const [mounted, setMounted] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [items, setItems] = useState<Item[]>([])
@@ -52,6 +54,24 @@ export default function CustomCommandsPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    setMounted(true)
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' })
+        if (res.ok) {
+          setIsAdmin(true)
+        } else {
+          setIsAdmin(false)
+          router.push('/')
+        }
+      } catch {
+        setIsAdmin(false)
+        router.push('/')
+      }
+    })()
+  }, [router])
 
   const copy = async (text: string) => {
     try {
@@ -227,8 +247,6 @@ export default function CustomCommandsPage() {
           <div className="flex gap-2">
             <button type="submit" className="px-4 py-2 rounded bg-black text-white disabled:opacity-50" disabled={saving}>{saving ? '保存中...' : '保存'}</button>
             <button type="button" className="px-3 py-2 rounded border" onClick={() => { setFormName(''); setFormText('') }}>重置</button>
-            <button type="button" className="px-3 py-2 rounded border" onClick={() => copy(`添加自定义指令 ${formName || '小十地址'} ${formText || '这里是内容'}`)}>复制TG命令-新增文本</button>
-            <button type="button" className="px-3 py-2 rounded border" onClick={() => copy(`设置自定义图片 ${formName || '小十地址'} ${formImageUrl || 'https://.../img.png'}`)}>复制TG命令-设置图片</button>
           </div>
         </div>
       </form>
@@ -267,16 +285,7 @@ export default function CustomCommandsPage() {
         ))}
       </div>
 
-      <div className="mt-6 text-sm text-gray-600">
-        <div className="font-medium">快速复制 Telegram 指令</div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button className="px-3 py-1.5 border rounded" onClick={() => copy(`添加自定义指令 小十地址 这里是内容`)}>示例：新增/编辑文本</button>
-          <button className="px-3 py-1.5 border rounded" onClick={() => copy(`设置自定义图片 小十地址 https://.../img.png`)}>示例：设置自定义图片</button>
-          <button className="px-3 py-1.5 border rounded" onClick={() => copy(`删除自定义指令 小十地址`)}>示例：删除自定义指令</button>
-          <button className="px-3 py-1.5 border rounded" onClick={() => copy(`自定义指令列表`)}>示例：自定义指令列表</button>
-        </div>
-        <div className="mt-3 text-slate-500">在 Telegram 群/私聊里直接粘贴以上指令，由管理员或被授权成员发送生效。</div>
-      </div>
+      {/* 删除快速复制区域，保持页面简洁 */}
 
       {/* Modal for create/edit */}
       {modalOpen && (

@@ -30,13 +30,14 @@ export function LoginForm() {
         setError('用户名或密码错误')
         return
       }
-      const json = await res.json().catch(() => ({}))
-      if (!json?.token) {
-        setError('登录失败')
-        return
-      }
-      localStorage.setItem('auth_token', json.token)
-      if (json.username) localStorage.setItem('auth_user', json.username)
+      // Cookie-based session: simply redirect; optionally verify
+      try {
+        const me = await fetch('/api/auth/me', { cache: 'no-store' })
+        if (!me.ok) {
+          setError('登录失败')
+          return
+        }
+      } catch {}
       router.push('/dashboard')
     } catch {
       setError('网络错误，请稍后重试')

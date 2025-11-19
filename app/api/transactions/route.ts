@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 function parseDate(s: string | null) {
   if (!s) return null
@@ -9,6 +10,8 @@ function parseDate(s: string | null) {
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const { searchParams } = new URL(req.url)
     const chatId = searchParams.get('chatId') || undefined
     const type = (searchParams.get('type') || 'all').toLowerCase() as 'all'|'income'|'dispatch'
@@ -46,10 +49,10 @@ export async function GET(req: NextRequest) {
       where: billWhere,
       select: { id: true }
     })
-    const billIds = bills.map(b => b.id)
+    const billIds = bills.map((b: any) => b.id)
 
     if (billIds.length === 0) {
-      return Response.json({ page, size, total: 0, items: [] })
+      return NextResponse.json({ page, size, total: 0, items: [] })
     }
 
     // 构建 BillItem 查询条件
@@ -72,7 +75,7 @@ export async function GET(req: NextRequest) {
     ])
 
     // 格式化数据
-    const formattedItems = items.map((item) => {
+    const formattedItems = items.map((item: any) => {
       if (item.type === 'INCOME') {
         return {
           id: item.id,
@@ -102,9 +105,9 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return Response.json({ page, size, total, items: formattedItems })
+    return NextResponse.json({ page, size, total, items: formattedItems })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

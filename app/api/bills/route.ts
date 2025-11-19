@@ -1,8 +1,11 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const { searchParams } = new URL(req.url)
     const chatId = searchParams.get('chatId') || undefined
     const page = Math.max(1, Number(searchParams.get('page') || '1'))
@@ -28,7 +31,7 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    return Response.json({
+    return NextResponse.json({
       page,
       size,
       total,
@@ -36,6 +39,6 @@ export async function GET(req: NextRequest) {
     })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

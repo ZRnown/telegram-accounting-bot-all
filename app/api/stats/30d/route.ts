@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 function startOfDay(d: Date) {
   const x = new Date(d)
@@ -14,6 +15,10 @@ function addDays(d: Date, n: number) {
 
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'stats_30d', 60, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { searchParams } = new URL(req.url)
     const chatIdParam = searchParams.get('chatId')
     const endStr = searchParams.get('end') // YYYY-MM-DD (inclusive end)
@@ -29,7 +34,7 @@ export async function GET(req: NextRequest) {
       chatId = latestBill?.chatId || ''
     }
     if (!chatId) {
-      return Response.json({
+      return NextResponse.json({
         totalIncome: 0,
         totalIncomeUSDT: 0,
         totalDispatch: 0,
@@ -47,13 +52,13 @@ export async function GET(req: NextRequest) {
       prisma.bill.findMany({ where: { chatId, savedAt: { gte: start, lt: addDays(end, 1) } }, orderBy: { savedAt: 'asc' } }),
     ])
 
-    const billIds = bills.map(b => b.id)
+    const billIds = bills.map((b: any) => b.id)
     const items = billIds.length
       ? await prisma.billItem.findMany({ where: { billId: { in: billIds } } })
       : []
 
-    const incomeItems = items.filter(i => i.type === 'INCOME')
-    const dispatchItems = items.filter(i => i.type === 'DISPATCH')
+    const incomeItems = items.filter((i: any) => i.type === 'INCOME')
+    const dispatchItems = items.filter((i: any) => i.type === 'DISPATCH')
 
     const totalIncome = incomeItems.reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0)
     const totalDispatch = dispatchItems.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0)
@@ -77,7 +82,7 @@ export async function GET(req: NextRequest) {
     const notDispatched = Math.max(shouldDispatch - totalDispatch, 0)
     const notDispatchedUSDT = toUSDT(notDispatched)
 
-    return Response.json({
+    return NextResponse.json({
       totalIncome,
       totalIncomeUSDT,
       totalDispatch,
@@ -90,6 +95,6 @@ export async function GET(req: NextRequest) {
     })
   } catch (e) {
     console.error(e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

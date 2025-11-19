@@ -1,17 +1,12 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 function ok(data: any) {
-  return Response.json(data)
+  return NextResponse.json(data)
 }
-
 function bad(msg = 'Bad Request', code = 400) {
-  return new Response(msg, { status: code })
-}
-
-function isAdmin(req: NextRequest) {
-  const token = req.headers.get('x-auth-token') || ''
-  return token === 'authenticated'
+  return NextResponse.json({ error: msg }, { status: code })
 }
 
 const DEFAULT_VALUE = { exact_map: {}, prefix_map: {} }
@@ -30,13 +25,14 @@ export async function GET() {
     }
   } catch (e) {
     console.error('[GET /api/global-config/commands]', e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    if (!isAdmin(req)) return bad('Unauthorized', 401)
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const body = await req.json().catch(() => ({})) as any
     const exact_map = body?.exact_map
     const prefix_map = body?.prefix_map
@@ -73,6 +69,6 @@ export async function POST(req: NextRequest) {
     return ok(valueObj)
   } catch (e) {
     console.error('[POST /api/global-config/commands]', e)
-    return new Response('Server error', { status: 500 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

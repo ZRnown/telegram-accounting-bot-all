@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db.js'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 function normalizeName(name: string) {
   return (name || '').trim().toLowerCase()
@@ -21,6 +22,10 @@ function isValidHttpUrl(url?: string) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'cc_img_put', 30, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const body = await req.json().catch(() => ({}))
     const botId = String(body.botId || '').trim()
     const rawName = String(body.name || '')

@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
 /**
  * 获取当前应该查看的日期（基于日切时间）
@@ -7,6 +8,10 @@ import { prisma } from '@/lib/db'
  */
 export async function GET(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'stats_current_date', 60, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
     const { searchParams } = new URL(req.url)
     const chatIdParam = searchParams.get('chatId')
     
@@ -23,7 +28,7 @@ export async function GET(req: NextRequest) {
       const year = today.getFullYear()
       const month = String(today.getMonth() + 1).padStart(2, '0')
       const day = String(today.getDate()).padStart(2, '0')
-      return Response.json({ date: `${year}-${month}-${day}` })
+      return NextResponse.json({ date: `${year}-${month}-${day}` })
     }
 
     // 🔥 获取日切时间设置
@@ -76,7 +81,7 @@ export async function GET(req: NextRequest) {
     const month = String(targetDate.getMonth() + 1).padStart(2, '0')
     const day = String(targetDate.getDate()).padStart(2, '0')
     
-    return Response.json({ date: `${year}-${month}-${day}` })
+    return NextResponse.json({ date: `${year}-${month}-${day}` })
   } catch (e) {
     console.error('[stats/current-date] 错误:', e)
     // 出错时返回今天的日期
@@ -84,6 +89,6 @@ export async function GET(req: NextRequest) {
     const year = today.getFullYear()
     const month = String(today.getMonth() + 1).padStart(2, '0')
     const day = String(today.getDate()).padStart(2, '0')
-    return Response.json({ date: `${year}-${month}-${day}` })
+    return NextResponse.json({ date: `${year}-${month}-${day}` })
   }
 }
