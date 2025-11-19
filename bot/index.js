@@ -1115,7 +1115,7 @@ bot.hears(/^(上课|开始上课)$/i, async (ctx) => {
   chat.muteMode = false
   chat.workStartedAt = null
   try { await setChatMute(ctx, false) } catch {}
-  await ctx.reply('已解除禁言。')
+  await ctx.reply('本群已开始营业')
 })
 
 // 下课：停止计时并开启全体禁言（管理员不受影响；操作员放行）
@@ -1129,7 +1129,7 @@ bot.hears(/^下课$/i, async (ctx) => {
   }
   chat.muteMode = true
   try { await setChatMute(ctx, true) } catch {}
-  await ctx.reply('下课了，已开启全体禁言（管理员与操作员除外）。')
+  await ctx.reply('本群今日已下课\n如需交易，请在该群恢复营业后在群内交易！ 切勿私下交易！')
 })
 
 // 解除禁言/开口：关闭全体禁言
