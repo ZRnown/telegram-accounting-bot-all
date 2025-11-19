@@ -10,8 +10,10 @@ function buildKey(botId: string) {
   return `customcmds:bot:${botId}`
 }
 
-function isValidHttpUrl(url?: string) {
+function isValidImageUrl(url?: string) {
   if (!url) return false
+  // allow site-relative uploads path
+  if (url.startsWith('/uploads/')) return true
   try {
     const u = new URL(url)
     return u.protocol === 'http:' || u.protocol === 'https:'
@@ -44,7 +46,7 @@ export async function PUT(req: NextRequest) {
     if (imageUrlRaw === null || imageUrlRaw === '') {
       delete map[name].imageUrl
     } else {
-      if (!isValidHttpUrl(imageUrlRaw)) {
+      if (!isValidImageUrl(imageUrlRaw)) {
         return NextResponse.json({ error: 'invalid imageUrl' }, { status: 400 })
       }
       map[name].imageUrl = imageUrlRaw
