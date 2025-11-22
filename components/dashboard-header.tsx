@@ -75,7 +75,7 @@ export function DashboardHeader({
   // 🔥 从统计API获取实际的日期范围（考虑日切时间）- 仅非累计模式需要
   useEffect(() => {
     if (!chatId || isCumulativeMode) return
-    
+
     let cancelled = false
     const fetchDateRange = async () => {
       try {
@@ -96,7 +96,7 @@ export function DashboardHeader({
         if (!cancelled) console.error('获取日期范围失败', e)
       }
     }
-    
+
     fetchDateRange()
     return () => { cancelled = true }
   }, [dateStr, chatId, isCumulativeMode])
@@ -183,9 +183,9 @@ export function DashboardHeader({
               </Button>
             )}
             {isAdmin && compact && (
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => router.push('/security')}
                 title="修改密码"
               >
@@ -258,7 +258,7 @@ export function DashboardHeader({
                       router.push("/chats")
                     }
                   }}
-                > 
+                >
                   群组管理
                 </Button>
               )}

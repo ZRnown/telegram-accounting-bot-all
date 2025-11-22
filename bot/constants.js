@@ -14,11 +14,11 @@ export const DEFAULT_FEATURES = [
  */
 export async function ensureDefaultFeatures(chatId, prisma, force = false) {
   try {
-    const existingFlags = await prisma.chatFeatureFlag.findMany({ 
+    const existingFlags = await prisma.chatFeatureFlag.findMany({
       where: { chatId },
       select: { feature: true, enabled: true, id: true }
     })
-    
+
     if (existingFlags.length === 0 || force) {
       if (force && existingFlags.length > 0) {
         await prisma.chatFeatureFlag.deleteMany({ where: { chatId } })

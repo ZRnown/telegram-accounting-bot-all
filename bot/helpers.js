@@ -71,7 +71,7 @@ export async function fetchRealtimeRateUSDTtoCNY() {
   return await fetchUsdtToFiatRate('cny')
 }
 
- 
+
 
 /**
  * 🔥 优化：获取群组的有效汇率（优先使用内存，避免重复查询）
@@ -85,7 +85,7 @@ export async function getEffectiveRate(chatId, chat = null) {
     if (chat.fixedRate != null) return chat.fixedRate
     if (chat.realtimeRate != null) return chat.realtimeRate
   }
-  
+
   // 🔥 如果内存中没有，从数据库获取（只查询汇率字段）
   try {
     const settings = await prisma.setting.findUnique({
@@ -106,15 +106,15 @@ export async function buildInlineKb(ctx, options = {}) {
   const { Markup } = await import('telegraf')
   const rows = []
   const chatId = String(ctx?.chat?.id || '')
-  
+
   if (options.hideHelpAndOrder) {
     return Markup.inlineKeyboard(rows)
   }
-  
+
   if (ctx.chat?.type === 'private') {
     // 🔥 私聊：显示指令菜单和直接邀请按钮
     rows.push([Markup.button.callback('📋 指令菜单', 'command_menu')])
-    
+
     // 🔥 直接生成邀请链接，不需要点击后再跳转
     try {
       // 使用 ctx.botInfo 获取机器人信息（更高效，不需要额外API调用）
@@ -133,21 +133,21 @@ export async function buildInlineKb(ctx, options = {}) {
     } catch (e) {
       console.error('[buildInlineKb] 获取机器人信息失败:', e)
     }
-    
+
     return Markup.inlineKeyboard(rows)
   }
-  
+
   try {
     const setting = await prisma.setting.findUnique({
       where: { chatId },
       select: { hideHelpButton: true, hideOrderButton: true }
     })
-    
+
     // 使用说明按钮（根据设置决定是否显示）
     if (!setting?.hideHelpButton) {
       rows.push([Markup.button.callback('使用说明', 'help')])
     }
-    
+
     // 查看完整订单按钮（根据设置决定是否显示）
     if (!setting?.hideOrderButton) {
       if (isPublicUrl(BACKEND_URL)) {
@@ -177,7 +177,7 @@ export async function buildInlineKb(ctx, options = {}) {
       rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
     }
   }
-  
+
   return Markup.inlineKeyboard(rows)
 }
 
@@ -203,10 +203,10 @@ export async function hasOperatorPermission(ctx, chat) {
   if (!chat) return false
   if (chat.everyoneAllowed) return true
   if (await isAdmin(ctx)) return true
-  
+
   const username = ctx.from?.username ? `@${ctx.from.username}` : null
   if (username && chat.operators.has(username)) return true
-  
+
   return false
 }
 
@@ -218,7 +218,7 @@ export async function hasOperatorPermission(ctx, chat) {
  */
 export async function hasPermissionWithWhitelist(ctx, chat) {
   if (await hasOperatorPermission(ctx, chat)) return true
-  
+
   // 检查白名单
   const userId = String(ctx.from?.id || '')
   if (userId) {

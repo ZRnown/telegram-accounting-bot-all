@@ -9,7 +9,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 export const metadata: Metadata = {
   title: "星空记账机器人后台",
   description: "Telegram 记账机器人后台管理系统",
-    generator: 'v0.app'
+  generator: 'v0.app'
 }
 
 export default function RootLayout({

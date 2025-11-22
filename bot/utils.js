@@ -169,12 +169,12 @@ export function isPublicUrl(u) {
  */
 export function startOfDay(d = new Date(), cutoffHour = 0) {
   const now = new Date(d)
-  
+
   // 计算今天的日切开始时间
   const todayCutoff = new Date()
   todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
   todayCutoff.setHours(cutoffHour, 0, 0, 0)
-  
+
   // 判断当前时间是否已经过了今天的日切点
   if (now >= todayCutoff) {
     // 当前时间 >= 今天的日切时间，返回今天账单的开始时间

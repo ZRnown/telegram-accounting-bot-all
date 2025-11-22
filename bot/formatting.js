@@ -9,22 +9,22 @@ import { checkAndClearIfNewDay } from './database.js'
  */
 export async function formatSummary(ctx, chat, options = {}) {
   const chatId = String(ctx?.chat?.id || '')
-  
+
   // 🔥 首先检查是否跨日，如果是每日清零模式则清空内存数据
   await checkAndClearIfNewDay(chat, chatId)
-  
+
   let accountingMode = 'DAILY_RESET'
   let settings = null // 🔥 初始化 settings 变量
-  
+
   const lastSyncTime = chat._billLastSync || 0
   const now = Date.now()
-  const needsSync = !chat._billLastSync || 
-                    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
-                    (now - lastSyncTime > 30 * 60 * 1000)
-  
+  const needsSync = !chat._billLastSync ||
+    (chat.current.incomes.length === 0 && chat.current.dispatches.length === 0) ||
+    (now - lastSyncTime > 30 * 60 * 1000)
+
   try {
     const [settingsResult, billData] = await Promise.all([
-      prisma.setting.findUnique({ 
+      prisma.setting.findUnique({
         where: { chatId },
         select: {
           accountingMode: true,
@@ -43,19 +43,19 @@ export async function formatSummary(ctx, chat, options = {}) {
           const cutoffHour = setting?.dailyCutoffHour != null && setting.dailyCutoffHour >= 0 && setting.dailyCutoffHour <= 23
             ? setting.dailyCutoffHour
             : await getGlobalDailyCutoffHour()
-          
+
           // 🔥 修复：使用与 getOrCreateTodayBill 相同的日切逻辑
           const now = new Date()
-          
+
           // 计算今天的日切开始时间
           const todayCutoff = new Date()
           todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
           todayCutoff.setHours(cutoffHour, 0, 0, 0)
-          
+
           // 判断当前时间是否已经过了今天的日切点
           let gte
           let lt
-          
+
           if (now >= todayCutoff) {
             // 当前时间 >= 今天的日切时间，查询今天的账单
             gte = new Date(todayCutoff)
@@ -67,10 +67,10 @@ export async function formatSummary(ctx, chat, options = {}) {
             gte.setDate(gte.getDate() - 1)
             lt = new Date(todayCutoff)
           }
-          
-          return await prisma.bill.findFirst({ 
+
+          return await prisma.bill.findFirst({
             where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
-            include: { 
+            include: {
               items: {
                 select: {
                   type: true,
@@ -91,12 +91,12 @@ export async function formatSummary(ctx, chat, options = {}) {
         }
       })() : Promise.resolve(null)
     ])
-    
+
     settings = settingsResult // 🔥 赋值给外部变量
     accountingMode = settings?.accountingMode || 'DAILY_RESET'
-    
+
     // 🔥 累计模式不再需要历史未下发计算
-    
+
     if (needsSync && billData?.items) {
       const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => ({
         amount: Number(i.amount),
@@ -105,7 +105,7 @@ export async function formatSummary(ctx, chat, options = {}) {
         replier: i.replier || '',
         operator: i.operator || '',
       }))
-      
+
       const dbDispatches = billData.items.filter(i => i.type === 'DISPATCH').map(i => ({
         amount: Number(i.amount),
         usdt: Number(i.usdt),
@@ -113,7 +113,7 @@ export async function formatSummary(ctx, chat, options = {}) {
         replier: i.replier || '',
         operator: i.operator || '',
       }))
-      
+
       if (dbIncomes.length >= chat.current.incomes.length) {
         chat.current.incomes = dbIncomes
       }
@@ -130,7 +130,7 @@ export async function formatSummary(ctx, chat, options = {}) {
       const cutoffHour = setting?.dailyCutoffHour != null && setting.dailyCutoffHour >= 0 && setting.dailyCutoffHour <= 23
         ? setting.dailyCutoffHour
         : await getGlobalDailyCutoffHour()
-      
+
       const nowDate = new Date()
       const todayCutoff = new Date()
       todayCutoff.setFullYear(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate())
@@ -153,7 +153,7 @@ export async function formatSummary(ctx, chat, options = {}) {
   const currentRealtimeRate = settings?.realtimeRate ?? chat.realtimeRate ?? null
   const isFixedRate = currentFixedRate != null
   const rateLabel = isFixedRate ? '固定汇率' : '实时汇率'
-  
+
   const s = summarize(chat)
   const rateVal = s.effectiveRate || 0
 
@@ -181,45 +181,45 @@ export async function formatSummary(ctx, chat, options = {}) {
 
   const incPart = incCount > 0 && showIncomes.length > 0
     ? showIncomes.map((i) => {
-        const t = i.createdAt.toTimeString().slice(0, 8)
-        const rate = i.rate ?? rateVal
-        const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
-        const amount = Math.abs(i.amount)
-        const who = (i.operator || i.replier || '')
-        const remark = i.remark // 🔥 获取备注
-        
-        let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
-        if (rate) {
-          line += ` / ${rate}=${usdt}U`
+      const t = i.createdAt.toTimeString().slice(0, 8)
+      const rate = i.rate ?? rateVal
+      const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
+      const amount = Math.abs(i.amount)
+      const who = (i.operator || i.replier || '')
+      const remark = i.remark // 🔥 获取备注
+
+      let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
+      if (rate) {
+        line += ` / ${rate}=${usdt}U`
+      }
+      // 🔥 显示费率（如果有）
+      if (i.feeRate) {
+        line += ` *${(i.feeRate * 100).toFixed(0)}%`
+      }
+      // 🔥 显示备注（如果有）
+      if (remark) {
+        line += ` [${remark}]`
+      }
+      if (who) {
+        const whoWithAt = who.startsWith('@') ? who : `@${who}`
+        const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+        if (userId) {
+          line += ` [${who}](tg://user?id=${userId})`
+        } else {
+          line += ` *${who}*`
         }
-        // 🔥 显示费率（如果有）
-        if (i.feeRate) {
-          line += ` *${(i.feeRate * 100).toFixed(0)}%`
-        }
-        // 🔥 显示备注（如果有）
-        if (remark) {
-          line += ` [${remark}]`
-        }
-        if (who) {
-          const whoWithAt = who.startsWith('@') ? who : `@${who}`
-          const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
-          if (userId) {
-            line += ` [${who}](tg://user?id=${userId})`
-          } else {
-            line += ` *${who}*`
-          }
-        }
-        return line
-      }).join('\n')
+      }
+      return line
+    }).join('\n')
     : (incCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无入款')
 
   const disPart = disCount > 0 && showDispatches.length > 0
     ? showDispatches.map((d) => {
-        const t = d.createdAt.toTimeString().slice(0, 8)
-        const amount = Math.abs(d.amount)
-        const usdt = Math.abs(d.usdt)
-        return `${t} [${formatMoney(amount)}](tg://user?id=0) (${formatMoney(usdt)}U)`
-      }).join('\n')
+      const t = d.createdAt.toTimeString().slice(0, 8)
+      const amount = Math.abs(d.amount)
+      const usdt = Math.abs(d.usdt)
+      return `${t} [${formatMoney(amount)}](tg://user?id=0) (${formatMoney(usdt)}U)`
+    }).join('\n')
     : (disCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无下发')
 
   const header = chat.headerText ? `${chat.headerText}\n` : ''
@@ -237,15 +237,15 @@ export async function formatSummary(ctx, chat, options = {}) {
     `${rateLabel}：${rateVal || '未设置'}`,
     ...(chat.rmbMode
       ? [
-          `应下发：${formatMoney(s.shouldDispatch)}`,
-          `已下发：${formatMoney(s.dispatched)}`,
-          `未下发：${formatMoney(s.notDispatched)}`,
-        ]
+        `应下发：${formatMoney(s.shouldDispatch)}`,
+        `已下发：${formatMoney(s.dispatched)}`,
+        `未下发：${formatMoney(s.notDispatched)}`,
+      ]
       : [
-          `应下发：${formatMoney(s.shouldDispatch)} | ${formatMoney(s.shouldDispatchUSDT)}U`,
-          `已下发：${formatMoney(s.dispatched)} | ${formatMoney(s.dispatchedUSDT)}U`,
-          `未下发：${formatMoney(s.notDispatched)} | ${formatMoney(s.notDispatchedUSDT)}U`,
-        ]
+        `应下发：${formatMoney(s.shouldDispatch)} | ${formatMoney(s.shouldDispatchUSDT)}U`,
+        `已下发：${formatMoney(s.dispatched)} | ${formatMoney(s.dispatchedUSDT)}U`,
+        `未下发：${formatMoney(s.notDispatched)} | ${formatMoney(s.notDispatchedUSDT)}U`,
+      ]
     ),
   ].join('\n')
 }

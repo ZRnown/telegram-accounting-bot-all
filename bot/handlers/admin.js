@@ -13,15 +13,15 @@ export function registerBotLeave(bot) {
     if (ctx.chat?.type === 'private') {
       return ctx.reply('此命令仅在群组中使用')
     }
-    
+
     // 🔥 优化：使用统一的权限检查
     const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
     }
-    
+
     const chatId = String(ctx.chat?.id || '')
-    
+
     try {
       // 并行删除所有相关数据
       await Promise.all([
@@ -31,15 +31,15 @@ export function registerBotLeave(bot) {
         prisma.addressVerification.deleteMany({ where: { chatId } }),
         prisma.featureWarningLog.deleteMany({ where: { chatId } })
       ])
-      
-      await prisma.chat.delete({ where: { id: chatId } }).catch(() => {})
+
+      await prisma.chat.delete({ where: { id: chatId } }).catch(() => { })
       await ctx.leaveChat()
       console.log('[机器人退群]', { chatId })
     } catch (e) {
       console.error('[机器人退群]', e)
       try {
         await ctx.leaveChat()
-      } catch {}
+      } catch { }
     }
   })
 }
@@ -90,10 +90,10 @@ export function registerQueryRate(bot, ensureChat) {
   bot.hears(/^(查询汇率|查询映射表)(?:\s+(.+))?$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     const query = ctx.match[2]?.trim() || ''
     const chatId = await ensureDbChat(ctx, chat)
-    
+
     try {
       // 🔥 优化：使用统一的汇率获取函数
       const [setting, effectiveRate] = await Promise.all([
@@ -103,7 +103,7 @@ export function registerQueryRate(bot, ensureChat) {
         }),
         getEffectiveRate(chatId, ensureChat(ctx))
       ])
-      
+
       let rateText = ''
       if (query) {
         const rate = parseFloat(query)
@@ -127,7 +127,7 @@ export function registerQueryRate(bot, ensureChat) {
         const code = (chat?.currencyCode || 'cny')
         const sym = getDisplayCurrencySymbol(code)
         rateText = ' 💱 汇率映射表 \n\n'
-        
+
         if (fixedRate && displayRate) {
           rateText += `【固定汇率】\n` +
             `• 1 USDT = ${Number(displayRate).toFixed(2)} ${sym}\n` +
@@ -149,14 +149,14 @@ export function registerQueryRate(bot, ensureChat) {
         } else {
           rateText += `⚠️ 未设置汇率\n\n`
         }
-        
+
         if (feePercent > 0) {
           rateText += `【费率】${feePercent}%\n`
         }
-        
+
         rateText += `\n💡 提示：使用"查询汇率 7.2"可以查询指定汇率的映射关系`
       }
-      
+
       await ctx.reply(rateText, { ...(await buildInlineKb(ctx)) })
     } catch (e) {
       console.error('[查询汇率]', e)
@@ -173,58 +173,58 @@ export function registerAdminInfo(bot) {
     if (ctx.chat?.type === 'private') {
       return ctx.reply('此命令仅在群组中使用')
     }
-    
+
     const chatId = await ensureDbChat(ctx)
-    
+
     try {
       const [admins, operators, setting] = await Promise.all([
         ctx.getChatAdministrators(),
         prisma.operator.findMany({ where: { chatId }, select: { username: true } }),
         prisma.setting.findUnique({ where: { chatId }, select: { everyoneAllowed: true } })
       ])
-      
+
       // 🔥 分类：群主、管理员、操作员
       const creators = []
       const adminsList = []
       const operatorUsernames = new Set(operators.map(op => op.username))
-      
+
       admins
         .filter(a => !a.user.is_bot)
         .forEach(a => {
-          const name = a.user.username 
-            ? `@${a.user.username}` 
+          const name = a.user.username
+            ? `@${a.user.username}`
             : `${a.user.first_name || ''} ${a.user.last_name || ''}`.trim() || `用户${a.user.id}`
           const status = a.status === 'creator' ? '👑 群主' : '👤 管理员'
           const item = { name, status, isCreator: a.status === 'creator' }
-          
+
           if (a.status === 'creator') {
             creators.push(item)
           } else {
             adminsList.push(item)
           }
         })
-      
+
       // 🔥 过滤出非群主和管理员的操作员
       const otherOperators = operators
         .filter(op => {
           const username = op.username.startsWith('@') ? op.username : `@${op.username}`
-          return !creators.some(c => c.name === username) && 
-                 !adminsList.some(a => a.name === username)
+          return !creators.some(c => c.name === username) &&
+            !adminsList.some(a => a.name === username)
         })
         .map(op => op.username)
-      
+
       let text = ' 👥 群组权限信息 \n\n'
-      
+
       // 🔥 群主最上面
       if (creators.length > 0) {
         text += `【👑 群主】\n${creators.map(c => `• ${c.name}`).join('\n')}\n\n`
       }
-      
+
       // 🔥 然后管理员
       if (adminsList.length > 0) {
         text += `【👤 管理员】\n${adminsList.map(a => `• ${a.name}`).join('\n')}\n\n`
       }
-      
+
       // 🔥 然后其他操作员
       if (setting?.everyoneAllowed) {
         text += `【✅ 权限设置】\n• 所有人可操作\n\n`
@@ -233,7 +233,7 @@ export function registerAdminInfo(bot) {
       } else {
         text += `【👤 操作员】\n• 仅管理员可操作\n\n`
       }
-      
+
       await ctx.reply(text, { ...(await buildInlineKb(ctx)) })
     } catch (e) {
       console.error('[群内管理员]', e)

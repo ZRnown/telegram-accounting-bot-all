@@ -8,10 +8,10 @@ function formatOKXPrice(sellers, methodName) {
   if (sellers.length === 0) {
     return '❌ 获取OKX价格失败，请稍后重试'
   }
-  
+
   const top10 = sellers.slice(0, 10)
   const lines = [` OKX实时U价 ${methodName} TOP 10 \n`]
-  
+
   top10.forEach((seller, index) => {
     const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index]
     const price = seller.price.toFixed(2)
@@ -23,10 +23,10 @@ function formatOKXPrice(sellers, methodName) {
     }).join(', ')
     lines.push(`${emoji} ${price} ${seller.nickName}${methods ? ` (${methods})` : ''}`)
   })
-  
+
   const now = new Date()
   lines.push(`\n获取时间：${now.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}`)
-  
+
   return lines.join('\n')
 }
 
@@ -39,13 +39,13 @@ export function registerZ0(bot) {
   bot.hears(/^(z0|Z0)$/i, async (ctx) => {
     try {
       const sellers = await getOKXC2CSellers('all')
-      
+
       if (sellers.length === 0) {
         return ctx.reply('❌ 获取OKX价格失败，请稍后重试')
       }
-      
+
       const text = formatOKXPrice(sellers, '全部')
-      
+
       const { Markup } = await import('telegraf')
       const inlineKb = Markup.inlineKeyboard([
         [
@@ -55,19 +55,19 @@ export function registerZ0(bot) {
           Markup.button.callback('微信', 'okx_c2c_wxpay')
         ]
       ])
-      
+
       await ctx.reply(text, { ...inlineKb })
     } catch (e) {
       console.error('[z0命令]', e)
       await ctx.reply('❌ 获取OKX价格失败，请稍后重试')
     }
   })
-  
+
   // OKX C2C支付方式筛选回调
   bot.action(/^okx_c2c_(all|bank|alipay|wxpay)$/, async (ctx) => {
     try {
       await ctx.answerCbQuery()
-      
+
       const method = ctx.match[1]
       const methodMap = {
         'all': 'all',
@@ -75,16 +75,16 @@ export function registerZ0(bot) {
         'alipay': 'alipay',
         'wxpay': 'wxPay'
       }
-      
+
       const sellers = await getOKXC2CSellers(methodMap[method])
-      
+
       if (sellers.length === 0) {
         return ctx.editMessageText('❌ 获取OKX价格失败，请稍后重试')
       }
-      
+
       const methodName = { 'all': '全部', 'bank': '银行卡', 'alipay': '支付宝', 'wxpay': '微信' }[method]
       const text = formatOKXPrice(sellers, methodName)
-      
+
       const { Markup } = await import('telegraf')
       const inlineKb = Markup.inlineKeyboard([
         [
@@ -94,11 +94,11 @@ export function registerZ0(bot) {
           Markup.button.callback('微信', 'okx_c2c_wxpay')
         ]
       ])
-      
+
       await ctx.editMessageText(text, { ...inlineKb })
     } catch (e) {
       console.error('[okx_c2c_action]', e)
-      await ctx.answerCbQuery('获取失败', { show_alert: true }).catch(() => {})
+      await ctx.answerCbQuery('获取失败', { show_alert: true }).catch(() => { })
     }
   })
 }

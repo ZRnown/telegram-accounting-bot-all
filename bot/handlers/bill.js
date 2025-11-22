@@ -26,13 +26,13 @@ export function registerSaveBill(bot, ensureChat) {
   bot.hears(/^保存账单$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
-    
+
     try {
       // 🔥 检查记账模式
       const settings = await prisma.setting.findUnique({
@@ -42,21 +42,21 @@ export function registerSaveBill(bot, ensureChat) {
       const accountingMode = settings?.accountingMode || 'DAILY_RESET'
       const isCumulativeMode = accountingMode === 'CARRY_OVER'
       const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
-      
+
       // 🔥 单笔订单模式：不支持保存账单
       if (isSingleBillMode) {
         return ctx.reply('⚠️ 当前记账模式不支持保存账单。每天只有一笔订单，日切时会自动关闭。', { ...(await buildInlineKb(ctx)) })
       }
-      
+
       const { bill } = await getOrCreateTodayBill(chatId)
       const now = new Date()
-      
+
       // 🔥 保存账单：记录closedAt（结束时间），然后创建新账单（以当前时间作为开始时间）
       await prisma.bill.update({
         where: { id: bill.id },
         data: { status: 'CLOSED', closedAt: now, savedAt: now }
       })
-      
+
       // 清空内存
       chat.history.push({
         savedAt: now,
@@ -67,7 +67,7 @@ export function registerSaveBill(bot, ensureChat) {
       })
       chat.current.incomes = []
       chat.current.dispatches = []
-      
+
       // 🔥 累计模式：保存后自动创建新的账单（以当前时间作为开始时间）
       if (isCumulativeMode) {
         // 🔥 创建新账单，以当前时间作为开始时间
@@ -98,20 +98,20 @@ export function registerDeleteBill(bot, ensureChat) {
   bot.hears(/^删除账单$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
-    
+
     try {
       // 🔥 检查是否需要确认
       const setting = await prisma.setting.findUnique({
         where: { chatId },
         select: { deleteBillConfirm: true }
       })
-      
+
       if (setting?.deleteBillConfirm) {
         // 需要二次确认，先提示用户
         const { Markup } = await import('telegraf')
@@ -119,7 +119,7 @@ export function registerDeleteBill(bot, ensureChat) {
           [Markup.button.callback('✅ 确认删除', 'confirm_delete_bill')],
           [Markup.button.callback('❌ 取消', 'cancel_delete_bill')]
         ])
-        
+
         // 🔥 使用临时存储（Map）来存储待删除的chatId，避免session问题
         // 格式：userId_chatId -> true
         const deletePendingKey = `${ctx.from?.id}_${chatId}`
@@ -127,21 +127,21 @@ export function registerDeleteBill(bot, ensureChat) {
           global.pendingDeleteBills = new Map()
         }
         global.pendingDeleteBills.set(deletePendingKey, { chatId, userId: ctx.from?.id, timestamp: Date.now() })
-        
+
         await ctx.reply(
           '⚠️ *删除确认*\n\n确定要删除当前账单吗？此操作不可恢复！\n\n点击下方按钮确认或取消：',
           { ...keyboard, parse_mode: 'Markdown' }
         )
         return
       }
-      
+
       // 🔥 优化：先查询当前账单，不要自动创建（避免删除后立即创建新账单）
       const cutoffHour = await getChatDailyCutoffHour(chatId)
       const now = new Date()
       const todayCutoff = new Date()
       todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
       todayCutoff.setHours(cutoffHour, 0, 0, 0)
-      
+
       let gte, lt
       if (now >= todayCutoff) {
         gte = new Date(todayCutoff)
@@ -152,20 +152,20 @@ export function registerDeleteBill(bot, ensureChat) {
         gte.setDate(gte.getDate() - 1)
         lt = new Date(todayCutoff)
       }
-      
+
       // 🔥 查询当前账单（不自动创建）
       const bill = await prisma.bill.findFirst({
         where: { chatId, status: 'OPEN', openedAt: { gte, lt } },
         orderBy: { openedAt: 'asc' }
       })
-      
+
       if (!bill) {
         // 如果没有账单，直接清空内存即可
         chat.current.incomes = []
         chat.current.dispatches = []
         return ctx.reply('✅ 当前没有账单', { ...(await buildInlineKb(ctx)) })
       }
-      
+
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
       const settings = await prisma.setting.findUnique({
@@ -173,7 +173,7 @@ export function registerDeleteBill(bot, ensureChat) {
         select: { accountingMode: true }
       })
       const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-      
+
       if (isCumulativeMode) {
         // 累计模式：完全删除账单（使用事务确保原子性）
         await prisma.$transaction(async (tx) => {
@@ -184,10 +184,10 @@ export function registerDeleteBill(bot, ensureChat) {
         // 清零模式：只删除账单项
         await prisma.billItem.deleteMany({ where: { billId: bill.id } })
       }
-      
+
       chat.current.incomes = []
       chat.current.dispatches = []
-      
+
       // 🔥 删除账单后，重新显示账单摘要（确保历史未下发正确更新）
       try {
         const summary = await formatSummary(ctx, chat, { title: '当前账单' })
@@ -201,37 +201,37 @@ export function registerDeleteBill(bot, ensureChat) {
       await ctx.reply('❌ 删除账单失败，请稍后重试')
     }
   })
-  
+
   // 🔥 确认删除按钮
   bot.action('confirm_delete_bill', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
+    try { await ctx.answerCbQuery() } catch { }
+
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     // 🔥 从临时存储中获取chatId
     const chatId = String(ctx.chat?.id || '')
     const userId = ctx.from?.id
     const deletePendingKey = `${userId}_${chatId}`
-    
+
     if (!global.pendingDeleteBills) {
       return ctx.reply('❌ 操作已过期，请重新发送"删除账单"')
     }
-    
+
     const pendingInfo = global.pendingDeleteBills.get(deletePendingKey)
     if (!pendingInfo || (Date.now() - pendingInfo.timestamp > 5 * 60 * 1000)) {
       // 超过5分钟，清除过期记录
       global.pendingDeleteBills.delete(deletePendingKey)
       return ctx.reply('❌ 操作已过期，请重新发送"删除账单"')
     }
-    
+
     // 🔥 使用pendingInfo中的chatId（更可靠）
     const finalChatId = pendingInfo.chatId || chatId
-    
+
     try {
       // 🔥 优化：先查询当前账单，不要自动创建（避免删除后立即创建新账单）
       const cutoffHour = await getChatDailyCutoffHour(finalChatId)
@@ -239,7 +239,7 @@ export function registerDeleteBill(bot, ensureChat) {
       const todayCutoff = new Date()
       todayCutoff.setFullYear(now.getFullYear(), now.getMonth(), now.getDate())
       todayCutoff.setHours(cutoffHour, 0, 0, 0)
-      
+
       let gte, lt
       if (now >= todayCutoff) {
         gte = new Date(todayCutoff)
@@ -250,13 +250,13 @@ export function registerDeleteBill(bot, ensureChat) {
         gte.setDate(gte.getDate() - 1)
         lt = new Date(todayCutoff)
       }
-      
+
       // 🔥 查询当前账单（不自动创建）
       const bill = await prisma.bill.findFirst({
         where: { chatId: finalChatId, status: 'OPEN', openedAt: { gte, lt } },
         orderBy: { openedAt: 'asc' }
       })
-      
+
       if (!bill) {
         // 如果没有账单，直接清空内存即可
         chat.current.incomes = []
@@ -266,10 +266,10 @@ export function registerDeleteBill(bot, ensureChat) {
           global.pendingDeleteBills.delete(deletePendingKey)
         }
         await ctx.reply('✅ 当前没有账单', { ...(await buildInlineKb(ctx)) })
-        await ctx.deleteMessage().catch(() => {})
+        await ctx.deleteMessage().catch(() => { })
         return
       }
-      
+
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
       const settings = await prisma.setting.findUnique({
@@ -277,7 +277,7 @@ export function registerDeleteBill(bot, ensureChat) {
         select: { accountingMode: true }
       })
       const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
-      
+
       if (isCumulativeMode) {
         // 累计模式：完全删除账单（使用事务确保原子性）
         await prisma.$transaction(async (tx) => {
@@ -288,36 +288,36 @@ export function registerDeleteBill(bot, ensureChat) {
         // 清零模式：只删除账单项
         await prisma.billItem.deleteMany({ where: { billId: bill.id } })
       }
-      
+
       chat.current.incomes = []
       chat.current.dispatches = []
-      
+
       // 🔥 清除待删除标记
       if (global.pendingDeleteBills) {
         global.pendingDeleteBills.delete(deletePendingKey)
       }
-      
+
       await ctx.reply('✅ 当前账单已清空', { ...(await buildInlineKb(ctx)) })
-      await ctx.deleteMessage().catch(() => {})
+      await ctx.deleteMessage().catch(() => { })
     } catch (e) {
       console.error('删除账单失败', e)
       await ctx.reply('❌ 删除账单失败，请稍后重试')
     }
   })
-  
+
   // 🔥 取消删除按钮
   bot.action('cancel_delete_bill', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
+    try { await ctx.answerCbQuery() } catch { }
+
     // 🔥 清除待删除标记
     const chatId = String(ctx.chat?.id || '')
     const userId = ctx.from?.id
     if (global.pendingDeleteBills && userId) {
       global.pendingDeleteBills.delete(`${userId}_${chatId}`)
     }
-    
+
     await ctx.reply('已取消删除操作', { ...(await buildInlineKb(ctx)) })
-    await ctx.deleteMessage().catch(() => {})
+    await ctx.deleteMessage().catch(() => { })
   })
 }
 
@@ -328,25 +328,25 @@ export function registerDeleteAllBills(bot, ensureChat) {
   bot.hears(/^(删除全部账单|清除全部账单)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
-    
+
     try {
       const allBills = await prisma.bill.findMany({ where: { chatId }, select: { id: true } })
       const billIds = allBills.map(b => b.id)
-      
+
       await Promise.all([
         prisma.billItem.deleteMany({ where: { billId: { in: billIds } } }),
         prisma.bill.deleteMany({ where: { id: { in: billIds } } })
       ])
-      
+
       chat.current = { incomes: [], dispatches: [] }
       chat.history = []
-      
+
       await ctx.reply(`⚠️ 已删除全部账单（共 ${allBills.length} 条账单记录）\n\n请谨慎使用此功能！`)
     } catch (e) {
       console.error('删除全部账单失败', e)
@@ -362,11 +362,11 @@ export function registerShowHistory(bot, ensureChat) {
   bot.hears(/^显示历史账单$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (chat.history.length === 0) {
       return ctx.reply('暂无历史账单')
     }
-    
+
     const lines = chat.history.slice(-5).map((h, i) => {
       const incomes = h.data.incomes.length
       const dispatches = h.data.dispatches.length
@@ -383,23 +383,23 @@ export function registerUndoIncome(bot, ensureChat) {
   bot.hears(/^撤销入款$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
     const result = await deleteLastIncome(chatId)
-    
+
     if (!result) {
       return ctx.reply('❌ 没有可撤销的入款记录')
     }
-    
+
     // 从内存中移除最后一条
     if (chat.current.incomes.length > 0) {
       chat.current.incomes.pop()
     }
-    
+
     await ctx.reply(`✅ 已撤销最后一条入款：${result.amount}`, { ...(await buildInlineKb(ctx)) })
   })
 }
@@ -411,23 +411,23 @@ export function registerUndoDispatch(bot, ensureChat) {
   bot.hears(/^撤销下发$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
     }
-    
+
     const chatId = await ensureDbChat(ctx, chat)
     const result = await deleteLastDispatch(chatId)
-    
+
     if (!result) {
       return ctx.reply('❌ 没有可撤销的下发记录')
     }
-    
+
     // 从内存中移除最后一条
     if (chat.current.dispatches.length > 0) {
       chat.current.dispatches.pop()
     }
-    
+
     await ctx.reply(`✅ 已撤销最后一条下发：${result.usdt}U`, { ...(await buildInlineKb(ctx)) })
   })
 }
@@ -439,9 +439,9 @@ export function registerAllBill(bot, ensureChat) {
   bot.hears(/^总$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     const chatId = await ensureDbChat(ctx, chat)
-    
+
     try {
       // 获取所有账单（包括OPEN和CLOSED）
       const allBills = await prisma.bill.findMany({
@@ -464,11 +464,11 @@ export function registerAllBill(bot, ensureChat) {
         },
         orderBy: { openedAt: 'asc' }
       })
-      
+
       if (allBills.length === 0) {
         return ctx.reply('暂无账单记录', { ...(await buildInlineKb(ctx)) })
       }
-      
+
       // 汇总所有账单
       let totalIncome = 0
       let totalDispatch = 0
@@ -476,12 +476,12 @@ export function registerAllBill(bot, ensureChat) {
       let totalDispatchUSDT = 0
       const allIncomes = []
       const allDispatches = []
-      
+
       for (const bill of allBills) {
         for (const item of bill.items) {
           const amount = Number(item.amount || 0)
           const usdt = Number(item.usdt || 0)
-          
+
           if (item.type === 'INCOME') {
             totalIncome += amount
             totalIncomeUSDT += usdt
@@ -493,7 +493,7 @@ export function registerAllBill(bot, ensureChat) {
           }
         }
       }
-      
+
       // 🔥 优化：合并查询，减少数据库访问
       const { getEffectiveRate } = await import('../helpers.js')
       const [settings, effectiveRate] = await Promise.all([
@@ -503,13 +503,13 @@ export function registerAllBill(bot, ensureChat) {
         }),
         getEffectiveRate(chatId, chat).then(r => r ?? 0)
       ])
-      
+
       const feePercent = settings?.feePercent ?? 0
       const rate = effectiveRate
       const fee = (totalIncome * feePercent) / 100
       const shouldDispatch = totalIncome - fee
       const shouldDispatchUSDT = rate ? Number((shouldDispatch / rate).toFixed(1)) : 0
-      
+
       const lines = []
       lines.push('📊 *全部账单汇总*\n')
       lines.push(`入款（${allIncomes.length}笔）：${totalIncome.toFixed(2)} 元`)
@@ -535,10 +535,10 @@ export function registerAllBill(bot, ensureChat) {
       if (shouldDispatchUSDT > 0) {
         lines.push(`未下发USDT：${(shouldDispatchUSDT - totalDispatchUSDT).toFixed(1)} U`)
       }
-      
-      await ctx.reply(lines.join('\n'), { 
-        ...(await buildInlineKb(ctx)), 
-        parse_mode: 'Markdown' 
+
+      await ctx.reply(lines.join('\n'), {
+        ...(await buildInlineKb(ctx)),
+        parse_mode: 'Markdown'
       })
     } catch (e) {
       console.error('查询全部账单失败', e)
@@ -554,14 +554,14 @@ export function registerMyBill(bot, ensureChat) {
   bot.hears(/^(我的账单|\/我)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     const chatId = await ensureDbChat(ctx, chat)
     const userId = String(ctx.from?.id || '')
     const username = ctx.from?.username ? `@${ctx.from.username}` : null
-    
+
     try {
       const { bill } = await getOrCreateTodayBill(chatId)
-      
+
       const items = await prisma.billItem.findMany({
         where: {
           billId: bill.id,
@@ -575,24 +575,24 @@ export function registerMyBill(bot, ensureChat) {
         orderBy: { createdAt: 'desc' },
         take: 50 // 限制查询数量，优化性能
       })
-      
+
       if (items.length === 0) {
         return ctx.reply('❌ 您在本群暂无记账记录')
       }
-      
+
       const lines = []
       lines.push(`📋 您的账单记录（共 ${items.length} 条）：\n`)
-      
+
       let totalIncome = 0
       let totalDispatch = 0
       let totalUSDT = 0
-      
+
       items.forEach(item => {
         const amount = Number(item.amount || 0)
         const usdt = Number(item.usdt || 0)
         const isIncome = item.type === 'INCOME'
         const remark = item.remark // 🔥 获取备注
-        
+
         if (isIncome) {
           totalIncome += amount
           let line = ''
@@ -612,18 +612,18 @@ export function registerMyBill(bot, ensureChat) {
           lines.push(`📤 下发 ${usdt.toFixed(1)}U (${amount})`)
         }
       })
-      
+
       // 🔥 计算总入款的USDT
       const { getEffectiveRate } = await import('../helpers.js')
       const effectiveRate = await getEffectiveRate(chatId, chat)
       const totalIncomeUSDT = effectiveRate ? (totalIncome / effectiveRate).toFixed(1) : '0'
-      
+
       lines.push(`\n📊 汇总：`)
       lines.push(`入款：${totalIncome.toFixed(2)} (${totalIncomeUSDT}U)`) // 🔥 显示入款的U
       if (totalDispatch > 0 || totalUSDT > 0) {
         lines.push(`下发：${totalDispatch.toFixed(2)} (${totalUSDT.toFixed(1)}U)`)
       }
-      
+
       await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
     } catch (e) {
       console.error('查询我的账单失败', e)

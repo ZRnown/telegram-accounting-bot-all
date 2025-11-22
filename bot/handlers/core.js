@@ -15,14 +15,14 @@ export function registerStart(bot, ensureChat) {
     const firstName = ctx.from?.first_name || ''
     const lastName = ctx.from?.last_name || ''
     const fullName = `${firstName} ${lastName}`.trim()
-    
+
     if (ctx.chat?.type === 'private') {
       // 🔥 私聊：检查是否在白名单，显示不同的提示信息
       const userIdStr = String(userId || '')
       const whitelistedUser = await prisma.whitelistedUser.findUnique({
         where: { userId: userIdStr }
       })
-      
+
       if (whitelistedUser) {
         // 🔥 白名单用户：显示简要信息，提供内联菜单
         await ctx.reply(
@@ -32,7 +32,7 @@ export function registerStart(bot, ensureChat) {
           `📛 昵称：${fullName || '无'}\n\n` +
           `✅ 您已在白名单中，可以邀请机器人进群自动授权。\n\n` +
           `💡 点击下方按钮开始使用：`,
-          { 
+          {
             parse_mode: 'Markdown',
             ...(await buildInlineKb(ctx))
           }
@@ -43,7 +43,7 @@ export function registerStart(bot, ensureChat) {
         const inlineKb = Markup.inlineKeyboard([
           [Markup.button.callback('📋 使用说明', 'help')]
         ])
-        
+
         await ctx.reply(
           `👤 您的用户信息：\n\n` +
           `🆔 用户ID：\`${userId}\`\n` +
@@ -51,7 +51,7 @@ export function registerStart(bot, ensureChat) {
           `📛 昵称：${fullName || '无'}\n\n` +
           `您不在白名单中，请联系管理员将您加入白名单。\n\n` +
           `💡 点击下方按钮获取使用说明：`,
-          { 
+          {
             parse_mode: 'Markdown',
             ...inlineKb
           }
@@ -200,12 +200,12 @@ function getHelpText() {
  */
 export function registerHelp(bot) {
   bot.action('help', async (ctx) => {
-    try { 
-      await ctx.answerCbQuery() 
+    try {
+      await ctx.answerCbQuery()
     } catch (e) {
       console.error('[help-action][answerCbQuery-error]', e)
     }
-    
+
     // 🔥 私聊和群聊都显示完整的使用说明
     const help = getHelpText()
     await ctx.reply(help, { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) })
@@ -219,7 +219,7 @@ export function registerHelpCommand(bot, ensureChat) {
   bot.hears(/^使用说明$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     const help = getHelpText()
     await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
   })
@@ -230,7 +230,7 @@ export function registerHelpCommand(bot, ensureChat) {
  */
 export function registerDashboard(bot) {
   bot.action('open_dashboard', async (ctx) => {
-    try { await ctx.answerCbQuery('已发送链接') } catch {}
+    try { await ctx.answerCbQuery('已发送链接') } catch { }
     if (!BACKEND_URL) return ctx.reply('未配置后台地址。')
     const chatId = String(ctx.chat?.id || '')
     try {
@@ -250,11 +250,11 @@ export function registerViewBill(bot, ensureChat) {
   bot.hears(/^查看账单$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-    
+
     if (!BACKEND_URL) {
       return ctx.reply('❌ 未配置后台地址')
     }
-    
+
     const chatId = String(ctx.chat?.id || '')
     try {
       const u = new URL(BACKEND_URL)
@@ -277,13 +277,13 @@ export function registerViewBill(bot, ensureChat) {
  */
 export function registerCommandMenuAction(bot) {
   bot.action('command_menu', async (ctx) => {
-    try { await ctx.answerCbQuery() } catch {}
-    
+    try { await ctx.answerCbQuery() } catch { }
+
     // 只在私聊中处理
     if (ctx.chat?.type !== 'private') {
       return
     }
-    
+
     // 🔥 发送完整的使用说明（与 help action 一致）
     const help = getHelpText()
     await ctx.reply(help, { ...(await buildInlineKb(ctx)) })

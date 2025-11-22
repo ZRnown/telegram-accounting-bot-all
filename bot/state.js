@@ -57,17 +57,17 @@ function getChat(botId, chatId) {
     botChats.set(chatId, createInitialChatState())
   }
   const chat = botChats.get(chatId)
-  
+
   // 更新最后活动时间
   chat.lastActivityAt = Date.now()
-  
+
   // 定期清理大型数据结构，防止内存泄漏
   limitMapSize(chat.userIdByUsername, MAX_USER_ID_CACHE)
   limitMapSize(chat.commissions, MAX_COMMISSIONS)
   chat.history = limitArraySize(chat.history, MAX_HISTORY)
   chat.current.incomes = limitArraySize(chat.current.incomes, MAX_INCOMES)
   chat.current.dispatches = limitArraySize(chat.current.dispatches, MAX_DISPATCHES)
-  
+
   return chat
 }
 
@@ -77,7 +77,7 @@ function getChat(botId, chatId) {
 function cleanupInactiveChats() {
   const now = Date.now()
   const INACTIVE_THRESHOLD = 2 * 60 * 60 * 1000 // 🔥 内存优化：从24小时减少到2小时
-  
+
   let cleaned = 0
   let removed = 0
   for (const [botId, botChats] of bots.cache.entries()) {
@@ -103,7 +103,7 @@ function cleanupInactiveChats() {
       removed++
     }
   }
-  
+
   if (cleaned > 0) {
     console.log(`[memory-cleanup] 清理了 ${cleaned} 个不活跃的聊天，移除了 ${removed} 个`)
   }
@@ -118,21 +118,21 @@ function safeCalculate(expr) {
   try {
     // 移除所有空格
     const clean = expr.replace(/\s+/g, '')
-    
+
     // 安全检查：只允许数字、小数点和运算符
     if (!/^[\d+\-*/.()]+$/.test(clean)) {
       return null
     }
-    
+
     // 使用 Function 构造函数比 eval 更安全
     // 但仍然需要严格验证输入
     const result = Function('"use strict"; return (' + clean + ')')()
-    
+
     // 检查结果是否为有效数字
     if (!Number.isFinite(result)) {
       return null
     }
-    
+
     return Number(result.toFixed(1))
   } catch (e) {
     return null
@@ -160,7 +160,7 @@ function parseAmountAndRate(text) {
   let rate = null
   let feeRate = null
   let amount = null
-  
+
   // 🔥 处理组合格式：+1000/7*0.95 或 +1000u/7*0.95
   const comboMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/)
   if (comboMatch) {
@@ -171,7 +171,7 @@ function parseAmountAndRate(text) {
       return { amount, rate, feeRate }
     }
   }
-  
+
   // 🔥 单独费率格式：+1000u*0.95 或 +1000*0.95（乘法是费率）
   const feeMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/)
   if (feeMatch) {
@@ -181,7 +181,7 @@ function parseAmountAndRate(text) {
       return { amount, rate, feeRate }
     }
   }
-  
+
   // 🔥 单独汇率格式：+1000u/7 或 +100/2（除法是汇率）
   const rateMatch = text.match(/^([+\-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
   if (rateMatch) {
@@ -191,14 +191,14 @@ function parseAmountAndRate(text) {
       return { amount, rate, feeRate }
     }
   }
-  
+
   // 🔥 处理加减法计算：+3232+321, +100-20（加减法才是数学计算）
   const expr = text.trim()
   const firstChar = expr[0]
   const hasLeadingSign = firstChar === '+' || firstChar === '-'
   const sign = firstChar === '-' ? '-' : ''
   const cleanExpr = hasLeadingSign ? expr.slice(1) : expr
-  
+
   // 检查是否包含加减运算符（不包括乘除，乘除是费率/汇率）
   if (/[+\-]/.test(cleanExpr)) {
     const calculated = safeCalculate(sign + cleanExpr)
@@ -206,11 +206,11 @@ function parseAmountAndRate(text) {
       return { amount: calculated, rate, feeRate }
     }
   }
-  
+
   // 🔥 简单数字：+1000 或 -1000
   amount = Number(sign + cleanExpr)
   if (!Number.isFinite(amount)) return null
-  
+
   return { amount, rate, feeRate }
 }
 
