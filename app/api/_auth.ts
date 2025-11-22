@@ -64,15 +64,11 @@ export function assertAdmin(req: NextRequest) {
   if (!requireAdmin(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const origin = req.headers.get('origin')
-    const fwdHost = req.headers.get('x-forwarded-host') || ''
-    const host = fwdHost || req.headers.get('host') || ''
+    const host = req.headers.get('host')
     if (origin && host) {
       try {
         const u = new URL(origin)
-        const originHost = u.hostname.toLowerCase()
-        const reqHost = String(host).split(',')[0].trim().toLowerCase()
-        const reqHostName = reqHost.includes(':') ? reqHost.split(':')[0] : reqHost
-        if (originHost !== reqHostName) {
+        if (u.host !== host) {
           return NextResponse.json({ error: 'Bad Origin' }, { status: 403 })
         }
       } catch {}
@@ -133,15 +129,11 @@ export async function assertAdminAsync(req: NextRequest) {
   // 简单的 same-origin/Origin 校验（仅对修改类请求）
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const origin = req.headers.get('origin')
-    const fwdHost = req.headers.get('x-forwarded-host') || ''
-    const host = fwdHost || req.headers.get('host') || ''
+    const host = req.headers.get('host')
     if (origin && host) {
       try {
         const u = new URL(origin)
-        const originHost = u.hostname.toLowerCase()
-        const reqHost = String(host).split(',')[0].trim().toLowerCase()
-        const reqHostName = reqHost.includes(':') ? reqHost.split(':')[0] : reqHost
-        if (originHost !== reqHostName) {
+        if (u.host !== host) {
           return NextResponse.json({ error: 'Bad Origin' }, { status: 403 })
         }
       } catch {}
