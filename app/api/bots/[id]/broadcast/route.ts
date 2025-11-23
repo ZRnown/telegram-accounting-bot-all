@@ -1,11 +1,18 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ProxyAgent } from 'undici'
+import { assertAdmin, rateLimit, auditAdmin, getClientIp, getSession } from '@/app/api/_auth'
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    // auth & rate limit
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+    const rl = rateLimit(req, 'broadcast', 5, 60 * 1000)
+    if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
+
     const { id } = await context.params
-    const body = await req.json().catch(() => ({})) as { message?: string }
+    const body = await req.json().catch(() => ({})) as { message?: string; chatIds?: string[] }
     const message = (body.message || '').trim()
     if (!message) return Response.json({ error: '缺少 message' }, { status: 400 })
 
@@ -16,29 +23,42 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     if (!bot || !bot.token) return Response.json({ error: '未找到机器人' }, { status: 404 })
     if (!bot.enabled) return Response.json({ error: '机器人未启用，无法群发' }, { status: 400 })
 
-    // 只获取群组（ID为负数），排除私聊用户（ID为正数）
+    // 获取该 bot 已绑定且已批准的群聊
     const chats = await prisma.chat.findMany({
-      where: { 
-        botId: id, 
-        status: 'APPROVED'
-      },
+      where: { botId: id, status: 'APPROVED' },
       select: { id: true },
     })
-    
-    // 过滤出群组（ID 以 - 开头，即负数）
-    const groupChats = chats.filter(chat => chat.id.startsWith('-'))
-    
-    if (!groupChats.length) return Response.json({ error: '暂无已允许使用的群组' }, { status: 400 })
+    const allGroupChats = chats.filter(chat => chat.id.startsWith('-'))
+    if (!allGroupChats.length) return Response.json({ error: '暂无已允许使用的群组' }, { status: 400 })
+
+    // 如传入 chatIds，仅向所选子集发送
+    let selectedGroupChats = allGroupChats
+    if (Array.isArray(body.chatIds)) {
+      // 去重并规范
+      const set = new Set(body.chatIds.filter(x => typeof x === 'string').map(x => x.trim()).filter(Boolean))
+      if (set.size === 0) return Response.json({ error: 'chatIds 为空' }, { status: 400 })
+      // 必须以 '-' 开头且属于该 bot 的绑定群
+      const allowed = new Set(allGroupChats.map(c => c.id))
+      const invalid: string[] = []
+      const picked: { id: string }[] = []
+      for (const cid of set) {
+        if (!cid.startsWith('-') || !allowed.has(cid)) invalid.push(cid)
+        else picked.push({ id: cid })
+      }
+      if (invalid.length > 0) return Response.json({ error: '包含无效的 chatIds', invalid }, { status: 400 })
+      selectedGroupChats = picked
+    }
 
     const url = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/sendMessage`
     const proxyUrl = (process.env.PROXY_URL || '').trim()
     const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined
 
     let sent = 0
+    const failedIds: string[] = []
     // 先过滤掉机器人不在群内的 chat（避免报错）
     const checkUrlBase = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChatMember`
     const validChats: { id: string }[] = []
-    for (const chat of groupChats) {
+    for (const chat of selectedGroupChats) {
       try {
         const checkUrl = `${checkUrlBase}?chat_id=${encodeURIComponent(chat.id)}&user_id=${encodeURIComponent(''+0)}`
         // 上面只是占位，实际应查询机器人自身是否在群内：Telegram 不允许 getChatMember 查询自己，
@@ -50,7 +70,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         if (j && j.ok) {
           validChats.push(chat)
         }
-      } catch {}
+      } catch {
+        failedIds.push(chat.id)
+      }
     }
 
     for (const chat of validChats) {
@@ -63,15 +85,26 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
           ...(dispatcher ? { dispatcher } : {}),
         }
         const resp = await fetch(url, init)
-        if (resp.ok) {
-          sent += 1
-        }
+        if (resp.ok) sent += 1
+        else failedIds.push(chat.id)
       } catch (e) {
-        console.error('broadcast sendMessage failed', e)
+        // 保留最小错误信息，避免大量日志
+        failedIds.push(chat.id)
       }
     }
 
-    return Response.json({ ok: true, sent, total: groupChats.length })
+    const tried = validChats.length
+    const total = selectedGroupChats.length
+
+    // 审计日志
+    try {
+      const sess = getSession(req)
+      const username = String(sess?.u || '')
+      const ip = getClientIp(req)
+      await auditAdmin(username || 'admin', 'broadcast', ip, `bot:${id}; total:${total}; tried:${tried}; sent:${sent}; failed:${failedIds.length}`)
+    } catch {}
+
+    return Response.json({ ok: true, sent, tried, total, failedIds })
   } catch (e) {
     console.error(e)
     return Response.json({ error: 'Server error' }, { status: 500 })

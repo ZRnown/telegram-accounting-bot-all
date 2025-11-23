@@ -987,6 +987,88 @@ function DashboardPageInner() {
                               }))
                             }}
                           />
+                          {/* 选择群组（可选） */}
+                          <div className="border rounded-md p-2 bg-slate-50">
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs text-slate-600">可选：只向勾选的群组发送（不选择则默认向该机器人全部已允许群组发送）</div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  className="px-2 py-1 text-xs border rounded hover:bg-white disabled:opacity-50"
+                                  disabled={broadcastDrafts[bot.id]?.loading}
+                                  onClick={async () => {
+                                    const current = broadcastDrafts[bot.id] || { open: true }
+                                    // 若已加载则折叠/展开
+                                    if (Array.isArray(current.groups) && current.groups.length > 0) {
+                                      setBroadcastDrafts((prev) => ({
+                                        ...prev,
+                                        [bot.id]: { ...current, selectOpen: !current.selectOpen }
+                                      }))
+                                      return
+                                    }
+                                    // 否则加载
+                                    setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, loading: true, selectOpen: true } }))
+                                    try {
+                                      const res = await fetch(`/api/chats?botId=${encodeURIComponent(bot.id)}`)
+                                      const json = res.ok ? await res.json().catch(() => ({})) : {}
+                                      const all = Array.isArray(json?.items) ? json.items : []
+                                      // 仅群聊且已批准
+                                      const groupsList = all.filter((it: any) => String(it.id || '').startsWith('-') && ((it.status as any) === 'APPROVED' || it.allowed === true))
+                                        .map((it: any) => ({ id: String(it.id), title: String(it.title || it.id) }))
+                                      setBroadcastDrafts((prev) => ({
+                                        ...prev,
+                                        [bot.id]: { ...current, groups: groupsList, loading: false, selected: new Set<string>(), selectOpen: true }
+                                      }))
+                                    } catch {
+                                      setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, loading: false, error: '加载群组失败' } }))
+                                    }
+                                  }}
+                                >{broadcastDrafts[bot.id]?.selectOpen ? '收起群组' : '选择群组'}</button>
+                              </div>
+                            </div>
+                            {broadcastDrafts[bot.id]?.selectOpen && (
+                              <div className="mt-2 max-h-48 overflow-auto bg-white border rounded">
+                                {broadcastDrafts[bot.id]?.loading ? (
+                                  <div className="p-2 text-xs text-slate-500">加载中...</div>
+                                ) : (
+                                  <div className="p-2 space-y-2">
+                                    <label className="inline-flex items-center gap-2 text-xs">
+                                      <input
+                                        type="checkbox"
+                                        checked={Array.isArray(broadcastDrafts[bot.id]?.groups) && broadcastDrafts[bot.id]?.groups.length > 0 && (broadcastDrafts[bot.id]?.selected?.size || 0) === (broadcastDrafts[bot.id]?.groups?.length || 0)}
+                                        onChange={(e) => {
+                                          const cur = broadcastDrafts[bot.id]
+                                          const all = Array.isArray(cur?.groups) ? cur!.groups : []
+                                          const nextSel = new Set<string>()
+                                          if (e.target.checked) {
+                                            all.forEach((g: any) => nextSel.add(g.id))
+                                          }
+                                          setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...cur, selected: nextSel } }))
+                                        }}
+                                      /> 全选/取消全选
+                                    </label>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {(broadcastDrafts[bot.id]?.groups || []).map((g: any) => (
+                                        <label key={g.id} className="inline-flex items-center gap-2 text-xs border rounded px-2 py-1 hover:bg-slate-50">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!broadcastDrafts[bot.id]?.selected?.has(g.id)}
+                                            onChange={(e) => {
+                                              const cur = broadcastDrafts[bot.id]
+                                              const set = new Set<string>(Array.from(cur?.selected || []))
+                                              if (e.target.checked) set.add(g.id); else set.delete(g.id)
+                                              setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...cur, selected: set } }))
+                                            }}
+                                          />
+                                          <span className="truncate" title={`${g.title} (${g.id})`}>{g.title}</span>
+                                          <span className="text-slate-400">({g.id})</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                           <div className="flex justify-end gap-3">
                             <button
                               className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
@@ -1003,11 +1085,15 @@ function DashboardPageInner() {
                                   const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ message: current.message }),
+                                    body: JSON.stringify({ message: current.message, ...(current?.selected && current.selected.size > 0 ? { chatIds: Array.from(current.selected) } : {}) }),
                                   })
                                   if (res.ok) {
                                     const json = await res.json().catch(() => null)
-                                    toast({ title: '成功', description: `已发送：${json?.sent ?? 0} / ${json?.total ?? 0}` })
+                                    const sent = Number(json?.sent || 0)
+                                    const total = Number(json?.total || 0)
+                                    const tried = Number(json?.tried || 0)
+                                    const failed = Array.isArray(json?.failedIds) ? json.failedIds.length : Math.max(0, tried - sent)
+                                    toast({ title: '成功', description: `已发送：${sent} / ${total}（尝试：${tried}，失败：${failed}）` })
                                     setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { open: false, message: '', sending: false } }))
                                   } else {
                                     const err = await res.json().catch(() => ({}))

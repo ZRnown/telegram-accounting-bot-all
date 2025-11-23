@@ -36,6 +36,13 @@ export function verifySession(raw: string | null) {
   }
 }
 
+function shouldUseSecureCookie() {
+  const forced = process.env.COOKIE_SECURE
+  if (forced === 'true') return true
+  if (forced === 'false') return false
+  return process.env.NODE_ENV === 'production'
+}
+
 export function setSessionCookie(res: NextResponse, username: string, ver: number = 0) {
   const v = createSession(username, ver)
   res.cookies.set({
@@ -43,7 +50,7 @@ export function setSessionCookie(res: NextResponse, username: string, ver: numbe
     value: v,
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: shouldUseSecureCookie(),
     path: '/',
     maxAge: MAX_AGE,
   })
