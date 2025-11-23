@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { toast } from "@/hooks/use-toast"
 
 export default function CookieHelperPage() {
   const [cookieString, setCookieString] = useState("")
@@ -42,9 +43,13 @@ export default function CookieHelperPage() {
     return missing
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    alert("已复制到剪贴板")
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast({ title: "已复制", description: "内容已复制到剪贴板" })
+    } catch (e: any) {
+      toast({ title: "复制失败", description: e?.message || "", variant: "destructive" })
+    }
   }
 
   const missingCookies = checkRequiredCookies()

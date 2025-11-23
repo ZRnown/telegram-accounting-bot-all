@@ -52,6 +52,7 @@ function DashboardPageInner() {
   const [showCreateBot, setShowCreateBot] = useState<boolean>(false)
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
   const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
+  const [grpMemberDlg, setGrpMemberDlg] = useState<{ open: boolean; botId?: string; groupId?: string; groupName?: string; items?: Array<{ id: string; title: string }>; selected?: Set<string>; origSelected?: Set<string>; loading?: boolean; saving?: boolean; filter?: string }>({ open: false })
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
@@ -1161,42 +1162,103 @@ function DashboardPageInner() {
                                     <div className="mt-2 text-xs text-slate-600">{(g.chats||[]).slice(0,6).map((c:any)=>c.title).join('、')}{(g.count||g.chats?.length||0)>6?'…':''}</div>
                                     <div className="mt-2 flex items-center gap-2 text-xs">
                                       <button className="px-2 py-0.5 border rounded" onClick={async()=>{
-                                        // 添加群到分组
                                         try {
-                                          // 复用已加载 groups 列表
-                                          const curList = (broadcastDrafts as any)[bot.id]?.groups
-                                          let source = curList
-                                          if (!Array.isArray(source)) {
-                                            const res = await fetch(`/api/chats?botId=${encodeURIComponent(bot.id)}`)
-                                            const json = res.ok ? await res.json().catch(()=>({})) : {}
-                                            const all = Array.isArray(json?.items) ? json.items : []
-                                            source = all.filter((it: any) => String(it.id || '').startsWith('-') && ((it.status as any) === 'APPROVED' || it.allowed === true))
-                                              .map((it: any) => ({ id: String(it.id), title: String(it.title || it.id) }))
-                                          }
-                                          const pick = prompt('请输入要添加的群ID（逗号分隔）\n可参考：\n' + (source||[]).slice(0,10).map((s:any)=>`${s.title}(${s.id})`).join('\n'))
-                                          if (!pick) return
-                                          const ids = pick.split(',').map(s=>s.trim()).filter(Boolean)
-                                          await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ addChatIds: ids }) })
-                                          const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
-                                          const json2 = listRes.ok ? await listRes.json().catch(()=>({})) : {}
-                                          const items = Array.isArray(json2?.items) ? json2.items : []
-                                          setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{} as any), grpList: items } }))
-                                        } catch {}
-                                      }}>添加群</button>
-                                      <button className="px-2 py-0.5 border rounded" onClick={async()=>{
-                                        const rm = prompt('请输入要移除的群ID（逗号分隔）')
-                                        if(!rm) return
-                                        const ids = rm.split(',').map(s=>s.trim()).filter(Boolean)
-                                        await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ removeChatIds: ids }) })
-                                        const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
-                                        const json2 = listRes.ok ? await listRes.json().catch(()=>({})) : {}
-                                        const items = Array.isArray(json2?.items) ? json2.items : []
-                                        setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{} as any), grpList: items } }))
-                                      }}>移除群</button>
+                                          setGrpMemberDlg({ open: true, loading: true, saving: false, botId: bot.id, groupId: g.id, groupName: g.name, items: [], selected: new Set<string>(), origSelected: new Set<string>(), filter: '' })
+                                          const res = await fetch(`/api/chats?botId=${encodeURIComponent(bot.id)}`, { cache: 'no-store' })
+                                          const json = res.ok ? await res.json().catch(()=>({})) : {}
+                                          const all = Array.isArray((json as any)?.items) ? (json as any).items : []
+                                          const list = all.filter((it: any) => String(it.id || '').startsWith('-') && (((it as any).status as any) === 'APPROVED' || (it as any).allowed === true))
+                                            .map((it: any) => ({ id: String(it.id), title: String(it.title || it.id) }))
+                                          const currentIds = new Set<string>(((g?.chats||[]) as any[]).map((c:any)=>String(c.chatId || c.id || c)))
+                                          setGrpMemberDlg({ open: true, loading: false, saving: false, botId: bot.id, groupId: g.id, groupName: g.name, items: list, selected: new Set<string>(Array.from(currentIds)), origSelected: new Set<string>(Array.from(currentIds)), filter: '' })
+                                        } catch {
+                                          setGrpMemberDlg({ open: false })
+                                        }
+                                      }}>管理成员</button>
                                     </div>
                                   </div>
                                 ))}
                               </div>
+                              {grpMemberDlg.open && (
+                                <Dialog open={(grpMemberDlg as any).open} onOpenChange={(o)=> setGrpMemberDlg((prev)=>({ ...(prev as any), open: o }))}>
+                                  <DialogContent className="sm:max-w-[640px]">
+                                    <DialogHeader>
+                                      <DialogTitle>管理分组成员 - {String((grpMemberDlg as any).groupName || '')}</DialogTitle>
+                                      <DialogDescription>选择要包含在此分组内的群组</DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-2">
+                                      <input
+                                        className="w-full border rounded px-2 py-1 text-sm"
+                                        placeholder="搜索群名或ID"
+                                        value={String((grpMemberDlg as any).filter || '')}
+                                        onChange={(e)=> setGrpMemberDlg((prev)=>({ ...(prev as any), filter: e.target.value }))}
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button className="px-2 py-1 text-xs border rounded" onClick={()=>{
+                                          const items = ((grpMemberDlg as any).items || []) as Array<{id:string;title:string}>
+                                          const f = String((grpMemberDlg as any).filter || '').toLowerCase()
+                                          const filtered = items.filter(it=> it.id.toLowerCase().includes(f) || (it.title||'').toLowerCase().includes(f))
+                                          setGrpMemberDlg((prev)=>({ ...(prev as any), selected: new Set<string>(filtered.map(it=>it.id)) }))
+                                        }}>全选</button>
+                                        <button className="px-2 py-1 text-xs border rounded" onClick={()=>{
+                                          setGrpMemberDlg((prev)=>({ ...(prev as any), selected: new Set<string>() }))
+                                        }}>全不选</button>
+                                      </div>
+                                      <div className="max-h-72 overflow-auto border rounded">
+                                        <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                          {(((grpMemberDlg as any).items)||[] as Array<{id:string;title:string}>).filter((it: any)=>{
+                                            const f = String((grpMemberDlg as any).filter || '').toLowerCase()
+                                            return it.id.toLowerCase().includes(f) || (it.title||'').toLowerCase().includes(f)
+                                          }).map((it: any)=> (
+                                            <label key={it.id} className="flex items-center gap-2 text-xs border rounded px-2 py-1">
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(((grpMemberDlg as any).selected as Set<string>)?.has(it.id))}
+                                                onChange={(e)=>{
+                                                  const cur = (grpMemberDlg as any)
+                                                  const set = new Set<string>(Array.from((cur.selected as Set<string>) || new Set()))
+                                                  if (e.target.checked) set.add(it.id); else set.delete(it.id)
+                                                  setGrpMemberDlg({ ...(cur as any), selected: set })
+                                                }}
+                                              />
+                                              <span className="truncate" title={`${it.title} (${it.id})`}>{it.title}</span>
+                                              <span className="text-slate-400">({it.id})</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                      <button className="px-3 py-1.5 text-xs border rounded" onClick={()=> setGrpMemberDlg({ open: false })}>取消</button>
+                                      <button
+                                        className="px-3 py-1.5 text-xs border rounded disabled:opacity-50"
+                                        disabled={Boolean((grpMemberDlg as any).saving)}
+                                        onClick={async()=>{
+                                          try {
+                                            const cur: any = grpMemberDlg
+                                            const sel = Array.from((cur.selected as Set<string>) || new Set())
+                                            const orig = new Set<string>(Array.from((cur.origSelected as Set<string>) || new Set()))
+                                            const add = sel.filter((id)=> !orig.has(id))
+                                            const remove = Array.from(orig).filter((id)=> !(cur.selected as Set<string>).has(id))
+                                            if (add.length === 0 && remove.length === 0) { setGrpMemberDlg({ open: false }); toast({ title: '已保存', description: '无变更' }); return }
+                                            setGrpMemberDlg((prev)=>({ ...(prev as any), saving: true }))
+                                            await fetch(`/api/bots/${encodeURIComponent(String(cur.botId))}/broadcast-groups/${encodeURIComponent(String(cur.groupId))}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ addChatIds: add, removeChatIds: remove }) })
+                                            const listRes = await fetch(`/api/bots/${encodeURIComponent(String(cur.botId))}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                            const json = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                            const items = Array.isArray((json as any)?.items) ? (json as any).items : []
+                                            setBroadcastDrafts((prev)=> ({ ...prev, [String(cur.botId)]: { ...((prev as any)[String(cur.botId)]||{}), grpList: items } }))
+                                            toast({ title: '成功', description: '已保存分组成员' })
+                                            setGrpMemberDlg({ open: false })
+                                          } catch (e) {
+                                            toast({ title: '错误', description: '保存失败', variant: 'destructive' })
+                                            setGrpMemberDlg((prev)=>({ ...(prev as any), saving: false }))
+                                          }
+                                        }}
+                                      >保存</button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              )}
                             </div>
                           )}
                           <div className="flex justify-end gap-3">
@@ -1208,7 +1270,7 @@ function DashboardPageInner() {
                               className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50 disabled:opacity-50"
                               disabled={!broadcastDrafts[bot.id]?.message?.trim() || broadcastDrafts[bot.id]?.sending}
                               onClick={async () => {
-                                const current = broadcastDrafts[bot.id]
+                                const current: any = (broadcastDrafts as any)[bot.id]
                                 if (!current?.message?.trim()) return
                                 setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, sending: true } }))
                                 try {
@@ -1217,8 +1279,8 @@ function DashboardPageInner() {
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                       message: current.message,
-                                      ...(current?.selected && current.selected.size > 0 ? { chatIds: Array.from(current.selected) } : {}),
-                                      ...(current?.grpSelected && current.grpSelected.size > 0 ? { groupIds: Array.from(current.grpSelected) } : {}),
+                                      ...(current?.selected && (current.selected as Set<string>).size > 0 ? { chatIds: Array.from(current.selected as Set<string>) } : {}),
+                                      ...(current?.grpSelected && (current.grpSelected as Set<string>).size > 0 ? { groupIds: Array.from(current.grpSelected as Set<string>) } : {}),
                                     }),
                                   })
                                   if (res.ok) {
