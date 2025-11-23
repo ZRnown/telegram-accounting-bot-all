@@ -899,7 +899,7 @@ function DashboardPageInner() {
               {bots.length === 0 ? (
                 <div className="text-sm text-slate-500">暂无机器人，请先创建。</div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
                   {bots.map((bot) => (
                     <div key={bot.id} className="border rounded-md p-4 space-y-2">
                       <div className="flex items-center justify-between">
@@ -975,6 +975,16 @@ function DashboardPageInner() {
                       </div>
                       {broadcastDrafts[bot.id]?.open && (
                         <div className="space-y-2 text-sm">
+                          {/* Tab */}
+                          <div className="flex items-center gap-2 text-xs">
+                            {(['chats','groups'] as const).map(tab => (
+                              <button
+                                key={tab}
+                                className={`px-2 py-1 border rounded ${ (((broadcastDrafts as any)[bot.id]?.tab) || 'chats') === tab ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
+                                onClick={() => setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{open:true}), open:true, tab } }))}
+                              >{tab === 'chats' ? '选择群组' : '分组发送'}</button>
+                            ))}
+                          </div>
                           <textarea
                             className="w-full border rounded-md px-2 py-1 text-sm min-h-[80px]"
                             placeholder="在此输入要发送至所有绑定群组的公告"
@@ -988,15 +998,16 @@ function DashboardPageInner() {
                             }}
                           />
                           {/* 选择群组（可选） */}
+                          { (((broadcastDrafts as any)[bot.id]?.tab) || 'chats') === 'chats' && (
                           <div className="border rounded-md p-2 bg-slate-50">
                             <div className="flex items-center justify-between">
                               <div className="text-xs text-slate-600">可选：只向勾选的群组发送（不选择则默认向该机器人全部已允许群组发送）</div>
                               <div className="flex items-center gap-2">
                                 <button
                                   className="px-2 py-1 text-xs border rounded hover:bg-white disabled:opacity-50"
-                                  disabled={broadcastDrafts[bot.id]?.loading}
+                                  disabled={((broadcastDrafts as any)[bot.id]?.loading)}
                                   onClick={async () => {
-                                    const current = broadcastDrafts[bot.id] || { open: true }
+                                    const current = (broadcastDrafts as any)[bot.id] || { open: true }
                                     // 若已加载则折叠/展开
                                     if (Array.isArray(current.groups) && current.groups.length > 0) {
                                       setBroadcastDrafts((prev) => ({
@@ -1022,22 +1033,22 @@ function DashboardPageInner() {
                                       setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, loading: false, error: '加载群组失败' } }))
                                     }
                                   }}
-                                >{broadcastDrafts[bot.id]?.selectOpen ? '收起群组' : '选择群组'}</button>
+                                >{((broadcastDrafts as any)[bot.id]?.selectOpen) ? '收起群组' : '选择群组'}</button>
                               </div>
                             </div>
-                            {broadcastDrafts[bot.id]?.selectOpen && (
+                            {((broadcastDrafts as any)[bot.id]?.selectOpen) && (
                               <div className="mt-2 max-h-48 overflow-auto bg-white border rounded">
-                                {broadcastDrafts[bot.id]?.loading ? (
+                                {((broadcastDrafts as any)[bot.id]?.loading) ? (
                                   <div className="p-2 text-xs text-slate-500">加载中...</div>
                                 ) : (
                                   <div className="p-2 space-y-2">
                                     <label className="inline-flex items-center gap-2 text-xs">
                                       <input
                                         type="checkbox"
-                                        checked={Array.isArray(broadcastDrafts[bot.id]?.groups) && broadcastDrafts[bot.id]?.groups.length > 0 && (broadcastDrafts[bot.id]?.selected?.size || 0) === (broadcastDrafts[bot.id]?.groups?.length || 0)}
+                                        checked={Array.isArray(((broadcastDrafts as any)[bot.id]?.groups)) && ((broadcastDrafts as any)[bot.id]?.groups.length > 0) && ((((broadcastDrafts as any)[bot.id]?.selected)?.size || 0) === ((((broadcastDrafts as any)[bot.id]?.groups)?.length) || 0))}
                                         onChange={(e) => {
-                                          const cur = broadcastDrafts[bot.id]
-                                          const all = Array.isArray(cur?.groups) ? cur!.groups : []
+                                          const cur: any = (broadcastDrafts as any)[bot.id]
+                                          const all = Array.isArray(cur?.groups) ? cur.groups : []
                                           const nextSel = new Set<string>()
                                           if (e.target.checked) {
                                             all.forEach((g: any) => nextSel.add(g.id))
@@ -1047,13 +1058,13 @@ function DashboardPageInner() {
                                       /> 全选/取消全选
                                     </label>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {(broadcastDrafts[bot.id]?.groups || []).map((g: any) => (
+                                      {((((broadcastDrafts as any)[bot.id]?.groups) || []) as any[]).map((g: any) => (
                                         <label key={g.id} className="inline-flex items-center gap-2 text-xs border rounded px-2 py-1 hover:bg-slate-50">
                                           <input
                                             type="checkbox"
-                                            checked={!!broadcastDrafts[bot.id]?.selected?.has(g.id)}
+                                            checked={!!(((broadcastDrafts as any)[bot.id]?.selected)?.has(g.id))}
                                             onChange={(e) => {
-                                              const cur = broadcastDrafts[bot.id]
+                                              const cur: any = (broadcastDrafts as any)[bot.id]
                                               const set = new Set<string>(Array.from(cur?.selected || []))
                                               if (e.target.checked) set.add(g.id); else set.delete(g.id)
                                               setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...cur, selected: set } }))
@@ -1069,6 +1080,125 @@ function DashboardPageInner() {
                               </div>
                             )}
                           </div>
+                          )}
+
+                          {/* 分组发送 */}
+                          { (((broadcastDrafts as any)[bot.id]?.tab) || 'chats') === 'groups' && (
+                            <div className="border rounded-md p-2 bg-slate-50">
+                              <div className="flex items-center justify-between">
+                                <div className="text-xs text-slate-600">选择要发送的分组，可创建/重命名/删除分组，并维护分组内的群组</div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    className="px-2 py-1 text-xs border rounded hover:bg-white disabled:opacity-50"
+                                    onClick={async () => {
+                                      const cur: any = (broadcastDrafts as any)[bot.id] || { open: true, tab: 'groups' }
+                                      try {
+                                        const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache: 'no-store' })
+                                        const json = res.ok ? await res.json().catch(()=>({})) : {}
+                                        const items = Array.isArray(json?.items) ? json.items : []
+                                        setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...cur, grpList: items, grpSelected: new Set<string>() } }))
+                                      } catch {
+                                        // ignore
+                                      }
+                                    }}
+                                  >刷新分组</button>
+                                  <button
+                                    className="px-2 py-1 text-xs border rounded hover:bg-white"
+                                    onClick={async () => {
+                                      const name = prompt('请输入分组名称')?.trim()
+                                      if (!name) return
+                                      try {
+                                        const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups`, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ name }) })
+                                        if (res.ok) {
+                                          const cur: any = (broadcastDrafts as any)[bot.id] || { open: true, tab: 'groups' }
+                                          const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                          const json = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                          const items = Array.isArray(json?.items) ? json.items : []
+                                          setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...cur, grpList: items, grpSelected: new Set<string>() } }))
+                                        }
+                                      } catch {}
+                                    }}
+                                  >新建分组</button>
+                                </div>
+                              </div>
+                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {((((broadcastDrafts as any)[bot.id]?.grpList) || []) as any[]).map((g: any) => (
+                                  <div key={g.id} className="border rounded p-2 bg-white">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <label className="inline-flex items-center gap-2 text-xs">
+                                        <input type="checkbox" checked={!!(((broadcastDrafts as any)[bot.id]?.grpSelected)?.has(g.id))} onChange={(e)=>{
+                                          const cur: any = (broadcastDrafts as any)[bot.id]
+                                          const set = new Set<string>(Array.from(cur?.grpSelected || []))
+                                          if (e.target.checked) set.add(g.id); else set.delete(g.id)
+                                          setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...cur, grpSelected: set } }))
+                                        }} />
+                                        <span className="font-medium">{g.name}</span>
+                                        <span className="text-slate-400">({g.count || (g.chats?.length||0)}群)</span>
+                                      </label>
+                                      <div className="flex items-center gap-2">
+                                        <button className="px-2 py-0.5 text-xs border rounded" onClick={async()=>{
+                                          const nn = prompt('重命名分组', g.name)?.trim(); if(!nn) return
+                                          try {
+                                            await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: nn }) })
+                                            const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                            const json = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                            const items = Array.isArray(json?.items) ? json.items : []
+                                            setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{} as any), grpList: items } }))
+                                          } catch {}
+                                        }}>重命名</button>
+                                        <button className="px-2 py-0.5 text-xs border rounded text-red-600" onClick={async()=>{
+                                          if(!confirm('确认删除该分组？')) return
+                                          try {
+                                            await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method: 'DELETE' })
+                                            const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                            const json = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                            const items = Array.isArray(json?.items) ? json.items : []
+                                            setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{}), grpList: items } }))
+                                          } catch {}
+                                        }}>删除</button>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2 text-xs text-slate-600">{(g.chats||[]).slice(0,6).map((c:any)=>c.title).join('、')}{(g.count||g.chats?.length||0)>6?'…':''}</div>
+                                    <div className="mt-2 flex items-center gap-2 text-xs">
+                                      <button className="px-2 py-0.5 border rounded" onClick={async()=>{
+                                        // 添加群到分组
+                                        try {
+                                          // 复用已加载 groups 列表
+                                          const curList = (broadcastDrafts as any)[bot.id]?.groups
+                                          let source = curList
+                                          if (!Array.isArray(source)) {
+                                            const res = await fetch(`/api/chats?botId=${encodeURIComponent(bot.id)}`)
+                                            const json = res.ok ? await res.json().catch(()=>({})) : {}
+                                            const all = Array.isArray(json?.items) ? json.items : []
+                                            source = all.filter((it: any) => String(it.id || '').startsWith('-') && ((it.status as any) === 'APPROVED' || it.allowed === true))
+                                              .map((it: any) => ({ id: String(it.id), title: String(it.title || it.id) }))
+                                          }
+                                          const pick = prompt('请输入要添加的群ID（逗号分隔）\n可参考：\n' + (source||[]).slice(0,10).map((s:any)=>`${s.title}(${s.id})`).join('\n'))
+                                          if (!pick) return
+                                          const ids = pick.split(',').map(s=>s.trim()).filter(Boolean)
+                                          await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ addChatIds: ids }) })
+                                          const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                          const json2 = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                          const items = Array.isArray(json2?.items) ? json2.items : []
+                                          setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{} as any), grpList: items } }))
+                                        } catch {}
+                                      }}>添加群</button>
+                                      <button className="px-2 py-0.5 border rounded" onClick={async()=>{
+                                        const rm = prompt('请输入要移除的群ID（逗号分隔）')
+                                        if(!rm) return
+                                        const ids = rm.split(',').map(s=>s.trim()).filter(Boolean)
+                                        await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups/${encodeURIComponent(g.id)}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ removeChatIds: ids }) })
+                                        const listRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast-groups?withChats=1`, { cache:'no-store' })
+                                        const json2 = listRes.ok ? await listRes.json().catch(()=>({})) : {}
+                                        const items = Array.isArray(json2?.items) ? json2.items : []
+                                        setBroadcastDrafts(prev => ({ ...prev, [bot.id]: { ...(prev[bot.id]||{} as any), grpList: items } }))
+                                      }}>移除群</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="flex justify-end gap-3">
                             <button
                               className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
@@ -1085,7 +1215,11 @@ function DashboardPageInner() {
                                   const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ message: current.message, ...(current?.selected && current.selected.size > 0 ? { chatIds: Array.from(current.selected) } : {}) }),
+                                    body: JSON.stringify({
+                                      message: current.message,
+                                      ...(current?.selected && current.selected.size > 0 ? { chatIds: Array.from(current.selected) } : {}),
+                                      ...(current?.grpSelected && current.grpSelected.size > 0 ? { groupIds: Array.from(current.grpSelected) } : {}),
+                                    }),
                                   })
                                   if (res.ok) {
                                     const json = await res.json().catch(() => null)

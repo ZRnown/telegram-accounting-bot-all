@@ -3,6 +3,28 @@ import { prisma } from '@/lib/db'
 import { ProxyAgent } from 'undici'
 import { assertAdmin, rateLimit, auditAdmin, getClientIp, getSession } from '@/app/api/_auth'
 
+async function ensureDDL() {
+  const createGroups = `CREATE TABLE IF NOT EXISTS BroadcastGroup (
+    id TEXT PRIMARY KEY,
+    botId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`
+  const createGroupChat = `CREATE TABLE IF NOT EXISTS BroadcastGroupChat (
+    groupId TEXT NOT NULL,
+    chatId TEXT NOT NULL,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (groupId, chatId)
+  )`
+  try {
+    // @ts-ignore
+    await prisma.$executeRawUnsafe(createGroups)
+    // @ts-ignore
+    await prisma.$executeRawUnsafe(createGroupChat)
+  } catch {}
+}
+
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     // auth & rate limit
@@ -12,7 +34,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     if (!rl.ok) return NextResponse.json({ error: `Too many requests. Retry after ${rl.retryAfter}s` }, { status: 429 })
 
     const { id } = await context.params
-    const body = await req.json().catch(() => ({})) as { message?: string; chatIds?: string[] }
+    const body = await req.json().catch(() => ({})) as { message?: string; chatIds?: string[]; groupIds?: string[] }
     const message = (body.message || '').trim()
     if (!message) return Response.json({ error: '缺少 message' }, { status: 400 })
 
@@ -28,26 +50,53 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       where: { botId: id, status: 'APPROVED' },
       select: { id: true },
     })
-    const allGroupChats = chats.filter(chat => chat.id.startsWith('-'))
+    const allGroupChats = chats.filter((chat: any) => chat.id.startsWith('-'))
     if (!allGroupChats.length) return Response.json({ error: '暂无已允许使用的群组' }, { status: 400 })
 
-    // 如传入 chatIds，仅向所选子集发送
-    let selectedGroupChats = allGroupChats
-    if (Array.isArray(body.chatIds)) {
-      // 去重并规范
-      const set = new Set(body.chatIds.filter(x => typeof x === 'string').map(x => x.trim()).filter(Boolean))
-      if (set.size === 0) return Response.json({ error: 'chatIds 为空' }, { status: 400 })
-      // 必须以 '-' 开头且属于该 bot 的绑定群
-      const allowed = new Set(allGroupChats.map(c => c.id))
-      const invalid: string[] = []
-      const picked: { id: string }[] = []
-      for (const cid of set) {
-        if (!cid.startsWith('-') || !allowed.has(cid)) invalid.push(cid)
-        else picked.push({ id: cid })
+    // 展开 groupIds -> chatIds，并与手动 chatIds 合并去重
+    let selectedIds = new Set<string>()
+    if (Array.isArray(body.groupIds) && body.groupIds.length > 0) {
+      await ensureDDL()
+      const gids = body.groupIds.map(String)
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT DISTINCT gc.chatId AS id FROM BroadcastGroupChat gc JOIN BroadcastGroup g ON g.id = gc.groupId WHERE g.botId = ? AND g.id IN (${gids.map(() => '?').join(',')})`,
+        id, ...gids
+      ).catch(() => []) as any[]
+      for (const r of rows as any[]) {
+        const cid = String((r as any).id || '')
+        if (cid) selectedIds.add(cid)
       }
-      if (invalid.length > 0) return Response.json({ error: '包含无效的 chatIds', invalid }, { status: 400 })
-      selectedGroupChats = picked
     }
+
+    // 合并显式 chatIds
+    if (Array.isArray(body.chatIds)) {
+      for (const raw of body.chatIds) {
+        if (typeof raw === 'string') {
+          const v = raw.trim()
+          if (v) selectedIds.add(v)
+        }
+      }
+    }
+
+    // 如果既未传 groupIds 又未传 chatIds，则默认全量
+    if (selectedIds.size === 0 && !Array.isArray(body.chatIds) && !Array.isArray(body.groupIds)) {
+      for (const c of allGroupChats) selectedIds.add(c.id)
+    }
+
+    // 如最后仍为空，报错
+    if (selectedIds.size === 0) return Response.json({ error: 'chatIds 为空' }, { status: 400 })
+
+    // 校验：必须属于该 bot 已批准群，且是群聊（-开头）
+    const allowed = new Set(allGroupChats.map((c: any) => c.id))
+    const invalid: string[] = []
+    const selectedGroupChats: { id: string }[] = []
+    for (const cid of selectedIds) {
+      if (!cid.startsWith('-') || !allowed.has(cid)) invalid.push(cid)
+      else selectedGroupChats.push({ id: cid })
+    }
+    if (invalid.length > 0) return Response.json({ error: '包含无效的 chatIds', invalid }, { status: 400 })
+    
+    // selectedGroupChats 已就绪
 
     const url = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/sendMessage`
     const proxyUrl = (process.env.PROXY_URL || '').trim()
@@ -101,7 +150,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       const sess = getSession(req)
       const username = String(sess?.u || '')
       const ip = getClientIp(req)
-      await auditAdmin(username || 'admin', 'broadcast', ip, `bot:${id}; total:${total}; tried:${tried}; sent:${sent}; failed:${failedIds.length}`)
+      const groupMeta = Array.isArray(body.groupIds) ? ` groups:${body.groupIds.length}` : ''
+      await auditAdmin(username || 'admin', 'broadcast', ip, `bot:${id}; total:${total}; tried:${tried}; sent:${sent}; failed:${failedIds.length};${groupMeta}`)
     } catch {}
 
     return Response.json({ ok: true, sent, tried, total, failedIds })
