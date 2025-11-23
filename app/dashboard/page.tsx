@@ -53,6 +53,7 @@ function DashboardPageInner() {
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
   const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
   const [grpMemberDlg, setGrpMemberDlg] = useState<{ open: boolean; botId?: string; groupId?: string; groupName?: string; items?: Array<{ id: string; title: string }>; selected?: Set<string>; origSelected?: Set<string>; loading?: boolean; saving?: boolean; filter?: string }>({ open: false })
+  const [helpDlg, setHelpDlg] = useState<{ open: boolean; botId?: string; botName?: string }>({ open: false })
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
@@ -943,6 +944,10 @@ function DashboardPageInner() {
                             })
                           }}
                         >{broadcastDrafts[bot.id]?.open ? '收起群发' : '群发通知'}</button>
+                        <button
+                          className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
+                          onClick={() => setHelpDlg({ open: true, botId: String(bot.id), botName: String(bot.name) })}
+                        >使用说明</button>
                         {isAdmin && (
                           <>
                             <button
@@ -1310,6 +1315,27 @@ function DashboardPageInner() {
                 </div>
               )}
             </div>
+
+            {/* 使用说明弹窗（按机器人） */}
+            {helpDlg.open && (
+              <Dialog open={(helpDlg as any).open} onOpenChange={(o)=> setHelpDlg((prev)=>({ ...(prev as any), open: o }))}>
+                <DialogContent className="sm:max-w-[560px]">
+                  <DialogHeader>
+                    <DialogTitle>使用说明 - {String((helpDlg as any).botName || '')}</DialogTitle>
+                    <DialogDescription>如何使用本机器人进行群发与管理</DialogDescription>
+                  </DialogHeader>
+                  <div className="text-sm space-y-2">
+                    <p>1. 点击“群发通知”打开面板，输入消息内容。</p>
+                    <p>2. 在“选择群组”页签中可勾选特定群；在“分组发送”页签可勾选预设分组。</p>
+                    <p>3. 如需调整分组成员，点击分组卡片内“管理成员”进行勾选保存。</p>
+                    <p>4. 确认选择后点击“发送群发”。发送结果会以提示显示成功/失败数量。</p>
+                  </div>
+                  <div className="flex justify-end">
+                    <button className="px-3 py-1.5 text-xs border rounded" onClick={()=> setHelpDlg({ open: false })}>关闭</button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
 
             {/* 命令别名配置弹窗（按机器人） */}
             {isAdmin && bots.map((bot) => {
