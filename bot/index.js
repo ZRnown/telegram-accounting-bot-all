@@ -877,20 +877,7 @@ bot.on('my_chat_member', async (ctx) => {
           console.error('[welcome-msg][error]', e)
         }
       } else {
-        // 非白名单用户，提示需要审核
-        try {
-          await ctx.reply(
-            `👋 机器人已加入群组！\n\n` +
-            `⚠️ 当前需要管理员审核才能使用。\n` +
-            `邀请人：${inviterUsername || inviterId}\n\n` +
-            `请联系管理员到后台批准本群使用。\n\n` +
-            `💡 提示：如果您希望自动授权，请联系管理员将您的用户ID添加到白名单。\n` +
-            `您的用户ID：\`${inviterId}\``,
-            { parse_mode: 'Markdown' }
-          )
-        } catch (e) {
-          console.error('[pending-msg][error]', e)
-        }
+        // 按需求：非白名单邀请不发送任何群内提示
       }
       
       console.log('[my_chat_member][completed]', { 

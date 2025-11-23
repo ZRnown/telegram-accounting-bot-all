@@ -232,7 +232,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       rate: rate || undefined,
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
-      operator: operatorUsername || targetUsername,
+      operator: (operatorUsername || targetUsername).replace('@', ''),
     })
 
     try {
@@ -245,7 +245,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
           rate: rate ? Number(rate) : null,
           usdt: usdt ? Number(usdt) : null,
           replier: targetUsername.replace('@', '') || null,
-          operator: operatorUsername || targetUsername || null,
+          operator: (operatorUsername || targetUsername || '').replace('@', '') || null,
           createdAt: new Date(),
         }
       })
