@@ -195,20 +195,39 @@ function getHelpText() {
   ].join('\n')
 }
 
+function splitIntoChunks(text, max = 3500) {
+  const lines = String(text || '').split('\n')
+  const chunks = []
+  let buf = ''
+  for (const ln of lines) {
+    if ((buf + (buf ? '\n' : '') + ln).length > max) {
+      if (buf) chunks.push(buf)
+      buf = ln
+    } else {
+      buf = buf ? (buf + '\n' + ln) : ln
+    }
+  }
+  if (buf) chunks.push(buf)
+  return chunks
+}
+
 /**
  * 注册 help action
  */
 export function registerHelp(bot) {
   bot.action('help', async (ctx) => {
-    try {
-      await ctx.answerCbQuery()
-    } catch (e) {
-      console.error('[help-action][answerCbQuery-error]', e)
-    }
-
-    // 🔥 私聊和群聊都显示完整的使用说明
+    try { await ctx.answerCbQuery() } catch (e) { console.error('[help-action][answerCbQuery-error]', e) }
     const help = getHelpText()
-    await ctx.reply(help, { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) })
+    const chunks = splitIntoChunks(help)
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1
+        const opts = isLast ? { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) } : { parse_mode: 'Markdown' }
+        await ctx.reply(chunks[i], opts)
+      }
+    } catch (e) {
+      console.error('[help-action][reply-error]', e)
+    }
   })
 }
 
@@ -219,9 +238,17 @@ export function registerHelpCommand(bot, ensureChat) {
   bot.hears(/^使用说明$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
-
     const help = getHelpText()
-    await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
+    const chunks = splitIntoChunks(help)
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1
+        const opts = isLast ? { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) } : { parse_mode: 'Markdown' }
+        await ctx.reply(chunks[i], opts)
+      }
+    } catch (e) {
+      console.error('[help-hears][reply-error]', e)
+    }
   })
 }
 
