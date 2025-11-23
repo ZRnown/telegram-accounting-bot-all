@@ -222,11 +222,15 @@ export function registerHelp(bot) {
     try {
       for (let i = 0; i < chunks.length; i++) {
         const isLast = i === chunks.length - 1
-        const opts = isLast ? { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) } : { parse_mode: 'Markdown' }
+        const opts = isLast ? { ...(await buildInlineKb(ctx)) } : {}
         await ctx.reply(chunks[i], opts)
       }
     } catch (e) {
       console.error('[help-action][reply-error]', e)
+      // fallback：逐段纯文本发送（无键盘）
+      try {
+        for (const c of chunks) { await ctx.reply(c) }
+      } catch {}
     }
   })
 }
@@ -243,11 +247,12 @@ export function registerHelpCommand(bot, ensureChat) {
     try {
       for (let i = 0; i < chunks.length; i++) {
         const isLast = i === chunks.length - 1
-        const opts = isLast ? { parse_mode: 'Markdown', ...(await buildInlineKb(ctx)) } : { parse_mode: 'Markdown' }
+        const opts = isLast ? { ...(await buildInlineKb(ctx)) } : {}
         await ctx.reply(chunks[i], opts)
       }
     } catch (e) {
       console.error('[help-hears][reply-error]', e)
+      try { for (const c of chunks) { await ctx.reply(c) } } catch {}
     }
   })
 }
@@ -311,9 +316,18 @@ export function registerCommandMenuAction(bot) {
       return
     }
 
-    // 🔥 发送完整的使用说明（与 help action 一致）
+    // 🔥 分段发送使用说明（与 help action 一致），避免长度/Markdown解析错误
     const help = getHelpText()
-    await ctx.reply(help, { ...(await buildInlineKb(ctx)) })
+    const chunks = splitIntoChunks(help)
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1
+        const opts = isLast ? { ...(await buildInlineKb(ctx)) } : {}
+        await ctx.reply(chunks[i], opts)
+      }
+    } catch (e) {
+      try { for (const c of chunks) { await ctx.reply(c) } } catch {}
+    }
   })
 }
 
