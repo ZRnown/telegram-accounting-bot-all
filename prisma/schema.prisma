@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Bot {
+  id           String           @id @default(cuid())
+  name         String
+  description  String?
+  token        String
+  proxyUrl     String?
+  enabled      Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  featureFlags BotFeatureFlag[]
+  chats        Chat[]
+}
+
+model BotFeatureFlag {
+  id      String  @id @default(cuid())
+  botId   String
+  feature String
+  enabled Boolean @default(true)
+  bot     Bot     @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, feature])
+}
+
+model Chat {
+  id                String            @id
+  title             String?
+  createdAt         DateTime          @default(now())
+  status            ChatStatus        @default(PENDING)
+  allowed           Boolean           @default(false)
+  botId             String?
+  invitedBy         String? // 🔥 新增：邀请人用户ID
+  invitedByUsername String? // 🔥 新增：邀请人用户名
+  bills             Bill[]
+  bot               Bot?              @relation(fields: [botId], references: [id])
+  featureFlags      ChatFeatureFlag[]
+  commissions       Commission[]
+  dispatches        Dispatch[]
+  incomes           Income[]
+  operators         Operator[]
+  settings          Setting?
+}
+
+model ChatFeatureFlag {
+  id      String  @id @default(cuid())
+  chatId  String
+  feature String
+  enabled Boolean @default(true)
+  chat    Chat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, feature])
+}
+
+model Setting {
+  id                         String         @id @default(cuid())
+  chatId                     String         @unique
+  feePercent                 Float          @default(0)
+  fixedRate                  Float?
+  realtimeRate               Float?
+  displayMode                Int            @default(1)
+  headerText                 String?
+  everyoneAllowed            Boolean        @default(false)
+  accountingMode             AccountingMode @default(DAILY_RESET)
+  featureWarningMode         String         @default("always") // "always", "once", "daily", "silent"
+  addressVerificationEnabled Boolean        @default(false) // 地址验证功能开关
+  dailyCutoffHour            Int            @default(0) // 日切时间（小时，0-23），默认0点（使用全局配置，此处为保留字段）
+  hideHelpButton             Boolean        @default(false) // 隐藏使用说明按钮
+  hideOrderButton            Boolean        @default(false) // 隐藏查看完整订单按钮
+  overDepositLimit           Float          @default(0) // 超押提醒额度，0表示关闭提醒
+  lastOverDepositWarning     DateTime? // 上次超押提醒时间
+  deleteBillConfirm          Boolean        @default(false) // 🔥 删除账单确认功能（发送删除账单后会有二次确认）
+  accountingEnabled          Boolean        @default(true) // 🔥 记账功能开关，默认开启
+  calculatorEnabled          Boolean        @default(true) // 🔥 计算器功能开关，默认开启
+  chat                       Chat           @relation(fields: [chatId], references: [id])
+}
+
+model Operator {
+  id       String @id @default(cuid())
+  chatId   String
+  username String
+  chat     Chat   @relation(fields: [chatId], references: [id])
+
+  @@unique([chatId, username])
+}
+
+model Bill {
+  id       String     @id @default(cuid())
+  chatId   String
+  status   BillStatus @default(OPEN)
+  openedAt DateTime   @default(now())
+  savedAt  DateTime   @default(now())
+  closedAt DateTime?
+  chat     Chat       @relation(fields: [chatId], references: [id])
+  items    BillItem[]
+}
+
+model BillItem {
+  id        String   @id @default(cuid())
+  billId    String
+  type      ItemType
+  amount    Float
+  usdt      Float?
+  rate      Float?
+  feeRate   Float? // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
+  remark    String? // 🔥 新增：备注（用于备注入账）
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  bill      Bill     @relation(fields: [billId], references: [id])
+}
+
+model Income {
+  id        String   @id @default(cuid())
+  chatId    String
+  amount    Float
+  rate      Float?
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id])
+}
+
+model Dispatch {
+  id        String   @id @default(cuid())
+  chatId    String
+  amount    Float
+  usdt      Float
+  replier   String?
+  operator  String?
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id])
+}
+
+model Commission {
+  id       String @id @default(cuid())
+  chatId   String
+  username String
+  value    Int    @default(0)
+  chat     Chat   @relation(fields: [chatId], references: [id])
+
+  @@unique([chatId, username])
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model Admin {
+  id           String?   @id @default("lower(hex(randomblob(16)))")
+  username     String?   @unique(map: "sqlite_autoindex_Admin_2")
+  passwordHash String?
+  createdAt    DateTime? @default(now())
+  updatedAt    DateTime? @default(now())
+
+  @@ignore
+}
+
+model WhitelistedUser {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  username  String?
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FeatureWarningLog {
+  id       String   @id @default(cuid())
+  chatId   String
+  feature  String
+  warnedAt DateTime @default(now())
+
+  @@unique([chatId, feature])
+  @@index([chatId])
+}
+
+model AddressVerification {
+  id               String   @id @default(cuid())
+  chatId           String   @unique // 每个群只有一条记录
+  confirmedAddress String? // 当前确认的地址（发送过>=2次）
+  confirmedCount   Int      @default(0) // 确认地址的发送次数
+  pendingAddress   String? // 待确认的地址（新地址，发送过1次）
+  pendingCount     Int      @default(0) // 待确认地址的发送次数
+  lastSenderId     String? // 最后发送人ID
+  lastSenderName   String? // 最后发送人名称
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([chatId])
+}
+
+enum ItemType {
+  INCOME
+  DISPATCH
+}
+
+enum BillStatus {
+  OPEN
+  CLOSED
+}
+
+enum AccountingMode {
+  DAILY_RESET
+  CARRY_OVER
+  SINGLE_BILL_PER_DAY // 🔥 每天只有一笔订单，不支持保存，但支持删除
+}
+
+enum ChatStatus {
+  PENDING
+  APPROVED
+  BLOCKED
+}
+
+model GlobalConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  updatedBy   String? // 更新人（用户ID或系统）
+
+  @@index([key])
+}
