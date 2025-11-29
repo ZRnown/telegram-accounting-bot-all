@@ -103,18 +103,21 @@ model Bill {
 }
 
 model BillItem {
-  id        String   @id @default(cuid())
-  billId    String
-  type      ItemType
-  amount    Float
-  usdt      Float?
-  rate      Float?
-  feeRate   Float? // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
-  remark    String? // 🔥 新增：备注（用于备注入账）
-  replier   String?
-  operator  String?
-  createdAt DateTime @default(now())
-  bill      Bill     @relation(fields: [billId], references: [id])
+  id         String   @id @default(cuid())
+  billId     String
+  type       ItemType
+  amount     Float
+  usdt       Float?
+  rate       Float?
+  feeRate    Float? // 🔥 新增：单独费率（如0.95表示95%，即5%手续费）
+  remark     String? // 🔥 新增：备注（用于备注入账）
+  replier    String?
+  operator   String?
+  displayName String? // 🔥 新增：用户昵称（first_name + last_name）
+  userId     String? // 🔥 新增：用户ID（用于生成用户链接）
+  messageId  Int?    // 🔥 新增：消息ID（用于跳转到原始消息）
+  createdAt  DateTime @default(now())
+  bill       Bill     @relation(fields: [billId], references: [id])
 }
 
 model Income {

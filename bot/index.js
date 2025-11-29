@@ -21,7 +21,7 @@ import {
   formatDuration
 } from './utils.js'
 // 新模块导入
-import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff, deleteLastIncome, deleteLastDispatch } from './database.js'
+import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff, deleteLastIncome, deleteLastDispatch, deleteIncomeByMessageId, deleteDispatchByMessageId } from './database.js'
 import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
@@ -1486,7 +1486,8 @@ bot.hears(/^显示操作人$/i, async (ctx) => {
 
 // 模式相关已迁移至 handlers/modes.js
 
-// 🔥 撤销入款：撤销最近一条入款记录
+// 🔥 撤销入款：撤销最近一条入款记录（已迁移至 handlers/bill.js，此处保留作为备用）
+// 注意：如果 handlers/bill.js 中的 registerUndoIncome 已注册，这里的代码可能不会执行
 bot.hears(/^撤销入款$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
@@ -1497,19 +1498,37 @@ bot.hears(/^撤销入款$/i, async (ctx) => {
   }
   
   const chatId = await ensureDbChat(ctx)
-  const deleted = await deleteLastIncome(chatId)
   
-  if (deleted) {
-    // 更新内存 current
-    const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-    if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
-    await ctx.reply(`✅ 已撤销最近一条入款记录：${deleted.amount}`)
+  // 🔥 检查是否有回复消息
+  const replyToMessage = ctx.message.reply_to_message
+  let deleted = null
+  
+  if (replyToMessage && replyToMessage.message_id) {
+    // 如果有回复，通过 messageId 删除对应的记录
+    deleted = await deleteIncomeByMessageId(chatId, replyToMessage.message_id)
+    if (!deleted) {
+      return ctx.reply('❌ 未找到对应的入款记录（可能该消息不是入款记录）')
+    }
   } else {
-    await ctx.reply('❌ 未找到可撤销的入款记录')
+    // 如果没有回复，删除最后一条
+    deleted = await deleteLastIncome(chatId)
+    if (!deleted) {
+      return ctx.reply('❌ 未找到可撤销的入款记录')
+    }
   }
+  
+  // 更新内存 current
+  const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+  if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
+  
+  const message = replyToMessage 
+    ? `✅ 已撤销指定的入款记录：${deleted.amount}`
+    : `✅ 已撤销最近一条入款记录：${deleted.amount}`
+  await ctx.reply(message)
 })
 
-// 🔥 撤销下发：撤销最近一条下发记录
+// 🔥 撤销下发：撤销最近一条下发记录（已迁移至 handlers/bill.js，此处保留作为备用）
+// 注意：如果 handlers/bill.js 中的 registerUndoDispatch 已注册，这里的代码可能不会执行
 bot.hears(/^撤销下发$/i, async (ctx) => {
   const chat = ensureChat(ctx)
   if (!chat) return
@@ -1520,16 +1539,33 @@ bot.hears(/^撤销下发$/i, async (ctx) => {
   }
   
   const chatId = await ensureDbChat(ctx)
-  const deleted = await deleteLastDispatch(chatId)
   
-  if (deleted) {
-    // 更新内存 current
-    const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-    if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
-    await ctx.reply(`✅ 已撤销最近一条下发记录：${deleted.amount}`)
+  // 🔥 检查是否有回复消息
+  const replyToMessage = ctx.message.reply_to_message
+  let deleted = null
+  
+  if (replyToMessage && replyToMessage.message_id) {
+    // 如果有回复，通过 messageId 删除对应的记录
+    deleted = await deleteDispatchByMessageId(chatId, replyToMessage.message_id)
+    if (!deleted) {
+      return ctx.reply('❌ 未找到对应的下发记录（可能该消息不是下发记录）')
+    }
   } else {
-    await ctx.reply('❌ 未找到可撤销的下发记录')
+    // 如果没有回复，删除最后一条
+    deleted = await deleteLastDispatch(chatId)
+    if (!deleted) {
+      return ctx.reply('❌ 未找到可撤销的下发记录')
+    }
   }
+  
+  // 更新内存 current
+  const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+  if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
+  
+  const message = replyToMessage 
+    ? `✅ 已撤销指定的下发记录：${deleted.usdt}U`
+    : `✅ 已撤销最近一条下发记录：${deleted.usdt}U`
+  await ctx.reply(message)
 })
 
 // 🔥 指定删除和指定账单：回复指定记录消息，输入"删除"或"账单"（需要在其他text监听器之前）

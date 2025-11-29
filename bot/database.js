@@ -324,6 +324,27 @@ export async function deleteLastIncome(chatId) {
 }
 
 /**
+ * 通过 messageId 删除指定的入款记录
+ */
+export async function deleteIncomeByMessageId(chatId, messageId) {
+  const { bill } = await getOrCreateTodayBill(chatId)
+  if (!bill) return false
+
+  const item = await prisma.billItem.findFirst({
+    where: { 
+      billId: bill.id, 
+      type: 'INCOME',
+      messageId: messageId
+    }
+  })
+
+  if (!item) return false
+
+  await prisma.billItem.delete({ where: { id: item.id } })
+  return { amount: Number(item.amount), rate: item.rate ? Number(item.rate) : undefined }
+}
+
+/**
  * 删除最后一条下发记录
  */
 export async function deleteLastDispatch(chatId) {
@@ -339,6 +360,27 @@ export async function deleteLastDispatch(chatId) {
 
   await prisma.billItem.delete({ where: { id: lastItem.id } })
   return { amount: Number(lastItem.amount), usdt: lastItem.usdt ? Number(lastItem.usdt) : 0 }
+}
+
+/**
+ * 通过 messageId 删除指定的下发记录
+ */
+export async function deleteDispatchByMessageId(chatId, messageId) {
+  const { bill } = await getOrCreateTodayBill(chatId)
+  if (!bill) return false
+
+  const item = await prisma.billItem.findFirst({
+    where: { 
+      billId: bill.id, 
+      type: 'DISPATCH',
+      messageId: messageId
+    }
+  })
+
+  if (!item) return false
+
+  await prisma.billItem.delete({ where: { id: item.id } })
+  return { amount: Number(item.amount), usdt: item.usdt ? Number(item.usdt) : 0 }
 }
 
 /**

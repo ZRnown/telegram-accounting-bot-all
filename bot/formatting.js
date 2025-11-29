@@ -80,6 +80,9 @@ export async function formatSummary(ctx, chat, options = {}) {
                   replier: true,
                   operator: true,
                   remark: true, // 🔥 添加备注字段
+                  displayName: true, // 🔥 添加用户昵称字段
+                  userId: true, // 🔥 添加用户ID字段
+                  messageId: true, // 🔥 添加消息ID字段
                   createdAt: true
                 }
               }
@@ -98,21 +101,83 @@ export async function formatSummary(ctx, chat, options = {}) {
     // 🔥 累计模式不再需要历史未下发计算
 
     if (needsSync && billData?.items) {
-      const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => ({
-        amount: Number(i.amount),
-        rate: i.rate ? Number(i.rate) : undefined,
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
+      // 🔥 从数据库同步时，尝试从 chat.userIdByUsername 获取用户信息
+      const dbIncomes = billData.items.filter(i => i.type === 'INCOME').map(i => {
+        const replier = i.replier || ''
+        const operator = i.operator || ''
+        const who = operator || replier || ''
+        
+        // 🔥 优先使用数据库中的 displayName 和 userId
+        let userId = i.userId ? Number(i.userId) : null
+        let displayName = i.displayName || null
+        
+        // 如果数据库中没有 displayName，尝试从 chat.userIdByUsername 获取
+        if (!displayName) {
+          displayName = who.replace(/^@/, '') || '用户'
+          if (who) {
+            const whoWithAt = who.startsWith('@') ? who : `@${who}`
+            if (!userId) {
+              userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+            }
+            // 如果没有 userId，尝试从 who 中提取（如果是 @user_123456 格式）
+            if (!userId && who.startsWith('@user_')) {
+              const extractedId = who.replace('@user_', '')
+              if (/^\d+$/.test(extractedId)) {
+                userId = Number(extractedId)
+              }
+            }
+          }
+        }
+        
+        return {
+          amount: Number(i.amount),
+          rate: i.rate ? Number(i.rate) : undefined,
+          createdAt: new Date(i.createdAt),
+          replier: replier,
+          operator: operator,
+          displayName: displayName,
+          userId: userId,
+          messageId: i.messageId || null, // 🔥 保存消息ID
+        }
+      })
 
-      const dbDispatches = billData.items.filter(i => i.type === 'DISPATCH').map(i => ({
-        amount: Number(i.amount),
-        usdt: Number(i.usdt),
-        createdAt: new Date(i.createdAt),
-        replier: i.replier || '',
-        operator: i.operator || '',
-      }))
+      const dbDispatches = billData.items.filter(i => i.type === 'DISPATCH').map(i => {
+        const replier = i.replier || ''
+        const operator = i.operator || ''
+        const who = operator || replier || ''
+        
+        // 🔥 优先使用数据库中的 displayName 和 userId
+        let userId = i.userId ? Number(i.userId) : null
+        let displayName = i.displayName || null
+        
+        // 如果数据库中没有 displayName，尝试从 chat.userIdByUsername 获取
+        if (!displayName) {
+          displayName = who.replace(/^@/, '') || '用户'
+          if (who) {
+            const whoWithAt = who.startsWith('@') ? who : `@${who}`
+            if (!userId) {
+              userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+            }
+            // 如果没有 userId，尝试从 who 中提取（如果是 @user_123456 格式）
+            if (!userId && who.startsWith('@user_')) {
+              const extractedId = who.replace('@user_', '')
+              if (/^\d+$/.test(extractedId)) {
+                userId = Number(extractedId)
+              }
+            }
+          }
+        }
+        
+        return {
+          amount: Number(i.amount),
+          usdt: Number(i.usdt),
+          createdAt: new Date(i.createdAt),
+          replier: replier,
+          operator: operator,
+          displayName: displayName,
+          userId: userId,
+        }
+      })
 
       // 🔥 修复：始终使用数据库数据作为权威来源，确保数据一致性
       // 这样可以避免内存数据与数据库数据不一致导致的计算错误
@@ -214,7 +279,7 @@ export async function formatSummary(ctx, chat, options = {}) {
         line += ` [${remark}]`
       }
 
-      // 第二行显示用户名称（去掉 @），名称可点击打开用户详情
+      // 同一行显示用户名称（去掉 @），名称可点击打开用户详情
       if (who) {
         const displayName = String(who || '').replace(/^@/, '') || '用户'
         const userId = i.userId
@@ -222,7 +287,7 @@ export async function formatSummary(ctx, chat, options = {}) {
         if (userId) {
           userLine = `[${displayName}](tg://user?id=${userId})`
         }
-        line += `\n${userLine}`
+        line += ` ${userLine}`
       }
 
       return line
@@ -234,7 +299,22 @@ export async function formatSummary(ctx, chat, options = {}) {
       const t = d.createdAt.toTimeString().slice(0, 8)
       const amount = Math.abs(d.amount)
       const usdt = Math.abs(d.usdt)
-      return `${t} [${formatMoney(amount)}](tg://user?id=0) (${formatMoney(usdt)}U)`
+      const who = d.displayName || d.replier || d.operator || ''
+      
+      let line = `${t} ${formatMoney(amount)} (${formatMoney(usdt)}U)`
+      
+      // 同一行显示用户名称（去掉 @），名称可点击打开用户详情
+      if (who) {
+        const displayName = String(who || '').replace(/^@/, '') || '用户'
+        const userId = d.userId
+        let userLine = displayName
+        if (userId) {
+          userLine = `[${displayName}](tg://user?id=${userId})`
+        }
+        line += ` ${userLine}`
+      }
+      
+      return line
     }).join('\n')
     : (disCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无下发')
 

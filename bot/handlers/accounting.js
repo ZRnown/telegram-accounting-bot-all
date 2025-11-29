@@ -5,7 +5,7 @@ import { ensureDbChat, getOrCreateTodayBill, checkAndClearIfNewDay, updateSettin
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getEffectiveRate, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { formatMoney } from '../utils.js'
-import { getUsername } from '../helpers.js'
+import { getUsername, getDisplayName } from '../helpers.js'
 import { isAccountingEnabled, isFeatureEnabled, clearAccountingCache } from '../middleware.js'
 
 /**
@@ -136,7 +136,7 @@ export function registerIncomeWithRemark(bot, ensureChat) {
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
-    const displayName = replierUsername
+    const displayName = getDisplayName(ctx.from) // 🔥 使用昵称而不是用户名
 
     chat.current.incomes.push({
       amount: amountRMB,
@@ -162,6 +162,9 @@ export function registerIncomeWithRemark(bot, ensureChat) {
           remark: remark || null, // 🔥 保存备注
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
+          messageId: ctx.message?.message_id || null, // 🔥 保存消息ID
           createdAt: new Date(),
         }
       })
@@ -233,6 +236,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    // 🔥 对于 @username 指定的用户，暂时使用用户名，后续可通过API获取昵称
     const displayName = targetUsername.replace('@', '')
 
     chat.current.incomes.push({
@@ -257,6 +261,9 @@ export function registerIncomeWithTarget(bot, ensureChat) {
           usdt: usdt ? Number(usdt) : null,
           replier: targetUsername.replace('@', '') || null,
           operator: operatorUsername || targetUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
+          messageId: ctx.message?.message_id || null, // 🔥 保存消息ID
           createdAt: new Date(),
         }
       })
@@ -319,9 +326,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
-    const displayName = replyTo.from?.first_name || replyTo.from?.last_name
-      ? `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim()
-      : (replyTo.from.username ? `@${replyTo.from.username}` : `user_${replyTo.from.id}`)
+    const displayName = getDisplayName(replyTo.from) // 🔥 使用统一的昵称获取函数
 
     chat.current.incomes.push({
       amount: amountRMB,
@@ -345,6 +350,9 @@ export function registerIncomeWithTarget(bot, ensureChat) {
           usdt: usdt ? Number(usdt) : null,
           replier: targetUsername.replace('@', '') || null,
           operator: operatorUsername || targetUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
+          messageId: ctx.message?.message_id || null, // 🔥 保存消息ID
           createdAt: new Date(),
         }
       })
@@ -529,7 +537,7 @@ export function registerIncome(bot, ensureChat) {
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
-    const displayName = replierUsername
+    const displayName = getDisplayName(ctx.from) // 🔥 使用昵称而不是用户名
 
     chat.current.incomes.push({
       amount: finalAmountRMB,
@@ -555,6 +563,9 @@ export function registerIncome(bot, ensureChat) {
           remark: remark || null, // 🔥 保存备注
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
+          messageId: ctx.message?.message_id || null, // 🔥 保存消息ID
           createdAt: new Date(),
         }
       })
@@ -669,6 +680,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    // 🔥 对于 @username 指定的用户，暂时使用用户名，后续可通过API获取昵称
     const displayName = targetUsername.replace('@', '')
 
     chat.current.dispatches.push({
@@ -691,6 +703,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
           usdt: Number(usdtValue),
           replier: targetUsername.replace('@', '') || null,
           operator: operatorUsername || targetUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
           createdAt: new Date(),
         }
       })
@@ -761,9 +775,7 @@ export function registerDispatchWithTarget(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
-    const displayName = replyTo.from?.first_name || replyTo.from?.last_name
-      ? `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim()
-      : (replyTo.from.username ? `@${replyTo.from.username}` : `user_${replyTo.from.id}`)
+    const displayName = getDisplayName(replyTo.from) // 🔥 使用统一的昵称获取函数
 
     chat.current.dispatches.push({
       amount: amountRMB,
@@ -785,6 +797,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
           usdt: Number(usdtValue),
           replier: targetUsername.replace('@', '') || null,
           operator: operatorUsername || targetUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
           createdAt: new Date(),
         }
       })
@@ -874,7 +888,7 @@ export function registerDispatch(bot, ensureChat) {
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
     const userId = ctx.from?.id ? Number(ctx.from.id) : null
-    const displayName = replierUsername
+    const displayName = getDisplayName(ctx.from) // 🔥 使用昵称而不是用户名
 
     chat.current.dispatches.push({
       amount: amountRMB,
@@ -897,6 +911,8 @@ export function registerDispatch(bot, ensureChat) {
           remark: remark || null, // 🔥 保存备注
           replier: replierUsername || null,
           operator: operatorUsername || replierUsername || null,
+          displayName: displayName || null, // 🔥 保存用户昵称
+          userId: userId ? String(userId) : null, // 🔥 保存用户ID
           createdAt: new Date(),
         }
       })

@@ -244,3 +244,15 @@ export function getUsername(ctx) {
   const lastName = ctx.from?.last_name || ''
   return [firstName, lastName].filter(Boolean).join(' ') || '未知用户'
 }
+
+/**
+ * 获取用户昵称（first_name + last_name）
+ * 🔥 始终返回昵称，而不是用户名
+ */
+export function getDisplayName(from) {
+  if (!from) return '未知用户'
+  const firstName = from.first_name || ''
+  const lastName = from.last_name || ''
+  const displayName = [firstName, lastName].filter(Boolean).join(' ').trim()
+  return displayName || '未知用户'
+}

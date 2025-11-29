@@ -1,7 +1,7 @@
 // 账单相关命令处理器
 import { prisma } from '../../lib/db.js'
 import { getChat } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, getChatDailyCutoffHour } from '../database.js'
+import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, deleteIncomeByMessageId, deleteDispatchByMessageId, getChatDailyCutoffHour } from '../database.js'
 import { buildInlineKb, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { getGlobalDailyCutoffHour } from '../utils.js'
@@ -378,6 +378,7 @@ export function registerShowHistory(bot, ensureChat) {
 
 /**
  * 撤销入款
+ * 🔥 支持回复消息撤销指定记录，如果没有回复则撤销最后一条
  */
 export function registerUndoIncome(bot, ensureChat) {
   bot.hears(/^撤销入款$/i, async (ctx) => {
@@ -389,20 +390,28 @@ export function registerUndoIncome(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx, chat)
-    const result = await deleteLastIncome(chatId)
-
-    if (!result) {
-      return ctx.reply('❌ 没有可撤销的入款记录')
+    
+    // 🔥 检查是否有回复消息
+    const replyToMessage = ctx.message.reply_to_message
+    let result = null
+    
+    if (replyToMessage && replyToMessage.message_id) {
+      // 如果有回复，通过 messageId 删除对应的记录
+      result = await deleteIncomeByMessageId(chatId, replyToMessage.message_id)
+      if (!result) {
+        return ctx.reply('❌ 未找到对应的入款记录（可能该消息不是入款记录）')
+      }
+    } else {
+      // 如果没有回复，删除最后一条
+      result = await deleteLastIncome(chatId)
+      if (!result) {
+        return ctx.reply('❌ 没有可撤销的入款记录')
+      }
     }
 
-    // 从内存中移除最后一条，并与数据库重新同步，避免其它记录被误删/丢失
+    // 从内存中移除，并与数据库重新同步，避免其它记录被误删/丢失
     try {
-      // 先简单 pop 一次，保证本地状态与常规使用场景兼容
-      if (Array.isArray(chat.current.incomes) && chat.current.incomes.length > 0) {
-        chat.current.incomes.pop()
-      }
-
-      // 再从数据库完整拉取当前账单的所有 INCOME 记录，作为权威数据
+      // 先从数据库完整拉取当前账单的所有 INCOME 记录，作为权威数据
       const { bill } = await getOrCreateTodayBill(chatId)
       if (bill) {
         const items = await prisma.billItem.findMany({
@@ -414,6 +423,9 @@ export function registerUndoIncome(bot, ensureChat) {
             usdt: true,
             replier: true,
             operator: true,
+            displayName: true,
+            userId: true,
+            messageId: true,
             createdAt: true,
           },
         })
@@ -424,6 +436,9 @@ export function registerUndoIncome(bot, ensureChat) {
           createdAt: new Date(i.createdAt),
           replier: i.replier || '',
           operator: i.operator || '',
+          displayName: i.displayName || null,
+          userId: i.userId ? Number(i.userId) : null,
+          messageId: i.messageId || null,
         }))
       }
       // 让后续的 formatSummary 认为需要重新同步一次（防止旧缓存影响）
@@ -432,12 +447,16 @@ export function registerUndoIncome(bot, ensureChat) {
       console.error('[撤销入款][sync-from-db-failed]', e)
     }
 
-    await ctx.reply(`✅ 已撤销最后一条入款：${result.amount}`, { ...(await buildInlineKb(ctx)) })
+    const message = replyToMessage 
+      ? `✅ 已撤销指定的入款记录：${result.amount}`
+      : `✅ 已撤销最后一条入款：${result.amount}`
+    await ctx.reply(message, { ...(await buildInlineKb(ctx)) })
   })
 }
 
 /**
  * 撤销下发
+ * 🔥 支持回复消息撤销指定记录，如果没有回复则撤销最后一条
  */
 export function registerUndoDispatch(bot, ensureChat) {
   bot.hears(/^撤销下发$/i, async (ctx) => {
@@ -449,18 +468,70 @@ export function registerUndoDispatch(bot, ensureChat) {
     }
 
     const chatId = await ensureDbChat(ctx, chat)
-    const result = await deleteLastDispatch(chatId)
-
-    if (!result) {
-      return ctx.reply('❌ 没有可撤销的下发记录')
+    
+    // 🔥 检查是否有回复消息
+    const replyToMessage = ctx.message.reply_to_message
+    let result = null
+    
+    if (replyToMessage && replyToMessage.message_id) {
+      // 如果有回复，通过 messageId 删除对应的记录
+      result = await deleteDispatchByMessageId(chatId, replyToMessage.message_id)
+      if (!result) {
+        return ctx.reply('❌ 未找到对应的下发记录（可能该消息不是下发记录）')
+      }
+    } else {
+      // 如果没有回复，删除最后一条
+      result = await deleteLastDispatch(chatId)
+      if (!result) {
+        return ctx.reply('❌ 没有可撤销的下发记录')
+      }
     }
 
-    // 从内存中移除最后一条
-    if (chat.current.dispatches.length > 0) {
-      chat.current.dispatches.pop()
+    // 从内存中移除，并与数据库重新同步
+    try {
+      // 先从数据库完整拉取当前账单的所有 DISPATCH 记录，作为权威数据
+      const { bill } = await getOrCreateTodayBill(chatId)
+      if (bill) {
+        const items = await prisma.billItem.findMany({
+          where: { billId: bill.id, type: 'DISPATCH' },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            amount: true,
+            usdt: true,
+            replier: true,
+            operator: true,
+            displayName: true,
+            userId: true,
+            messageId: true,
+            createdAt: true,
+          },
+        })
+
+        chat.current.dispatches = items.map((i) => ({
+          amount: Number(i.amount || 0),
+          usdt: Number(i.usdt || 0),
+          createdAt: new Date(i.createdAt),
+          replier: i.replier || '',
+          operator: i.operator || '',
+          displayName: i.displayName || null,
+          userId: i.userId ? Number(i.userId) : null,
+          messageId: i.messageId || null,
+        }))
+      }
+      // 让后续的 formatSummary 认为需要重新同步一次（防止旧缓存影响）
+      chat._billLastSync = 0
+    } catch (e) {
+      console.error('[撤销下发][sync-from-db-failed]', e)
+      // 如果同步失败，至少从内存中移除最后一条
+      if (chat.current.dispatches.length > 0) {
+        chat.current.dispatches.pop()
+      }
     }
 
-    await ctx.reply(`✅ 已撤销最后一条下发：${result.usdt}U`, { ...(await buildInlineKb(ctx)) })
+    const message = replyToMessage 
+      ? `✅ 已撤销指定的下发记录：${result.usdt}U`
+      : `✅ 已撤销最后一条下发：${result.usdt}U`
+    await ctx.reply(message, { ...(await buildInlineKb(ctx)) })
   })
 }
 
