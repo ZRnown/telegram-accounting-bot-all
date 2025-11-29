@@ -142,6 +142,8 @@ export function registerIncomeWithRemark(bot, ensureChat) {
       createdAt: new Date(),
       replier: replierUsername,
       operator: operatorUsername || replierUsername,
+      // 记录原始消息ID，便于后续跳转到消息
+      messageId: ctx.message?.message_id || null,
     })
 
     try {
@@ -233,6 +235,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      messageId: ctx.message?.message_id || null,
     })
 
     try {
@@ -314,6 +317,7 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      messageId: ctx.message?.message_id || null,
     })
 
     try {
@@ -517,6 +521,7 @@ export function registerIncome(bot, ensureChat) {
       createdAt: new Date(),
       replier: replierUsername,
       operator: operatorUsername || replierUsername,
+      messageId: ctx.message?.message_id || null,
     })
 
     try {

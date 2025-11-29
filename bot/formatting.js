@@ -190,7 +190,18 @@ export async function formatSummary(ctx, chat, options = {}) {
       const who = (i.operator || i.replier || '')
       const remark = i.remark // 🔥 获取备注
 
-      let line = `${t} [${formatMoney(amount)}](tg://user?id=0)`
+      // 金额可点击跳转到原始消息（仅对超级群生效：chatId 形如 -100xxxx）
+      let amountText = formatMoney(amount)
+      try {
+        const chatIdNum = String(chatId || '')
+        if (i.messageId && chatIdNum.startsWith('-100')) {
+          const internalId = chatIdNum.slice(4) // 去掉 -100 前缀
+          const msgUrl = `https://t.me/c/${internalId}/${i.messageId}`
+          amountText = `[${amountText}](${msgUrl})`
+        }
+      } catch {}
+
+      let line = `${t} ${amountText}`
       if (rate) {
         line += ` / ${rate}=${usdt}U`
       }
@@ -202,15 +213,19 @@ export async function formatSummary(ctx, chat, options = {}) {
       if (remark) {
         line += ` [${remark}]`
       }
+
+      // 第二行显示用户名称（去掉 @），名称可点击打开用户详情
       if (who) {
         const whoWithAt = who.startsWith('@') ? who : `@${who}`
+        const displayName = who.replace(/^@/, '') || '用户'
         const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+        let userLine = displayName
         if (userId) {
-          line += ` [${who}](tg://user?id=${userId})`
-        } else {
-          line += ` *${who}*`
+          userLine = `[${displayName}](tg://user?id=${userId})`
         }
+        line += `\n${userLine}`
       }
+
       return line
     }).join('\n')
     : (incCount > 0 && chat.displayMode === 3 ? '（详情省略，显示模式3）' : ' 暂无入款')
