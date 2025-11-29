@@ -395,9 +395,41 @@ export function registerUndoIncome(bot, ensureChat) {
       return ctx.reply('❌ 没有可撤销的入款记录')
     }
 
-    // 从内存中移除最后一条
-    if (chat.current.incomes.length > 0) {
-      chat.current.incomes.pop()
+    // 从内存中移除最后一条，并与数据库重新同步，避免其它记录被误删/丢失
+    try {
+      // 先简单 pop 一次，保证本地状态与常规使用场景兼容
+      if (Array.isArray(chat.current.incomes) && chat.current.incomes.length > 0) {
+        chat.current.incomes.pop()
+      }
+
+      // 再从数据库完整拉取当前账单的所有 INCOME 记录，作为权威数据
+      const { bill } = await getOrCreateTodayBill(chatId)
+      if (bill) {
+        const items = await prisma.billItem.findMany({
+          where: { billId: bill.id, type: 'INCOME' },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            amount: true,
+            rate: true,
+            usdt: true,
+            replier: true,
+            operator: true,
+            createdAt: true,
+          },
+        })
+
+        chat.current.incomes = items.map((i) => ({
+          amount: Number(i.amount || 0),
+          rate: i.rate != null ? Number(i.rate) : undefined,
+          createdAt: new Date(i.createdAt),
+          replier: i.replier || '',
+          operator: i.operator || '',
+        }))
+      }
+      // 让后续的 formatSummary 认为需要重新同步一次（防止旧缓存影响）
+      chat._billLastSync = 0
+    } catch (e) {
+      console.error('[撤销入款][sync-from-db-failed]', e)
     }
 
     await ctx.reply(`✅ 已撤销最后一条入款：${result.amount}`, { ...(await buildInlineKb(ctx)) })
