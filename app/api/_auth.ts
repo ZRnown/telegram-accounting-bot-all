@@ -38,12 +38,21 @@ export function verifySession(raw: string | null) {
 
 export function setSessionCookie(res: NextResponse, username: string, ver: number = 0) {
   const v = createSession(username, ver)
+
+  // In production, Next.js 默认 NODE_ENV=production，会把 Cookie 标记为 Secure，
+  // 这在只用 http 部署时浏览器不会回传 Cookie，导致永远 401。
+  // 这里加一个可配置开关：ADMIN_COOKIE_SECURE=false 时，即使在生产环境也不加 Secure。
+  const secure =
+    process.env.ADMIN_COOKIE_SECURE != null
+      ? process.env.ADMIN_COOKIE_SECURE === 'true'
+      : process.env.NODE_ENV === 'production'
+
   res.cookies.set({
     name: COOKIE_NAME,
     value: v,
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure,
     path: '/',
     maxAge: MAX_AGE,
   })
