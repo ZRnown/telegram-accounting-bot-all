@@ -135,6 +135,8 @@ export function registerIncomeWithRemark(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = replierUsername
 
     chat.current.incomes.push({
       amount: amountRMB,
@@ -142,6 +144,8 @@ export function registerIncomeWithRemark(bot, ensureChat) {
       createdAt: new Date(),
       replier: replierUsername,
       operator: operatorUsername || replierUsername,
+      displayName,
+      userId,
       // 记录原始消息ID，便于后续跳转到消息
       messageId: ctx.message?.message_id || null,
     })
@@ -228,6 +232,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     }
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = targetUsername.replace('@', '')
 
     chat.current.incomes.push({
       amount: amountRMB,
@@ -235,6 +241,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      displayName,
+      userId,
       messageId: ctx.message?.message_id || null,
     })
 
@@ -310,6 +318,10 @@ export function registerIncomeWithTarget(bot, ensureChat) {
     }
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = replyTo.from?.first_name || replyTo.from?.last_name
+      ? `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim()
+      : (replyTo.from.username ? `@${replyTo.from.username}` : `user_${replyTo.from.id}`)
 
     chat.current.incomes.push({
       amount: amountRMB,
@@ -317,6 +329,8 @@ export function registerIncomeWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      displayName,
+      userId,
       messageId: ctx.message?.message_id || null,
     })
 
@@ -514,6 +528,8 @@ export function registerIncome(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = replierUsername
 
     chat.current.incomes.push({
       amount: finalAmountRMB,
@@ -521,6 +537,8 @@ export function registerIncome(bot, ensureChat) {
       createdAt: new Date(),
       replier: replierUsername,
       operator: operatorUsername || replierUsername,
+      displayName,
+      userId,
       messageId: ctx.message?.message_id || null,
     })
 
@@ -650,6 +668,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     }
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = targetUsername.replace('@', '')
 
     chat.current.dispatches.push({
       amount: amountRMB,
@@ -657,6 +677,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      displayName,
+      userId,
     })
 
     try {
@@ -738,6 +760,10 @@ export function registerDispatchWithTarget(bot, ensureChat) {
     }
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = replyTo.from?.first_name || replyTo.from?.last_name
+      ? `${replyTo.from.first_name || ''} ${replyTo.from.last_name || ''}`.trim()
+      : (replyTo.from.username ? `@${replyTo.from.username}` : `user_${replyTo.from.id}`)
 
     chat.current.dispatches.push({
       amount: amountRMB,
@@ -745,6 +771,8 @@ export function registerDispatchWithTarget(bot, ensureChat) {
       createdAt: new Date(),
       replier: targetUsername.replace('@', ''),
       operator: operatorUsername || targetUsername,
+      displayName,
+      userId,
     })
 
     try {
@@ -845,6 +873,8 @@ export function registerDispatch(bot, ensureChat) {
 
     const operatorUsername = ctx.from?.username ? `@${ctx.from.username}` : null
     const replierUsername = getUsername(ctx)
+    const userId = ctx.from?.id ? Number(ctx.from.id) : null
+    const displayName = replierUsername
 
     chat.current.dispatches.push({
       amount: amountRMB,
@@ -852,6 +882,8 @@ export function registerDispatch(bot, ensureChat) {
       createdAt: new Date(),
       replier: replierUsername,
       operator: operatorUsername || replierUsername,
+      displayName,
+      userId,
     })
 
     try {

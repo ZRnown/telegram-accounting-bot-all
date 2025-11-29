@@ -224,7 +224,7 @@ export function registerHelp(bot) {
       console.error('[help-action][reply-error]', e)
       // 如果 MarkdownV2 失败，尝试使用普通文本
       try {
-        const help = getHelpText()
+    const help = getHelpText()
         // 移除 MarkdownV2 转义字符
         const plainHelp = help.replace(/\\([\\_*\[\]()~`>#+\-=|{}.!])/g, '$1')
         await ctx.reply(plainHelp, { 
@@ -326,7 +326,7 @@ export function registerCommandMenuAction(bot) {
       console.error('[command_menu][reply-error]', e)
       // 如果 MarkdownV2 失败，尝试使用普通文本
       try {
-        const help = getHelpText()
+    const help = getHelpText()
         // 移除 MarkdownV2 转义字符
         const plainHelp = help.replace(/\\([\\_*\[\]()~`>#+\-=|{}.!])/g, '$1')
         await ctx.reply(plainHelp, { 

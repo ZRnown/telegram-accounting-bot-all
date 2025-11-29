@@ -187,7 +187,7 @@ export async function formatSummary(ctx, chat, options = {}) {
       const rate = i.rate ?? rateVal
       const usdt = rate ? Number((Math.abs(i.amount) / rate).toFixed(1)) : 0
       const amount = Math.abs(i.amount)
-      const who = (i.operator || i.replier || '')
+      const who = i.displayName || i.replier || i.operator || ''
       const remark = i.remark // 🔥 获取备注
 
       // 金额可点击跳转到原始消息（仅对超级群生效：chatId 形如 -100xxxx）
@@ -216,9 +216,8 @@ export async function formatSummary(ctx, chat, options = {}) {
 
       // 第二行显示用户名称（去掉 @），名称可点击打开用户详情
       if (who) {
-        const whoWithAt = who.startsWith('@') ? who : `@${who}`
-        const displayName = who.replace(/^@/, '') || '用户'
-        const userId = chat.userIdByUsername.get(whoWithAt) || chat.userIdByUsername.get(who)
+        const displayName = String(who || '').replace(/^@/, '') || '用户'
+        const userId = i.userId
         let userLine = displayName
         if (userId) {
           userLine = `[${displayName}](tg://user?id=${userId})`

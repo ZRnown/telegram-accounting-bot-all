@@ -368,20 +368,20 @@ bot.on('message', async (ctx, next) => {
             // 自动授权：先确保 Chat 存在，再创建 Setting，避免外键错误
             // 🔥 修复：先创建 Chat，确保成功后再创建 Setting
             const chatResult = await prisma.chat.upsert({
-              where: { id: chatId },
-              create: { 
-                id: chatId, 
-                title, 
-                botId,
-                status: 'APPROVED', 
-                allowed: true 
-              },
-              update: { 
-                title,
-                botId,
-                status: 'APPROVED',
-                allowed: true
-              },
+                where: { id: chatId },
+                create: { 
+                  id: chatId, 
+                  title, 
+                  botId,
+                  status: 'APPROVED', 
+                  allowed: true 
+                },
+                update: { 
+                  title,
+                  botId,
+                  status: 'APPROVED',
+                  allowed: true
+                },
             }).catch((e) => {
               console.error('[message][chat-upsert-error]', e)
               return null
@@ -403,12 +403,12 @@ bot.on('message', async (ctx, next) => {
             }
             
             console.log('[message][auto-authorized]', { chatId, userId })
-        } else {
+          } else {
           // 非白名单用户：先创建 Chat，再创建 Setting
           const chatResult = await prisma.chat.upsert({
-            where: { id: chatId },
-            create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
-            update: { title, botId },
+                where: { id: chatId },
+                create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
+                update: { title, botId },
           }).catch((e) => {
             console.error('[message][chat-upsert-error]', e)
             return null
@@ -416,20 +416,20 @@ bot.on('message', async (ctx, next) => {
           
           if (chatResult) {
             await prisma.setting.upsert({
-              where: { chatId },
-              create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-              update: {},
+                where: { chatId },
+                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+                update: {},
             }).catch((e) => {
               console.error('[message][setting-upsert-error]', e)
-            })
+              })
           }
-        }
+          }
         } else {
           // 先创建 Chat，再创建 Setting
           const chatResult = await prisma.chat.upsert({
-            where: { id: chatId },
-            create: { id: chatId, title, status: 'PENDING', allowed: false },
-            update: { title },
+              where: { id: chatId },
+              create: { id: chatId, title, status: 'PENDING', allowed: false },
+              update: { title },
           }).catch((e) => {
             console.error('[message][chat-upsert-error]', e)
             return null
@@ -449,9 +449,9 @@ bot.on('message', async (ctx, next) => {
         console.error('[message][whitelist-check-error]', e)
         // 先创建 Chat，再创建 Setting
         const chatResult = await prisma.chat.upsert({
-          where: { id: chatId },
-          create: { id: chatId, title, status: 'PENDING', allowed: false },
-          update: { title },
+            where: { id: chatId },
+            create: { id: chatId, title, status: 'PENDING', allowed: false },
+            update: { title },
         }).catch((e2) => {
           console.error('[message][chat-upsert-error]', e2)
           return null
