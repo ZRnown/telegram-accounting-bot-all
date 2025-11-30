@@ -404,9 +404,9 @@ export function registerUndoIncome(bot, ensureChat) {
     } else {
       // 如果没有回复，删除最后一条
       result = await deleteLastIncome(chatId)
-      if (!result) {
-        return ctx.reply('❌ 没有可撤销的入款记录')
-      }
+    if (!result) {
+      return ctx.reply('❌ 没有可撤销的入款记录')
+    }
     }
 
     // 从内存中移除，并与数据库重新同步，避免其它记录被误删/丢失
@@ -482,9 +482,9 @@ export function registerUndoDispatch(bot, ensureChat) {
     } else {
       // 如果没有回复，删除最后一条
       result = await deleteLastDispatch(chatId)
-      if (!result) {
-        return ctx.reply('❌ 没有可撤销的下发记录')
-      }
+    if (!result) {
+      return ctx.reply('❌ 没有可撤销的下发记录')
+    }
     }
 
     // 从内存中移除，并与数据库重新同步
@@ -523,8 +523,8 @@ export function registerUndoDispatch(bot, ensureChat) {
     } catch (e) {
       console.error('[撤销下发][sync-from-db-failed]', e)
       // 如果同步失败，至少从内存中移除最后一条
-      if (chat.current.dispatches.length > 0) {
-        chat.current.dispatches.pop()
+    if (chat.current.dispatches.length > 0) {
+      chat.current.dispatches.pop()
       }
     }
 

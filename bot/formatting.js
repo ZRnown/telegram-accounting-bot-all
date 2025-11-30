@@ -130,9 +130,9 @@ export async function formatSummary(ctx, chat, options = {}) {
         }
         
         return {
-          amount: Number(i.amount),
-          rate: i.rate ? Number(i.rate) : undefined,
-          createdAt: new Date(i.createdAt),
+        amount: Number(i.amount),
+        rate: i.rate ? Number(i.rate) : undefined,
+        createdAt: new Date(i.createdAt),
           replier: replier,
           operator: operator,
           displayName: displayName,
@@ -169,9 +169,9 @@ export async function formatSummary(ctx, chat, options = {}) {
         }
         
         return {
-          amount: Number(i.amount),
-          usdt: Number(i.usdt),
-          createdAt: new Date(i.createdAt),
+        amount: Number(i.amount),
+        usdt: Number(i.usdt),
+        createdAt: new Date(i.createdAt),
           replier: replier,
           operator: operator,
           displayName: displayName,

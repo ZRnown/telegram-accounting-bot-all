@@ -1517,9 +1517,9 @@ bot.hears(/^撤销入款$/i, async (ctx) => {
     }
   }
   
-  // 更新内存 current
-  const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-  if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
+    // 更新内存 current
+    const idx = [...chat.current.incomes].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+    if (idx >= 0) chat.current.incomes.splice(chat.current.incomes.length - 1 - idx, 1)
   
   const message = replyToMessage 
     ? `✅ 已撤销指定的入款记录：${deleted.amount}`
@@ -1558,9 +1558,9 @@ bot.hears(/^撤销下发$/i, async (ctx) => {
     }
   }
   
-  // 更新内存 current
-  const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
-  if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
+    // 更新内存 current
+    const idx = [...chat.current.dispatches].reverse().findIndex(r => Math.abs(r.amount - deleted.amount) < 1e-9)
+    if (idx >= 0) chat.current.dispatches.splice(chat.current.dispatches.length - 1 - idx, 1)
   
   const message = replyToMessage 
     ? `✅ 已撤销指定的下发记录：${deleted.usdt}U`
@@ -2049,7 +2049,7 @@ bot.hears(/^机器人退群$/i, async (ctx) => {
 
 // 🔥 action 处理器已移至 handlers/core.js
 
-// 🔥 每小时自动更新实时汇率的定时任务（按币种聚合，USDT为基准）
+// 🔥 每10分钟自动更新实时汇率的定时任务（使用 OKX C2C 第一个汇率，与 z0 命令保持一致）
 async function updateAllRealtimeRates() {
   try {
     const botId = await ensureCurrentBotId()
@@ -2059,46 +2059,37 @@ async function updateAllRealtimeRates() {
     })
     if (!allSettings || allSettings.length === 0) return
 
-    // 查出每个 chat 的 currencyCode（GlobalConfig），默认 cny
-    const codes = new Map() // chatId -> code
-    const uniqueCodes = new Set()
-    for (const s of allSettings) {
-      try {
-        const row = await prisma.globalConfig.findUnique({ where: { key: `currency:${s.chatId}` }, select: { value: true } })
-        const code = (row?.value || 'cny').toString().trim().toLowerCase() || 'cny'
-        codes.set(s.chatId, code)
-        if (!s.fixedRate) uniqueCodes.add(code)
-      } catch {
-        codes.set(s.chatId, 'cny')
-        if (!s.fixedRate) uniqueCodes.add('cny')
-      }
+    // 🔥 从 OKX C2C 获取第一个汇率（所有支付方式，与 z0 命令保持一致）
+    const { getOKXC2CSellers } = await import('../lib/okx-api.js')
+    const sellers = await getOKXC2CSellers('all')
+    
+    if (!sellers || sellers.length === 0) {
+      console.error('[定时任务] 获取OKX汇率失败，跳过本次更新')
+      return
     }
 
-    // 为每种币种获取一次 USDT->fiat 汇率
-    const { fetchUsdtToFiatRate } = await import('./helpers.js')
-    const rateByCode = new Map()
-    for (const code of uniqueCodes) {
-      const r = await fetchUsdtToFiatRate(code)
-      if (r) rateByCode.set(code, r)
-    }
+    // 使用第一个汇率（最低价格，与 z0 命令显示的第一个一致）
+    const okxRate = sellers[0].price
 
-    // 批量更新数据库与内存
+    // 🔥 批量更新所有使用实时汇率的群组
     let updated = 0
     for (const s of allSettings) {
-      if (s.fixedRate) continue
-      const code = codes.get(s.chatId) || 'cny'
-      const r = rateByCode.get(code)
-      if (!r) continue
-      await prisma.setting.update({ where: { chatId: s.chatId }, data: { realtimeRate: r } })
+      if (s.fixedRate) continue // 跳过使用固定汇率的群组
+      
+      // 更新数据库和内存
+      await prisma.setting.update({ 
+        where: { chatId: s.chatId }, 
+        data: { realtimeRate: okxRate } 
+      })
       const chat = getChat(botId, s.chatId)
       if (chat) {
-        chat.realtimeRate = r
+        chat.realtimeRate = okxRate
       }
       updated++
     }
 
     if (process.env.DEBUG_BOT === 'true') {
-      console.log(`[定时任务] 汇率更新完成，按币种更新 ${updated} 个群组`)
+      console.log(`[定时任务] OKX汇率更新完成，更新 ${updated} 个群组，汇率：${okxRate}`)
     }
   } catch (e) {
     console.error('[定时任务] 更新汇率失败:', e)
@@ -2126,9 +2117,9 @@ bot.launch().then(async () => {
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
   
-  // 🔥 优化：定时任务 - 每半小时更新汇率（保存引用）
-  intervals.push(setInterval(updateAllRealtimeRates, 30 * 60 * 1000))
-  console.log('[定时任务] 实时汇率自动更新已启动，每半小时更新一次')
+  // 🔥 定时任务 - 每10分钟更新汇率（使用 OKX C2C 第一个汇率，与 z0 命令保持一致）
+  intervals.push(setInterval(updateAllRealtimeRates, 10 * 60 * 1000))
+  console.log('[定时任务] 实时汇率自动更新已启动，每10分钟更新一次（使用 OKX C2C 第一个汇率）')
   
   // 🔥 新增：自动日切定时任务 - 每10分钟检查一次，确保日切时自动切换
   const autoDailyCutoffTask = async () => {
