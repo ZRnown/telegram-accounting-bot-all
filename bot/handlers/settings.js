@@ -64,6 +64,7 @@ export function registerSetRate(bot, ensureChat) {
 
 /**
  * 设置实时汇率
+ * 🔥 使用 OKX C2C 第一个汇率（与 z0 命令保持一致）
  */
 export function registerSetRealtimeRate(bot, ensureChat) {
   bot.hears(/^设置实时汇率$/i, async (ctx) => {
@@ -77,20 +78,33 @@ export function registerSetRealtimeRate(bot, ensureChat) {
 
     const chatId = await ensureDbChat(ctx, chat)
     const code = chat.currencyCode || 'cny'
-    const rate = await fetchUsdtToFiatRate(code)
-    if (!rate) {
-      return ctx.reply('❌ 获取实时汇率失败，请稍后重试')
-    }
+    
+    // 🔥 使用 OKX C2C API 获取第一个汇率（与 z0 命令保持一致）
+    try {
+      const { getOKXC2CSellers } = await import('../../lib/okx-api.js')
+      const sellers = await getOKXC2CSellers('all')
+      
+      if (!sellers || sellers.length === 0) {
+        return ctx.reply('❌ 获取OKX实时汇率失败，请稍后重试')
+      }
 
-    chat.realtimeRate = rate
-    chat.fixedRate = null
-    await updateSettings(chatId, { realtimeRate: rate, fixedRate: null })
-    await ctx.reply(`✅ 已启用实时汇率：${rate.toFixed(2)} (${getDisplayCurrencySymbol(code)}/${'USDT'})`, { ...(await buildInlineKb(ctx)) })
+      // 使用第一个汇率（最低价格，与 z0 命令显示的第一个一致）
+      const rate = sellers[0].price
+
+      chat.realtimeRate = rate
+      chat.fixedRate = null
+      await updateSettings(chatId, { realtimeRate: rate, fixedRate: null })
+      await ctx.reply(`✅ 已启用实时汇率：${rate.toFixed(2)} (${getDisplayCurrencySymbol(code)}/${'USDT'})`, { ...(await buildInlineKb(ctx)) })
+    } catch (e) {
+      console.error('[设置实时汇率]', e)
+      await ctx.reply('❌ 获取实时汇率失败，请稍后重试')
+    }
   })
 }
 
 /**
  * 刷新实时汇率
+ * 🔥 使用 OKX C2C 第一个汇率（与 z0 命令保持一致）
  */
 export function registerRefreshRate(bot, ensureChat) {
   bot.hears(/^刷新实时汇率$/i, async (ctx) => {
@@ -99,14 +113,26 @@ export function registerRefreshRate(bot, ensureChat) {
 
     const chatId = await ensureDbChat(ctx, chat)
     const code = chat.currencyCode || 'cny'
-    const rate = await fetchUsdtToFiatRate(code)
-    if (!rate) {
-      return ctx.reply('❌ 获取实时汇率失败，请稍后重试')
-    }
+    
+    // 🔥 使用 OKX C2C API 获取第一个汇率（与 z0 命令保持一致）
+    try {
+      const { getOKXC2CSellers } = await import('../../lib/okx-api.js')
+      const sellers = await getOKXC2CSellers('all')
+      
+      if (!sellers || sellers.length === 0) {
+        return ctx.reply('❌ 获取OKX实时汇率失败，请稍后重试')
+      }
 
-    chat.realtimeRate = rate
-    await updateSettings(chatId, { realtimeRate: rate })
-    await ctx.reply(`✅ 实时汇率已更新：${rate.toFixed(2)} (${getDisplayCurrencySymbol(code)}/${'USDT'})`, { ...(await buildInlineKb(ctx)) })
+      // 使用第一个汇率（最低价格，与 z0 命令显示的第一个一致）
+      const rate = sellers[0].price
+
+      chat.realtimeRate = rate
+      await updateSettings(chatId, { realtimeRate: rate })
+      await ctx.reply(`✅ 实时汇率已更新：${rate.toFixed(2)} (${getDisplayCurrencySymbol(code)}/${'USDT'})`, { ...(await buildInlineKb(ctx)) })
+    } catch (e) {
+      console.error('[刷新实时汇率]', e)
+      await ctx.reply('❌ 获取实时汇率失败，请稍后重试')
+    }
   })
 }
 
