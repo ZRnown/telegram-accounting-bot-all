@@ -216,6 +216,8 @@ export async function GET(req: NextRequest) {
     }
 
     const billIds = billsData.map((b: any) => b.id)
+      // 🔥 性能优化：即使有大量记录（几千几万条），也一次性查询所有记录用于计算
+      // 使用 select 只选择必要字段，减少数据传输量
       const billItems = billIds.length
       ? await prisma.billItem.findMany({
           where: { billId: { in: billIds } },
@@ -229,6 +231,9 @@ export async function GET(req: NextRequest) {
             replier: true,
             operator: true,
             remark: true, // 🔥 添加备注字段
+            displayName: true, // 🔥 添加用户昵称字段
+            userId: true, // 🔥 添加用户ID字段
+            messageId: true, // 🔥 添加消息ID字段
             createdAt: true, // 🔥 用于计算今日入款（累计模式）
           },
           orderBy: { createdAt: 'asc' }

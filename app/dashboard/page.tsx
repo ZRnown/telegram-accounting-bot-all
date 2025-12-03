@@ -37,7 +37,7 @@ function DashboardPageInner() {
   const [billData, setBillData] = useState<{ billStartTime?: string; billEndTime?: string } | null>(null) // 🔥 累计模式账单时间数据
   const [chatTitle, setChatTitle] = useState<string>("")
   const [groupsCount, setGroupsCount] = useState<number | null>(null)
-  const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; invitedBy?: string | null; invitedByUsername?: string | null; bot?: { name: string } }>>([])
+  const [groups, setGroups] = useState<Array<{ id: string; title: string | null; status?: string; allowed?: boolean; createdAt: string; botId?: string | null; invitedBy?: string | null; invitedByUsername?: string | null; groupId?: string | null; group?: { id: string; name: string } | null; bot?: { name: string } }>>([])
   const [inviterFilter, setInviterFilter] = useState<string>('全部') // 🔥 新增：邀请人筛选
   const [drafts, setDrafts] = useState<Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }>>({})
   const [bots, setBots] = useState<Array<{ id: string; name: string; enabled?: boolean; realName?: string | null }>>([])
@@ -51,7 +51,19 @@ function DashboardPageInner() {
   const [quickSettingsSaving, setQuickSettingsSaving] = useState<Record<string, boolean>>({})
   const [showCreateBot, setShowCreateBot] = useState<boolean>(false)
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
-  const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { open: boolean; message: string; sending?: boolean }>>({})
+  const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { 
+    open: boolean
+    message: string
+    sending?: boolean
+    selectedChatIds?: string[] // 🔥 新增：选中的群组ID
+    selectedGroupIds?: string[] // 🔥 新增：选中的分组ID
+    showSelector?: boolean // 🔥 新增：是否显示选择器
+  }>>({})
+  // 🔥 新增：分组管理状态
+  const [chatGroups, setChatGroups] = useState<Record<string, Array<{ id: string; name: string; description: string | null; chatCount: number }>>>({})
+  const [groupDialogs, setGroupDialogs] = useState<Record<string, { open: boolean; editing?: { id: string; name: string; description: string | null } }>>({})
+  const [groupForm, setGroupForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
+  const [groupSaving, setGroupSaving] = useState<Record<string, boolean>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
@@ -400,6 +412,22 @@ function DashboardPageInner() {
     }
     load()
     
+    // 🔥 加载分组数据
+    const loadGroups = async () => {
+      for (const bot of bots) {
+        try {
+          const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`)
+          if (res.ok) {
+            const data = await res.json()
+            setChatGroups((prev) => ({ ...prev, [bot.id]: data }))
+          }
+        } catch {}
+      }
+    }
+    if (bots.length > 0) {
+      loadGroups()
+    }
+
     // 🔥 自动刷新群组列表（每30秒轮询一次，提升更新速度）
     if (!chatId) {
       const interval = setInterval(() => {
@@ -422,6 +450,16 @@ function DashboardPageInner() {
             setDrafts(d)
             setCachedData(CACHE_KEY_BOTS, newBots)
             setCachedData(CACHE_KEY_GROUPS, chatsItems)
+            // 🔥 同时刷新分组数据
+            for (const bot of newBots) {
+              try {
+                const groupsRes = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`)
+                if (groupsRes.ok) {
+                  const groupsData = await groupsRes.json()
+                  setChatGroups((prev) => ({ ...prev, [bot.id]: groupsData }))
+                }
+              } catch {}
+            }
           }
         }).catch(() => {})
       }, 30 * 1000) // 🔥 每30秒刷新一次
@@ -942,6 +980,19 @@ function DashboardPageInner() {
                             })
                           }}
                         >{broadcastDrafts[bot.id]?.open ? '收起群发' : '群发通知'}</button>
+                        <button
+                          className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
+                          onClick={() => {
+                            setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true } }))
+                            // 加载分组数据
+                            fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`).then(async (res) => {
+                              if (res.ok) {
+                                const data = await res.json()
+                                setChatGroups((prev) => ({ ...prev, [bot.id]: data }))
+                              }
+                            }).catch(() => {})
+                          }}
+                        >分组管理</button>
                         {isAdmin && (
                           <>
                             <button
@@ -977,7 +1028,7 @@ function DashboardPageInner() {
                         <div className="space-y-2 text-sm">
                           <textarea
                             className="w-full border rounded-md px-2 py-1 text-sm min-h-[80px]"
-                            placeholder="在此输入要发送至所有绑定群组的公告"
+                            placeholder="在此输入要发送的公告"
                             value={broadcastDrafts[bot.id]?.message || ''}
                             onChange={(e) => {
                               const value = e.target.value
@@ -987,6 +1038,111 @@ function DashboardPageInner() {
                               }))
                             }}
                           />
+                          {/* 🔥 新增：选择发送目标 */}
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <button
+                                className="px-2 py-1 text-xs border rounded-md hover:bg-slate-50"
+                                onClick={() => {
+                                  const current = broadcastDrafts[bot.id] || { open: true, message: '', sending: false }
+                                  setBroadcastDrafts((prev) => ({
+                                    ...prev,
+                                    [bot.id]: { ...current, showSelector: !current.showSelector }
+                                  }))
+                                }}
+                              >{broadcastDrafts[bot.id]?.showSelector ? '收起选择' : '选择发送目标'}</button>
+                              <span className="text-xs text-slate-500">
+                                {(() => {
+                                  const current = broadcastDrafts[bot.id]
+                                  if (!current) return '默认发送到所有群组'
+                                  if (current.selectedChatIds && current.selectedChatIds.length > 0) {
+                                    return `已选择 ${current.selectedChatIds.length} 个群组`
+                                  }
+                                  if (current.selectedGroupIds && current.selectedGroupIds.length > 0) {
+                                    return `已选择 ${current.selectedGroupIds.length} 个分组`
+                                  }
+                                  return '默认发送到所有群组'
+                                })()}
+                              </span>
+                            </div>
+                            {broadcastDrafts[bot.id]?.showSelector && (
+                              <div className="border rounded-md p-2 space-y-2 max-h-[200px] overflow-y-auto">
+                                {/* 分组选择 */}
+                                {chatGroups[bot.id] && chatGroups[bot.id].length > 0 && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-medium text-slate-700">按分组发送：</div>
+                                    <div className="space-y-1">
+                                      {chatGroups[bot.id].map((group) => {
+                                        const isSelected = broadcastDrafts[bot.id]?.selectedGroupIds?.includes(group.id)
+                                        return (
+                                          <label key={group.id} className="flex items-center gap-2 text-xs">
+                                            <input
+                                              type="checkbox"
+                                              checked={isSelected || false}
+                                              onChange={(e) => {
+                                                const current = broadcastDrafts[bot.id] || { open: true, message: '', sending: false }
+                                                const selectedGroupIds = current.selectedGroupIds || []
+                                                const newSelected = e.target.checked
+                                                  ? [...selectedGroupIds, group.id]
+                                                  : selectedGroupIds.filter((id: string) => id !== group.id)
+                                                setBroadcastDrafts((prev) => ({
+                                                  ...prev,
+                                                  [bot.id]: { ...current, selectedGroupIds: newSelected, selectedChatIds: [] }
+                                                }))
+                                              }}
+                                            />
+                                            <span>{group.name} ({group.chatCount} 个群组)</span>
+                                          </label>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                {/* 群组选择 */}
+                                <div className="space-y-1">
+                                  <div className="text-xs font-medium text-slate-700">按群组发送：</div>
+                                  <div className="space-y-1 max-h-[100px] overflow-y-auto">
+                                    {groups.filter((g: any) => g.botId === bot.id && g.status === 'APPROVED').slice(0, 20).map((group: any) => {
+                                      const isSelected = broadcastDrafts[bot.id]?.selectedChatIds?.includes(group.id)
+                                      return (
+                                        <label key={group.id} className="flex items-center gap-2 text-xs">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected || false}
+                                            onChange={(e) => {
+                                              const current = broadcastDrafts[bot.id] || { open: true, message: '', sending: false }
+                                              const selectedChatIds = current.selectedChatIds || []
+                                              const newSelected = e.target.checked
+                                                ? [...selectedChatIds, group.id]
+                                                : selectedChatIds.filter((id: string) => id !== group.id)
+                                              setBroadcastDrafts((prev) => ({
+                                                ...prev,
+                                                [bot.id]: { ...current, selectedChatIds: newSelected, selectedGroupIds: [] }
+                                              }))
+                                            }}
+                                          />
+                                          <span className="truncate">{group.title || group.id}</span>
+                                        </label>
+                                      )
+                                    })}
+                                    {groups.filter((g: any) => g.botId === bot.id && g.status === 'APPROVED').length > 20 && (
+                                      <div className="text-xs text-slate-500">（仅显示前20个，更多请使用分组）</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  className="px-2 py-1 text-xs border rounded-md hover:bg-slate-50"
+                                  onClick={() => {
+                                    const current = broadcastDrafts[bot.id] || { open: true, message: '', sending: false }
+                                    setBroadcastDrafts((prev) => ({
+                                      ...prev,
+                                      [bot.id]: { ...current, selectedChatIds: [], selectedGroupIds: [] }
+                                    }))
+                                  }}
+                                >清除选择（发送到所有群组）</button>
+                              </div>
+                            )}
+                          </div>
                           <div className="flex justify-end gap-3">
                             <button
                               className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
@@ -1000,10 +1156,16 @@ function DashboardPageInner() {
                                 if (!current?.message?.trim()) return
                                 setBroadcastDrafts((prev) => ({ ...prev, [bot.id]: { ...current, sending: true } }))
                                 try {
+                                  const body: any = { message: current.message }
+                                  if (current.selectedChatIds && current.selectedChatIds.length > 0) {
+                                    body.chatIds = current.selectedChatIds
+                                  } else if (current.selectedGroupIds && current.selectedGroupIds.length > 0) {
+                                    body.groupIds = current.selectedGroupIds
+                                  }
                                   const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/broadcast`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ message: current.message }),
+                                    body: JSON.stringify(body),
                                   })
                                   if (res.ok) {
                                     const json = await res.json().catch(() => null)
@@ -1244,6 +1406,168 @@ function DashboardPageInner() {
                       <button className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50" disabled={!!dlg.saving} onClick={() => saveAliasDialog(bot.id)}>
                         {dlg.saving ? '保存中...' : '保存'}
                       </button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )
+            })}
+
+            {/* 🔥 分组管理弹窗（按机器人） */}
+            {bots.map((bot) => {
+              const dlg = groupDialogs[bot.id]
+              if (!dlg) return null
+              const groups = chatGroups[bot.id] || []
+              const editing = dlg.editing
+              return (
+                <Dialog key={`group-${bot.id}`} open={!!dlg.open} onOpenChange={(open) => {
+                  if (!open) {
+                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: false } }))
+                    setGroupForm({ name: '', description: '' })
+                  }
+                }}>
+                  <DialogContent className="w-[98vw] max-w-none sm:max-w-none max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>📁 分组管理 - {bot.name}</DialogTitle>
+                      <DialogDescription>
+                        创建分组后，可以将群组分配到分组中，然后按分组进行群发。
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="mt-4 space-y-4">
+                      {/* 创建/编辑分组表单 */}
+                      <div className="border rounded-md p-4 space-y-2">
+                        <div className="text-sm font-medium">{editing ? '编辑分组' : '创建新分组'}</div>
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            className="w-full border rounded-md px-2 py-1 text-sm"
+                            placeholder="分组名称"
+                            value={groupForm.name}
+                            onChange={(e) => setGroupForm((prev) => ({ ...prev, name: e.target.value }))}
+                          />
+                          <textarea
+                            className="w-full border rounded-md px-2 py-1 text-sm min-h-[60px]"
+                            placeholder="分组描述（可选）"
+                            value={groupForm.description}
+                            onChange={(e) => setGroupForm((prev) => ({ ...prev, description: e.target.value }))}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                              disabled={!groupForm.name.trim() || groupSaving[bot.id]}
+                              onClick={async () => {
+                                if (!groupForm.name.trim()) return
+                                setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
+                                try {
+                                  const url = editing
+                                    ? `/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(editing.id)}`
+                                    : `/api/bots/${encodeURIComponent(bot.id)}/groups`
+                                  const method = editing ? 'PATCH' : 'POST'
+                                  const res = await fetch(url, {
+                                    method,
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ name: groupForm.name.trim(), description: groupForm.description.trim() || null })
+                                  })
+                                  if (res.ok) {
+                                    const data = await res.json()
+                                    setChatGroups((prev) => {
+                                      const current = prev[bot.id] || []
+                                      if (editing) {
+                                        return { ...prev, [bot.id]: current.map((g) => g.id === editing.id ? data : g) }
+                                      } else {
+                                        return { ...prev, [bot.id]: [...current, data] }
+                                      }
+                                    })
+                                    setGroupForm({ name: '', description: '' })
+                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true } }))
+                                    toast({ title: '成功', description: editing ? '分组已更新' : '分组已创建' })
+                                  } else {
+                                    const err = await res.json().catch(() => ({}))
+                                    toast({ title: '错误', description: err?.error || '操作失败', variant: 'destructive' })
+                                  }
+                                } catch (e) {
+                                  toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                } finally {
+                                  setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
+                                }
+                              }}
+                            >{editing ? '更新' : '创建'}</button>
+                            {editing && (
+                              <button
+                                className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                                onClick={() => {
+                                  setGroupForm({ name: '', description: '' })
+                                  setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true } }))
+                                }}
+                              >取消编辑</button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 分组列表 */}
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">现有分组 ({groups.length})</div>
+                        {groups.length === 0 ? (
+                          <div className="text-sm text-slate-500">暂无分组</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {groups.map((group) => (
+                              <div key={group.id} className="border rounded-md p-3 flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="text-sm font-medium">{group.name}</div>
+                                  {group.description && (
+                                    <div className="text-xs text-slate-500 mt-1">{group.description}</div>
+                                  )}
+                                  <div className="text-xs text-slate-500 mt-1">{group.chatCount} 个群组</div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    className="px-2 py-1 text-xs border rounded-md hover:bg-slate-50"
+                                    onClick={() => {
+                                      setGroupForm({ name: group.name, description: group.description || '' })
+                                      setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, editing: group } }))
+                                    }}
+                                  >编辑</button>
+                                  <button
+                                    className="px-2 py-1 text-xs border rounded-md hover:bg-red-50 text-red-600"
+                                    onClick={async () => {
+                                      if (!confirm(`确认删除分组"${group.name}"？此操作会将分组中的群组移出分组，但不会删除群组。`)) return
+                                      try {
+                                        const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(group.id)}`, {
+                                          method: 'DELETE'
+                                        })
+                                        if (res.ok) {
+                                          setChatGroups((prev) => {
+                                            const current = prev[bot.id] || []
+                                            return { ...prev, [bot.id]: current.filter((g) => g.id !== group.id) }
+                                          })
+                                          toast({ title: '成功', description: '分组已删除' })
+                                        } else {
+                                          const err = await res.json().catch(() => ({}))
+                                          toast({ title: '错误', description: err?.error || '删除失败', variant: 'destructive' })
+                                        }
+                                      } catch (e) {
+                                        toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                      }
+                                    }}
+                                  >删除</button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button
+                        className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                        onClick={() => {
+                          setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: false } }))
+                          setGroupForm({ name: '', description: '' })
+                        }}
+                      >关闭</button>
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -1547,6 +1871,41 @@ function DashboardPageInner() {
                                 </select>
                               </td>
                               <td className="py-3 px-3 text-sm text-slate-900 truncate" title={inviterLabel}>{inviterLabel}</td>
+                              <td className="py-3 px-3">
+                                <select
+                                  className="border rounded-md px-2 py-1.5 text-xs w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  value={it.groupId || ''}
+                                  onChange={async (e) => {
+                                    const groupId = e.target.value || null
+                                    try {
+                                      const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}/group`, {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ groupId })
+                                      })
+                                      if (res.ok) {
+                                        setGroups((prev) => prev.map((g) => {
+                                          if (g.id === it.id) {
+                                            return { ...g, groupId, group: groupId ? (chatGroups[it.botId || '']?.find((gr) => gr.id === groupId) ? { id: groupId, name: chatGroups[it.botId || '']?.find((gr) => gr.id === groupId)?.name || '' } : null) : null }
+                                          }
+                                          return g
+                                        }))
+                                        toast({ title: '成功', description: '分组已更新' })
+                                      } else {
+                                        const err = await res.json().catch(() => ({}))
+                                        toast({ title: '错误', description: err?.error || '更新失败', variant: 'destructive' })
+                                      }
+                                    } catch (e) {
+                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                    }
+                                  }}
+                                >
+                                  <option value="">无分组</option>
+                                  {(chatGroups[it.botId || ''] || []).map((group) => (
+                                    <option key={group.id} value={group.id}>{group.name}</option>
+                                  ))}
+                                </select>
+                              </td>
                               <td className="py-3 px-3 text-center">
                                 <input
                                   type="checkbox"

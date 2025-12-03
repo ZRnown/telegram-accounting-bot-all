@@ -377,8 +377,121 @@ export function registerShowHistory(bot, ensureChat) {
 }
 
 /**
+ * 查看历史入款记录（最多500条）
+ */
+export function registerShowIncomeHistory(bot, ensureChat) {
+  bot.hears(/^查看入款历史$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
+    }
+
+    const chatId = await ensureDbChat(ctx, chat)
+    const { bill } = await getOrCreateTodayBill(chatId)
+    if (!bill) {
+      return ctx.reply('❌ 未找到账单')
+    }
+
+    // 🔥 查询最多500条历史记录
+    const items = await prisma.billItem.findMany({
+      where: { billId: bill.id, type: 'INCOME' },
+      select: {
+        id: true,
+        amount: true,
+        rate: true,
+        usdt: true,
+        displayName: true,
+        messageId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500
+    })
+
+    if (items.length === 0) {
+      return ctx.reply('暂无入款记录')
+    }
+
+    // 格式化显示（最多显示最近50条，避免消息过长）
+    const displayItems = items.slice(0, 50)
+    const lines = displayItems.map((item, index) => {
+      const time = new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const amount = Number(item.amount || 0)
+      const rate = item.rate ? Number(item.rate) : null
+      const usdt = rate ? Number((Math.abs(amount) / rate).toFixed(1)) : (item.usdt ? Number(item.usdt) : 0)
+      const name = item.displayName || '用户'
+      return `${index + 1}. ${time} ${amount > 0 ? '+' : ''}${amount}${rate ? ` / ${rate}=${usdt}U` : ''} ${name}`
+    })
+
+    const totalText = items.length > 50 
+      ? `最近50条（共${items.length}条，最多支持500条）：\n\n${lines.join('\n')}\n\n💡 提示：回复消息输入"撤销入款"可撤销对应记录`
+      : `共${items.length}条记录：\n\n${lines.join('\n')}\n\n💡 提示：回复消息输入"撤销入款"可撤销对应记录`
+
+    await ctx.reply(totalText, { parse_mode: 'MarkdownV2' })
+  })
+}
+
+/**
+ * 查看历史下发记录（最多500条）
+ */
+export function registerShowDispatchHistory(bot, ensureChat) {
+  bot.hears(/^查看下发历史$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
+    }
+
+    const chatId = await ensureDbChat(ctx, chat)
+    const { bill } = await getOrCreateTodayBill(chatId)
+    if (!bill) {
+      return ctx.reply('❌ 未找到账单')
+    }
+
+    // 🔥 查询最多500条历史记录
+    const items = await prisma.billItem.findMany({
+      where: { billId: bill.id, type: 'DISPATCH' },
+      select: {
+        id: true,
+        amount: true,
+        usdt: true,
+        displayName: true,
+        messageId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500
+    })
+
+    if (items.length === 0) {
+      return ctx.reply('暂无下发记录')
+    }
+
+    // 格式化显示（最多显示最近50条，避免消息过长）
+    const displayItems = items.slice(0, 50)
+    const lines = displayItems.map((item, index) => {
+      const time = new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const amount = Number(item.amount || 0)
+      const usdt = Number(item.usdt || 0)
+      const name = item.displayName || '用户'
+      return `${index + 1}. ${time} ${amount} (${usdt}U) ${name}`
+    })
+
+    const totalText = items.length > 50 
+      ? `最近50条（共${items.length}条，最多支持500条）：\n\n${lines.join('\n')}\n\n💡 提示：回复消息输入"撤销下发"可撤销对应记录`
+      : `共${items.length}条记录：\n\n${lines.join('\n')}\n\n💡 提示：回复消息输入"撤销下发"可撤销对应记录`
+
+    await ctx.reply(totalText, { parse_mode: 'MarkdownV2' })
+  })
+}
+
+/**
  * 撤销入款
  * 🔥 支持回复消息撤销指定记录，如果没有回复则撤销最后一条
+ * 🔥 支持撤销最多500条历史记录
  */
 export function registerUndoIncome(bot, ensureChat) {
   bot.hears(/^撤销入款$/i, async (ctx) => {

@@ -5,7 +5,11 @@ import { ProxyAgent } from 'undici'
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params
-    const body = await req.json().catch(() => ({})) as { message?: string }
+    const body = await req.json().catch(() => ({})) as { 
+      message?: string
+      chatIds?: string[] // 🔥 新增：指定要发送的群组ID列表
+      groupIds?: string[] // 🔥 新增：指定要发送的分组ID列表
+    }
     const message = (body.message || '').trim()
     if (!message) return Response.json({ error: '缺少 message' }, { status: 400 })
 
@@ -16,12 +20,24 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     if (!bot || !bot.token) return Response.json({ error: '未找到机器人' }, { status: 404 })
     if (!bot.enabled) return Response.json({ error: '机器人未启用，无法群发' }, { status: 400 })
 
+    // 🔥 构建查询条件
+    const where: any = {
+      botId: id,
+      status: 'APPROVED'
+    }
+
+    // 🔥 如果指定了 chatIds，只发送到这些群组
+    if (body.chatIds && body.chatIds.length > 0) {
+      where.id = { in: body.chatIds }
+    }
+    // 🔥 如果指定了 groupIds，发送到这些分组的所有群组
+    else if (body.groupIds && body.groupIds.length > 0) {
+      where.groupId = { in: body.groupIds }
+    }
+
     // 只获取群组（ID为负数），排除私聊用户（ID为正数）
     const chats = await prisma.chat.findMany({
-      where: { 
-        botId: id, 
-        status: 'APPROVED'
-      },
+      where,
       select: { id: true },
     })
     

@@ -63,11 +63,26 @@ export async function GET(req: NextRequest) {
       itemWhere.type = 'DISPATCH'
     }
 
-    // 获取记录
+    // 🔥 性能优化：获取记录时只选择必要字段，减少数据传输量
     const [total, items] = await Promise.all([
       prisma.billItem.count({ where: itemWhere }),
       prisma.billItem.findMany({
         where: itemWhere,
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          rate: true,
+          usdt: true,
+          feeRate: true,
+          remark: true,
+          replier: true,
+          operator: true,
+          displayName: true,
+          userId: true,
+          messageId: true,
+          createdAt: true,
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * size,
         take: size,

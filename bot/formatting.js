@@ -2,7 +2,7 @@
 import { prisma } from '../lib/db.js'
 import { summarize } from './state.js'
 import { formatMoney, getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
-import { checkAndClearIfNewDay } from './database.js'
+import { checkAndClearIfNewDay, getOrCreateTodayBill } from './database.js'
 
 /**
  * 格式化账单摘要
@@ -180,13 +180,10 @@ export async function formatSummary(ctx, chat, options = {}) {
       })
 
       // 🔥 修复：始终使用数据库数据作为权威来源，确保数据一致性
-      // 这样可以避免内存数据与数据库数据不一致导致的计算错误
-      if (dbIncomes.length > 0) {
-        chat.current.incomes = dbIncomes
-      }
-      if (dbDispatches.length > 0) {
-        chat.current.dispatches = dbDispatches
-      }
+      // 🔥 优化：即使记录数超过内存限制（100条），也完整同步到内存（用于计算）
+      // 但显示时会根据displayMode限制显示数量
+      chat.current.incomes = dbIncomes
+      chat.current.dispatches = dbDispatches
       chat._billLastSync = now
       // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
       // 🔥 修复：优先使用群组级别的日切时间
@@ -221,14 +218,85 @@ export async function formatSummary(ctx, chat, options = {}) {
   const isFixedRate = currentFixedRate != null
   const rateLabel = isFixedRate ? '固定汇率' : '实时汇率'
 
-  const s = summarize(chat)
+  // 🔥 修复：从数据库读取所有记录进行计算，确保几千几万条记录时也能正确计算
+  // 内存中可能只保留部分记录（MAX_INCOMES=100），但计算时必须使用所有记录
+  let allIncomes = chat.current.incomes
+  let allDispatches = chat.current.dispatches
+  let incCount = chat.current.incomes.length
+  let disCount = chat.current.dispatches.length
+
+  try {
+    // 如果内存中的记录数达到限制（100条），说明数据库中可能有更多记录
+    // 需要从数据库重新读取所有记录进行计算
+    if (incCount >= 100 || disCount >= 100 || needsSync) {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      if (bill) {
+        const allItems = await prisma.billItem.findMany({
+          where: { billId: bill.id },
+          select: {
+            type: true,
+            amount: true,
+            rate: true,
+            usdt: true,
+            feeRate: true,
+            replier: true,
+            operator: true,
+            displayName: true,
+            userId: true,
+            messageId: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' }
+        })
+
+        allIncomes = allItems
+          .filter(i => i.type === 'INCOME')
+          .map(i => ({
+            amount: Number(i.amount || 0),
+            rate: i.rate != null ? Number(i.rate) : undefined,
+            feeRate: i.feeRate != null ? Number(i.feeRate) : undefined,
+            createdAt: new Date(i.createdAt),
+            replier: i.replier || '',
+            operator: i.operator || '',
+            displayName: i.displayName || null,
+            userId: i.userId ? Number(i.userId) : null,
+            messageId: i.messageId || null,
+          }))
+
+        allDispatches = allItems
+          .filter(i => i.type === 'DISPATCH')
+          .map(i => ({
+            amount: Number(i.amount || 0),
+            usdt: Number(i.usdt || 0),
+            createdAt: new Date(i.createdAt),
+            replier: i.replier || '',
+            operator: i.operator || '',
+            displayName: i.displayName || null,
+            userId: i.userId ? Number(i.userId) : null,
+            messageId: i.messageId || null,
+          }))
+
+        incCount = allIncomes.length
+        disCount = allDispatches.length
+      }
+    }
+  } catch (e) {
+    console.error('[formatSummary] 从数据库读取所有记录失败，使用内存数据', e)
+  }
+
+  // 🔥 使用所有记录创建临时chat对象进行计算
+  const tempChat = {
+    ...chat,
+    current: {
+      incomes: allIncomes,
+      dispatches: allDispatches,
+    }
+  }
+  const s = summarize(tempChat)
   const rateVal = s.effectiveRate || 0
 
-  const incCount = chat.current.incomes.length
-  const disCount = chat.current.dispatches.length
-
-  let showIncomes = chat.current.incomes
-  let showDispatches = chat.current.dispatches
+  let showIncomes = allIncomes
+  let showDispatches = allDispatches
   if (chat.displayMode === 1) {
     showIncomes = showIncomes.slice(-3)
     showDispatches = showDispatches.slice(-3)

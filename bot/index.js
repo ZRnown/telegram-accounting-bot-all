@@ -1281,6 +1281,22 @@ bot.hears(/^\d+[\d+\-*/.()]+$/, async (ctx) => {
 
 // 🔥 OKX C2C价格查询已移至 handlers/okx.js
 
+// 🔥 添加操作员方式三：添加操作员 @所有人（群内所有人都可以记账）- 需要先匹配，避免被方式一捕获
+bot.hears(/^添加操作员\s+@所有人$/i, async (ctx) => {
+  const chat = ensureChat(ctx)
+  if (!chat) return
+  
+  // 🔥 优化：使用统一的权限检查函数
+  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+  }
+  
+  const chatId = await ensureDbChat(ctx)
+  chat.everyoneAllowed = true
+  await updateSettings(chatId, { everyoneAllowed: true })
+  await ctx.reply('✅ 已开启：所有人可操作（群内所有人都可以记账）')
+})
+
 // 🔥 添加操作员方式一：添加操作员 @AAA @BBB（支持多个用户名）
 bot.hears(/^添加操作员\s+/i, async (ctx) => {
   const chat = ensureChat(ctx)
@@ -1292,6 +1308,11 @@ bot.hears(/^添加操作员\s+/i, async (ctx) => {
   }
   
   const text = ctx.message.text || ''
+  // 🔥 排除 @所有人 的情况（已在上面处理）
+  if (/@所有人/.test(text)) {
+    return // 已由上面的处理器处理
+  }
+  
   // 提取所有@用户名
   const mentions = text.match(/@([A-Za-z0-9_]{5,})/g) || []
   
@@ -1355,22 +1376,6 @@ bot.on('text', async (ctx, next) => {
     console.error('保存操作人失败', e)
     await ctx.reply('❌ 添加操作人失败')
   }
-})
-
-// 🔥 添加操作员方式三：添加操作员 @所有人（群内所有人都可以记账）
-bot.hears(/^添加操作员\s+@所有人$/i, async (ctx) => {
-  const chat = ensureChat(ctx)
-  if (!chat) return
-  
-  // 🔥 优化：使用统一的权限检查函数
-  if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
-  }
-  
-  const chatId = await ensureDbChat(ctx)
-  chat.everyoneAllowed = true
-  await updateSettings(chatId, { everyoneAllowed: true })
-  await ctx.reply('✅ 已开启：所有人可操作（群内所有人都可以记账）')
 })
 
 // 🔥 删除操作员方式一：删除操作员 @AAA @BBB（支持多个用户名）

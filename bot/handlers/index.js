@@ -26,6 +26,8 @@ import {
   registerDeleteBill,
   registerDeleteAllBills,
   registerShowHistory,
+  registerShowIncomeHistory,
+  registerShowDispatchHistory,
   registerUndoIncome,
   registerUndoDispatch,
   registerMyBill,
@@ -68,6 +70,8 @@ export function registerAllHandlers(bot, ensureChat) {
   registerDeleteBill(bot, ensureChat)
   registerDeleteAllBills(bot, ensureChat)
   registerShowHistory(bot, ensureChat)
+  registerShowIncomeHistory(bot, ensureChat) // 🔥 查看入款历史（最多500条）
+  registerShowDispatchHistory(bot, ensureChat) // 🔥 查看下发历史（最多500条）
   registerUndoIncome(bot, ensureChat)
   registerUndoDispatch(bot, ensureChat)
   registerMyBill(bot, ensureChat)
