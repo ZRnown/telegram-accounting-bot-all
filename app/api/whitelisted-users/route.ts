@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     const unauth = assertAdmin(req)
     if (unauth) return unauth
     // 🔥 优化：直接返回数据，移除 N+1 查询
-    const users = await prisma.whitelistedUser.findMany({
+    const usersRaw = await prisma.whitelistedUser.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -19,6 +19,12 @@ export async function GET(req: NextRequest) {
         updatedAt: true
       }
     })
+
+    // 🔥 兜底：如果 username 为 null，使用 userId 占位，避免前端显示为空
+    const users = usersRaw.map((u) => ({
+      ...u,
+      username: u.username || (u.userId ? `user_${u.userId}` : 'unknown')
+    }))
     
     return NextResponse.json({ items: users })
   } catch (error) {
@@ -82,10 +88,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 最终兜底：若仍无用户名，则使用 userId 代替，避免为 null
+    const finalUsername =
+      (username && username.trim()) ||
+      (userId ? `user_${userId}` : null)
+
     const user = await prisma.whitelistedUser.create({
       data: {
         userId,
-        username: username?.trim() || null,
+        username: finalUsername,
         note: note?.trim() || null
       }
     })

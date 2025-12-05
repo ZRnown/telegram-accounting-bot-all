@@ -372,8 +372,20 @@ function DashboardPageInner() {
                   const botsItems = Array.isArray(botsData?.items) ? botsData.items : []
                   const chatsItems = (Array.isArray(chatsData?.items) ? chatsData.items : []).filter((it: any) => String(it.id || '').startsWith('-'))
                   const newBots = botsItems.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
+                  // 🔥 立即更新状态并写入缓存，避免刷新后看不到新创建的机器人/群组
+                  setBots(newBots)
+                  setGroups(chatsItems)
+                  setGroupsCount(chatsItems.length)
                   setCachedData(CACHE_KEY_BOTS, newBots)
                   setCachedData(CACHE_KEY_GROUPS, chatsItems)
+                  // 同步 drafts
+                  const d: Record<string, { status: "PENDING" | "APPROVED" | "BLOCKED"; botId?: string | null; allowed: boolean }> = {}
+                  for (const it of chatsItems) {
+                    const status = (it.status as any) || (it.allowed ? 'APPROVED' : 'PENDING')
+                    const allowed = status === 'APPROVED'
+                    d[it.id] = { status, botId: it.botId ?? null, allowed }
+                  }
+                  setDrafts(d)
                 }
               }).catch(() => {})
             }, 100)
@@ -387,7 +399,7 @@ function DashboardPageInner() {
             if (botsRes.ok) {
               const data = await botsRes.json()
               const items = Array.isArray(data?.items) ? data.items : []
-              const botsData = items.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled }))
+              const botsData = items.map((b: any) => ({ id: b.id, name: b.name, enabled: !!b.enabled, realName: b.realName || null }))
               setBots(botsData)
               setCachedData(CACHE_KEY_BOTS, botsData)
             }
@@ -916,7 +928,10 @@ function DashboardPageInner() {
                               if (botsRes2.ok) {
                                 const data2 = await botsRes2.json()
                                 const items2 = Array.isArray(data2?.items) ? data2.items : []
-                                setBots(items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled, realName: x.realName || null })))
+                                const newBots = items2.map((x: any) => ({ id: x.id, name: x.name, enabled: !!x.enabled, realName: x.realName || null }))
+                                setBots(newBots)
+                                // 🔥 同步更新缓存，避免刷新后看不到新机器人
+                                setCachedData(CACHE_KEY_BOTS, newBots)
                               }
                             } catch {}
                             setCreateForm({ token: '', enabled: true })
@@ -954,7 +969,11 @@ function DashboardPageInner() {
                                 body: JSON.stringify({ enabled })
                               })
                               if (res.ok) {
-                                setBots((prev) => prev.map((b) => b.id === bot.id ? { ...b, enabled } : b))
+                                setBots((prev) => {
+                                  const next = prev.map((b) => b.id === bot.id ? { ...b, enabled } : b)
+                                  setCachedData(CACHE_KEY_BOTS, next)
+                                  return next
+                                })
                                 toast({ title: '成功', description: `机器人已${enabled ? '启用' : '停用'}` })
                               } else {
                                 toast({ title: '错误', description: '更新启用状态失败', variant: 'destructive' })
@@ -1012,7 +1031,11 @@ function DashboardPageInner() {
                             try {
                               const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, { method: 'DELETE' })
                               if (res.status === 204) {
-                                setBots((prev) => prev.filter((b) => b.id !== bot.id))
+                                setBots((prev) => {
+                                  const next = prev.filter((b) => b.id !== bot.id)
+                                  setCachedData(CACHE_KEY_BOTS, next)
+                                  return next
+                                })
                                 toast({ title: '成功', description: '机器人删除成功' })
                               } else {
                                 const msg = await res.text().catch(() => '')
@@ -1416,7 +1439,8 @@ function DashboardPageInner() {
             {bots.map((bot) => {
               const dlg = groupDialogs[bot.id]
               if (!dlg) return null
-              const groups = chatGroups[bot.id] || []
+              const botGroups = chatGroups[bot.id] || []
+              const chatsForBot = groups.filter((g: any) => g.botId === bot.id && g.status === 'APPROVED')
               const editing = dlg.editing
               return (
                 <Dialog key={`group-${bot.id}`} open={!!dlg.open} onOpenChange={(open) => {
@@ -1429,7 +1453,7 @@ function DashboardPageInner() {
                     <DialogHeader>
                       <DialogTitle>📁 分组管理 - {bot.name}</DialogTitle>
                       <DialogDescription>
-                        创建分组后，可以将群组分配到分组中，然后按分组进行群发。
+                        创建分组并分配群组，用于“群发通知”按分组发送。
                       </DialogDescription>
                     </DialogHeader>
 
@@ -1507,12 +1531,12 @@ function DashboardPageInner() {
 
                       {/* 分组列表 */}
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">现有分组 ({groups.length})</div>
-                        {groups.length === 0 ? (
+                        <div className="text-sm font-medium">现有分组 ({botGroups.length})</div>
+                        {botGroups.length === 0 ? (
                           <div className="text-sm text-slate-500">暂无分组</div>
                         ) : (
                           <div className="space-y-2">
-                            {groups.map((group) => (
+                            {botGroups.map((group) => (
                               <div key={group.id} className="border rounded-md p-3 flex items-start justify-between">
                                 <div className="flex-1">
                                   <div className="text-sm font-medium">{group.name}</div>
@@ -1553,6 +1577,63 @@ function DashboardPageInner() {
                                     }}
                                   >删除</button>
                                 </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 群组分配（用于群发） */}
+                      <div className="border rounded-md p-4 space-y-2">
+                        <div className="text-sm font-medium">分配群组到分组（用于群发）</div>
+                        <div className="text-xs text-slate-500">选择群所属的分组，群发时可按分组发送</div>
+                        {chatsForBot.length === 0 ? (
+                          <div className="text-sm text-slate-500">暂无群组</div>
+                        ) : (
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                            {chatsForBot.map((chat) => (
+                              <div key={chat.id} className="flex items-center gap-2">
+                                <div className="flex-1 truncate text-sm">{chat.title || chat.id}</div>
+                                <select
+                                  className="border rounded px-2 py-1 text-xs"
+                                  value={chat.groupId || ''}
+                                  onChange={async (e) => {
+                                    const groupId = e.target.value || null
+                                    try {
+                                      const res = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/group`, {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ groupId })
+                                      })
+                                      if (res.ok) {
+                                        setGroups((prev) => prev.map((g: any) => g.id === chat.id ? { ...g, groupId } : g))
+                                        // 同步 chatGroups 内的数量显示
+                                        setChatGroups((prev) => {
+                                          const current = prev[bot.id] || []
+                                          return {
+                                            ...prev,
+                                            [bot.id]: current.map((g) => {
+                                              if (!g.chatCount) return g
+                                              // 粗略刷新：重新统计
+                                              const cnt = groups.filter((c: any) => c.botId === bot.id && c.groupId === g.id).length + (groupId === g.id ? 1 : 0) - (chat.groupId === g.id ? 1 : 0)
+                                              return { ...g, chatCount: cnt }
+                                            })
+                                          }
+                                        })
+                                      } else {
+                                        const err = await res.json().catch(() => ({}))
+                                        toast({ title: '错误', description: err?.error || '分配失败', variant: 'destructive' })
+                                      }
+                                    } catch {
+                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                    }
+                                  }}
+                                >
+                                  <option value="">未分组</option>
+                                  {botGroups.map((g) => (
+                                    <option key={g.id} value={g.id}>{g.name}</option>
+                                  ))}
+                                </select>
                               </div>
                             ))}
                           </div>
