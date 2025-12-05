@@ -1441,6 +1441,7 @@ function DashboardPageInner() {
               const botGroups = chatGroups[bot.id] || []
               const chatsForBot = groups.filter((g: any) => g.botId === bot.id && g.status === 'APPROVED')
               const selectedGroupId = dlg.selectedGroupId || (botGroups[0]?.id ?? '')
+              const creating = dlg.creating || false
               const pending = dlg.pending || {}
               const selectedGroup = botGroups.find((g) => g.id === selectedGroupId)
 
@@ -1462,18 +1463,18 @@ function DashboardPageInner() {
                       <div className="border rounded-md p-4 space-y-3">
                         <div className="text-sm font-medium">分组选择 / 创建 / 重命名 / 删除</div>
                         <div className="flex flex-col gap-3">
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-2 items-center">
                             {botGroups.length === 0 && (
                               <div className="text-xs text-slate-500">暂无分组，请先创建</div>
                             )}
                             {botGroups.map((g) => {
-                              const active = g.id === selectedGroupId
+                              const active = !creating && g.id === selectedGroupId
                               return (
                                 <button
                                   key={g.id}
                                   className={`px-3 py-1 text-xs rounded-md border ${active ? 'bg-blue-50 border-blue-500 text-blue-600' : 'hover:bg-slate-50'}`}
                                   onClick={() => {
-                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: g.id, pending: {} } }))
+                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: g.id, pending: {}, creating: false } }))
                                     setGroupForm({ name: g.name || '', description: '' })
                                   }}
                                 >
@@ -1481,90 +1482,138 @@ function DashboardPageInner() {
                                 </button>
                               )
                             })}
+                            <button
+                              className="px-3 py-1 text-xs rounded-md border border-dashed hover:bg-slate-50"
+                              onClick={() => {
+                                setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: '', pending: {}, creating: true } }))
+                                setGroupForm({ name: '', description: '' })
+                              }}
+                            >
+                              创建分组
+                            </button>
                           </div>
 
                           <div className="flex items-center gap-2">
                             <input
                               type="text"
                               className="border rounded-md px-2 py-1 text-sm flex-1"
-                              placeholder="分组名称"
+                              placeholder={creating ? '新分组名称' : '分组名称'}
                               value={groupForm.name}
                               onChange={(e) => setGroupForm((prev) => ({ ...prev, name: e.target.value }))}
                             />
-                            <button
-                              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
-                              disabled={!groupForm.name.trim() || groupSaving[bot.id]}
-                              onClick={async () => {
-                                if (!groupForm.name.trim()) return
-                                setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
-                                try {
-                                  let url = `/api/bots/${encodeURIComponent(bot.id)}/groups`
-                                  let method: 'POST' | 'PATCH' = 'POST'
-                                  if (selectedGroupId) {
-                                    url = `/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(selectedGroupId)}`
-                                    method = 'PATCH'
-                                  }
-                                  const res = await fetch(url, {
-                                    method,
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ name: groupForm.name.trim() })
-                                  })
-                                  if (res.ok) {
-                                    const data = await res.json()
-                                    setChatGroups((prev) => {
-                                      const current = prev[bot.id] || []
-                                      if (method === 'PATCH') {
-                                        return { ...prev, [bot.id]: current.map((g) => g.id === selectedGroupId ? data : g) }
+                            {creating ? (
+                              <>
+                                <button
+                                  className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                                  disabled={!groupForm.name.trim() || groupSaving[bot.id]}
+                                  onClick={async () => {
+                                    if (!groupForm.name.trim()) return
+                                    setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
+                                    try {
+                                      const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ name: groupForm.name.trim() })
+                                      })
+                                      if (res.ok) {
+                                        const data = await res.json()
+                                        setChatGroups((prev) => {
+                                          const current = prev[bot.id] || []
+                                          return { ...prev, [bot.id]: [...current, data] }
+                                        })
+                                        setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: data.id, pending: {}, creating: false } }))
+                                        setGroupForm({ name: data.name, description: '' })
+                                        toast({ title: '成功', description: '分组已创建' })
+                                      } else {
+                                        const err = await res.json().catch(() => ({}))
+                                        toast({ title: '错误', description: err?.error || '创建失败', variant: 'destructive' })
                                       }
-                                      return { ...prev, [bot.id]: [...current, data] }
-                                    })
-                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: data.id, pending: {} } }))
-                                    setGroupForm({ name: data.name, description: '' })
-                                    toast({ title: '成功', description: method === 'PATCH' ? '分组已更新' : '分组已创建' })
-                                  } else {
-                                    const err = await res.json().catch(() => ({}))
-                                    toast({ title: '错误', description: err?.error || '操作失败', variant: 'destructive' })
-                                  }
-                                } catch (e) {
-                                  toast({ title: '错误', description: '网络错误', variant: 'destructive' })
-                                } finally {
-                                  setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
-                                }
-                              }}
-                            >{selectedGroupId ? '更新' : '创建'}</button>
-                            <button
-                              className="px-3 py-1.5 text-sm border rounded-md hover:bg-red-50 text-red-600 disabled:opacity-50"
-                              disabled={!selectedGroupId || groupSaving[bot.id]}
-                              onClick={async () => {
-                                if (!selectedGroupId) return
-                                const target = botGroups.find((g) => g.id === selectedGroupId)
-                                if (!confirm(`确认删除分组"${target?.name || ''}"？此操作会将分组中的群组移出分组，但不会删除群组。`)) return
-                                setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
-                                try {
-                                  const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(selectedGroupId)}`, { method: 'DELETE' })
-                                  if (res.ok) {
-                                    setChatGroups((prev) => {
-                                      const current = prev[bot.id] || []
-                                      const next = current.filter((g) => g.id !== selectedGroupId)
-                                      return { ...prev, [bot.id]: next }
-                                    })
-                                    setGroups((prev) => prev.map((g: any) => g.botId === bot.id && g.groupId === selectedGroupId ? { ...g, groupId: null } : g))
-                                    const rest = botGroups.filter((g) => g.id !== selectedGroupId)
-                                    const nextId = rest[0]?.id || ''
-                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: nextId, pending: {} } }))
-                                    setGroupForm({ name: nextId ? (rest.find((g) => g.id === nextId)?.name || '') : '', description: '' })
-                                    toast({ title: '成功', description: '分组已删除' })
-                                  } else {
-                                    const err = await res.json().catch(() => ({}))
-                                    toast({ title: '错误', description: err?.error || '删除失败', variant: 'destructive' })
-                                  }
-                                } catch {
-                                  toast({ title: '错误', description: '网络错误', variant: 'destructive' })
-                                } finally {
-                                  setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
-                                }
-                              }}
-                            >删除</button>
+                                    } catch {
+                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                    } finally {
+                                      setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
+                                    }
+                                  }}
+                                >创建</button>
+                                <button
+                                  className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                                  onClick={() => {
+                                    const fallbackId = botGroups[0]?.id || ''
+                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: fallbackId, pending: {}, creating: false } }))
+                                    setGroupForm({ name: fallbackId ? (botGroups.find((g) => g.id === fallbackId)?.name || '') : '', description: '' })
+                                  }}
+                                >取消</button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+                                  disabled={!groupForm.name.trim() || groupSaving[bot.id] || !selectedGroupId}
+                                  onClick={async () => {
+                                    if (!groupForm.name.trim() || !selectedGroupId) return
+                                    setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
+                                    try {
+                                      const url = `/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(selectedGroupId)}`
+                                      const res = await fetch(url, {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ name: groupForm.name.trim() })
+                                      })
+                                      if (res.ok) {
+                                        const data = await res.json()
+                                        setChatGroups((prev) => {
+                                          const current = prev[bot.id] || []
+                                          return { ...prev, [bot.id]: current.map((g) => g.id === selectedGroupId ? data : g) }
+                                        })
+                                        setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: data.id, pending: {}, creating: false } }))
+                                        setGroupForm({ name: data.name, description: '' })
+                                        toast({ title: '成功', description: '分组已更新' })
+                                      } else {
+                                        const err = await res.json().catch(() => ({}))
+                                        toast({ title: '错误', description: err?.error || '更新失败', variant: 'destructive' })
+                                      }
+                                    } catch {
+                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                    } finally {
+                                      setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
+                                    }
+                                  }}
+                                >更新</button>
+                                <button
+                                  className="px-3 py-1.5 text-sm border rounded-md hover:bg-red-50 text-red-600 disabled:opacity-50"
+                                  disabled={!selectedGroupId || groupSaving[bot.id]}
+                                  onClick={async () => {
+                                    if (!selectedGroupId) return
+                                    const target = botGroups.find((g) => g.id === selectedGroupId)
+                                    if (!confirm(`确认删除分组"${target?.name || ''}"？此操作会将分组中的群组移出分组，但不会删除群组。`)) return
+                                    setGroupSaving((prev) => ({ ...prev, [bot.id]: true }))
+                                    try {
+                                      const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups/${encodeURIComponent(selectedGroupId)}`, { method: 'DELETE' })
+                                      if (res.ok) {
+                                        setChatGroups((prev) => {
+                                          const current = prev[bot.id] || []
+                                          const next = current.filter((g) => g.id !== selectedGroupId)
+                                          return { ...prev, [bot.id]: next }
+                                        })
+                                        setGroups((prev) => prev.map((g: any) => g.botId === bot.id && g.groupId === selectedGroupId ? { ...g, groupId: null } : g))
+                                        const rest = botGroups.filter((g) => g.id !== selectedGroupId)
+                                        const nextId = rest[0]?.id || ''
+                                        setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: nextId, pending: {}, creating: false } }))
+                                        setGroupForm({ name: nextId ? (rest.find((g) => g.id === nextId)?.name || '') : '', description: '' })
+                                        toast({ title: '成功', description: '分组已删除' })
+                                      } else {
+                                        const err = await res.json().catch(() => ({}))
+                                        toast({ title: '错误', description: err?.error || '删除失败', variant: 'destructive' })
+                                      }
+                                    } catch {
+                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
+                                    } finally {
+                                      setGroupSaving((prev) => ({ ...prev, [bot.id]: false }))
+                                    }
+                                  }}
+                                >删除</button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
