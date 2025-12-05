@@ -1461,7 +1461,7 @@ function DashboardPageInner() {
                       {/* 分组选择与增删改 */}
                       <div className="border rounded-md p-4 space-y-3">
                         <div className="text-sm font-medium">分组选择 / 创建 / 重命名 / 删除</div>
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-3">
                           <div className="flex flex-wrap gap-2">
                             {botGroups.length === 0 && (
                               <div className="text-xs text-slate-500">暂无分组，请先创建</div>
