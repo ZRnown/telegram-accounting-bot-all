@@ -1462,21 +1462,26 @@ function DashboardPageInner() {
                       <div className="border rounded-md p-4 space-y-3">
                         <div className="text-sm font-medium">分组选择 / 创建 / 重命名 / 删除</div>
                         <div className="flex flex-col gap-2">
-                          <select
-                            className="border rounded-md px-2 py-1 text-sm"
-                            value={selectedGroupId}
-                            onChange={(e) => {
-                              const gid = e.target.value
-                              const target = botGroups.find((g) => g.id === gid)
-                              setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: gid, pending: {} } }))
-                              setGroupForm({ name: target?.name || '', description: '' })
-                            }}
-                          >
-                            {botGroups.length === 0 && <option value="">暂无分组，请先创建</option>}
-                            {botGroups.map((g) => (
-                              <option key={g.id} value={g.id}>{g.name}</option>
-                            ))}
-                          </select>
+                          <div className="flex flex-wrap gap-2">
+                            {botGroups.length === 0 && (
+                              <div className="text-xs text-slate-500">暂无分组，请先创建</div>
+                            )}
+                            {botGroups.map((g) => {
+                              const active = g.id === selectedGroupId
+                              return (
+                                <button
+                                  key={g.id}
+                                  className={`px-3 py-1 text-xs rounded-md border ${active ? 'bg-blue-50 border-blue-500 text-blue-600' : 'hover:bg-slate-50'}`}
+                                  onClick={() => {
+                                    setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true, selectedGroupId: g.id, pending: {} } }))
+                                    setGroupForm({ name: g.name || '', description: '' })
+                                  }}
+                                >
+                                  {g.name}
+                                </button>
+                              )
+                            })}
+                          </div>
 
                           <div className="flex items-center gap-2">
                             <input
