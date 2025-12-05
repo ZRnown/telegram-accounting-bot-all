@@ -182,8 +182,8 @@ export async function formatSummary(ctx, chat, options = {}) {
       // 🔥 修复：始终使用数据库数据作为权威来源，确保数据一致性
       // 🔥 优化：即使记录数超过内存限制（100条），也完整同步到内存（用于计算）
       // 但显示时会根据displayMode限制显示数量
-      chat.current.incomes = dbIncomes
-      chat.current.dispatches = dbDispatches
+        chat.current.incomes = dbIncomes
+        chat.current.dispatches = dbDispatches
       chat._billLastSync = now
       // 🔥 记录当前账单的日期，用于跨日检测（与 getOrCreateTodayBill 保持一致）
       // 🔥 修复：优先使用群组级别的日切时间

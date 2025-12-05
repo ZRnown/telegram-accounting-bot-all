@@ -999,19 +999,6 @@ function DashboardPageInner() {
                             })
                           }}
                         >{broadcastDrafts[bot.id]?.open ? '收起群发' : '群发通知'}</button>
-                        <button
-                          className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
-                          onClick={() => {
-                            setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true } }))
-                            // 加载分组数据
-                            fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`).then(async (res) => {
-                              if (res.ok) {
-                                const data = await res.json()
-                                setChatGroups((prev) => ({ ...prev, [bot.id]: data }))
-                              }
-                            }).catch(() => {})
-                          }}
-                        >分组管理</button>
                         {isAdmin && (
                           <>
                             <button
@@ -1074,6 +1061,19 @@ function DashboardPageInner() {
                                   }))
                                 }}
                               >{broadcastDrafts[bot.id]?.showSelector ? '收起选择' : '选择发送目标'}</button>
+                              <button
+                                className="px-2 py-1 text-xs border rounded-md hover:bg-slate-50"
+                                onClick={() => {
+                                  setGroupDialogs((prev) => ({ ...prev, [bot.id]: { open: true } }))
+                                  // 加载分组数据
+                                  fetch(`/api/bots/${encodeURIComponent(bot.id)}/groups`).then(async (res) => {
+                                    if (res.ok) {
+                                      const data = await res.json()
+                                      setChatGroups((prev) => ({ ...prev, [bot.id]: data }))
+                                    }
+                                  }).catch(() => {})
+                                }}
+                              >管理分组</button>
                               <span className="text-xs text-slate-500">
                                 {(() => {
                                   const current = broadcastDrafts[bot.id]
@@ -1897,10 +1897,10 @@ function DashboardPageInner() {
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[11%]">Chat ID</th>
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">群组名称</th>
                         <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[15%]">绑定机器人</th>
-                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">邀请人/方式</th>
-                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[10%]">允许使用</th>
-                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[16%]">创建时间</th>
-                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[20%]">操作</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[14%]">邀请人/方式</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[12%]">允许使用</th>
+                        <th className="text-left py-3 px-3 text-sm font-semibold text-slate-700 w-[18%]">创建时间</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-slate-700 w-[22%]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1952,41 +1952,6 @@ function DashboardPageInner() {
                                 </select>
                               </td>
                               <td className="py-3 px-3 text-sm text-slate-900 truncate" title={inviterLabel}>{inviterLabel}</td>
-                              <td className="py-3 px-3">
-                                <select
-                                  className="border rounded-md px-2 py-1.5 text-xs w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  value={it.groupId || ''}
-                                  onChange={async (e) => {
-                                    const groupId = e.target.value || null
-                                    try {
-                                      const res = await fetch(`/api/chats/${encodeURIComponent(it.id)}/group`, {
-                                        method: 'PATCH',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ groupId })
-                                      })
-                                      if (res.ok) {
-                                        setGroups((prev) => prev.map((g) => {
-                                          if (g.id === it.id) {
-                                            return { ...g, groupId, group: groupId ? (chatGroups[it.botId || '']?.find((gr) => gr.id === groupId) ? { id: groupId, name: chatGroups[it.botId || '']?.find((gr) => gr.id === groupId)?.name || '' } : null) : null }
-                                          }
-                                          return g
-                                        }))
-                                        toast({ title: '成功', description: '分组已更新' })
-                                      } else {
-                                        const err = await res.json().catch(() => ({}))
-                                        toast({ title: '错误', description: err?.error || '更新失败', variant: 'destructive' })
-                                      }
-                                    } catch (e) {
-                                      toast({ title: '错误', description: '网络错误', variant: 'destructive' })
-                                    }
-                                  }}
-                                >
-                                  <option value="">无分组</option>
-                                  {(chatGroups[it.botId || ''] || []).map((group) => (
-                                    <option key={group.id} value={group.id}>{group.name}</option>
-                                  ))}
-                                </select>
-                              </td>
                               <td className="py-3 px-3 text-center">
                                 <input
                                   type="checkbox"
