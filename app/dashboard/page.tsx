@@ -1469,12 +1469,6 @@ function DashboardPageInner() {
                             value={groupForm.name}
                             onChange={(e) => setGroupForm((prev) => ({ ...prev, name: e.target.value }))}
                           />
-                          <textarea
-                            className="w-full border rounded-md px-2 py-1 text-sm min-h-[60px]"
-                            placeholder="分组描述（可选）"
-                            value={groupForm.description}
-                            onChange={(e) => setGroupForm((prev) => ({ ...prev, description: e.target.value }))}
-                          />
                           <div className="flex gap-2">
                             <button
                               className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
@@ -1490,7 +1484,7 @@ function DashboardPageInner() {
                                   const res = await fetch(url, {
                                     method,
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ name: groupForm.name.trim(), description: groupForm.description.trim() || null })
+                                    body: JSON.stringify({ name: groupForm.name.trim() })
                                   })
                                   if (res.ok) {
                                     const data = await res.json()
