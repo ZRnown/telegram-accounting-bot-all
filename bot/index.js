@@ -31,8 +31,9 @@ import logger from './logger.js'
 
 logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
 logger.hijackConsole()
-const BOT_TOKEN = process.env.BOT_TOKEN
-if (!BOT_TOKEN) {
+
+// 🔥 加载环境变量（如果未设置）
+if (!process.env.BOT_TOKEN) {
   // fallback: try load config/env next to repo root
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = path.dirname(__filename)
@@ -47,12 +48,29 @@ if (!process.env.BOT_TOKEN) {
   process.exit(1)
 }
 
+// 🔥 验证 token 格式
+const BOT_TOKEN = process.env.BOT_TOKEN.trim()
+if (!BOT_TOKEN) {
+  console.error('❌ BOT_TOKEN 为空，请检查环境变量配置')
+  process.exit(1)
+}
+
+// Telegram bot token 格式：数字:字母数字组合（例如：123456789:ABCdefGHIjklMNOpqrsTUVwxyz）
+const tokenPattern = /^\d+:[A-Za-z0-9_-]+$/
+if (!tokenPattern.test(BOT_TOKEN)) {
+  console.error('❌ BOT_TOKEN 格式无效！')
+  console.error('   正确格式：数字:字母数字组合（例如：123456789:ABCdefGHIjklMNOpqrsTUVwxyz）')
+  console.error('   当前 token 长度：', BOT_TOKEN.length)
+  console.error('   当前 token 前缀：', BOT_TOKEN.substring(0, 20) + '...')
+  process.exit(1)
+}
+
 const BACKEND_URL = process.env.BACKEND_URL
 // Only use proxy when PROXY_URL is explicitly provided
 const PROXY_URL = process.env.PROXY_URL || ''
 const agent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined
 
-const bot = new Telegraf(process.env.BOT_TOKEN, {
+const bot = new Telegraf(BOT_TOKEN, {
   telegram: agent ? { agent } : undefined,
 })
 
@@ -512,7 +530,7 @@ async function ensureCurrentBotId() {
   try {
     // Try find bot by token; if missing, create a minimal record
     let row = await prisma.bot.findFirst({ 
-      where: { token: process.env.BOT_TOKEN },
+      where: { token: BOT_TOKEN },
       select: { id: true } // 🔥 只选择需要的字段
     }).catch(() => null)
     
@@ -532,6 +550,21 @@ async function ensureCurrentBotId() {
         
         name = me?.username ? `@${me.username}` : (me?.first_name || 'EnvBot')
       } catch (e) {
+        // 🔥 特别处理 401 Unauthorized 错误
+        if (e.response?.error_code === 401 || e.message?.includes('401') || e.message?.includes('Unauthorized')) {
+          console.error('❌ Telegram Bot Token 无效或已过期！')
+          console.error('   错误信息：401 Unauthorized')
+          console.error('   可能原因：')
+          console.error('   1. Bot token 已过期或被撤销')
+          console.error('   2. Bot token 格式错误（可能有多余空格或换行符）')
+          console.error('   3. Bot 已被禁用或删除')
+          console.error('   请检查：')
+          console.error('   - 数据库中的 token 是否正确')
+          console.error('   - 环境变量 BOT_TOKEN 是否正确设置')
+          console.error('   - 是否在 @BotFather 处重新生成了 token')
+          console.error('   当前 token 前缀：', BOT_TOKEN.substring(0, 20) + '...')
+          throw new Error('Bot token 无效，无法启动机器人')
+        }
         // 🔥 如果超时，记录错误但不阻止启动
         if (e.message === 'TIMEOUT') {
           console.error('⚠️ 链接Telegram API超时（30秒），请检查服务器网络连接')
@@ -540,7 +573,7 @@ async function ensureCurrentBotId() {
         }
       }
       row = await prisma.bot.create({ 
-        data: { name, token: process.env.BOT_TOKEN, enabled: true },
+        data: { name, token: BOT_TOKEN, enabled: true },
         select: { id: true } // 🔥 只选择需要的字段
       })
     }
@@ -633,7 +666,7 @@ bot.use(async (ctx, next) => {
   const chatId = await ensureDbChat(ctx, chatState)
   const dbChat = await prisma.chat.findUnique({ where: { id: chatId }, select: { botId: true, allowed: true, bot: { select: { id: true, token: true } } } })
   const bypass = /^(?:\/start|\/myid|显示账单|\+0|使用说明)$/i.test(text)
-  const currentToken = (process.env.BOT_TOKEN || '').trim()
+  const currentToken = BOT_TOKEN
   const boundToken = (dbChat?.bot?.token || '').trim()
   // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
   if (process.env.DEBUG_BOT === 'true') {
@@ -2116,8 +2149,23 @@ process.once('SIGTERM', cleanup)
 process.once('SIGINT', cleanup)
 process.once('SIGHUP', cleanup)
 
-bot.launch().then(async () => {
-  console.log('Telegram 机器人已启动')
+bot.launch().catch((error) => {
+  console.error('❌ 机器人启动失败！')
+  if (error.response?.error_code === 401 || error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+    console.error('   错误：401 Unauthorized - Bot Token 无效或已过期')
+    console.error('   请检查：')
+    console.error('   1. 数据库中的 bot token 是否正确')
+    console.error('   2. 环境变量 BOT_TOKEN 是否正确设置')
+    console.error('   3. 是否在 @BotFather 处重新生成了 token')
+    console.error('   4. Token 格式是否正确（不应包含多余空格或换行符）')
+    console.error('   当前 token 前缀：', BOT_TOKEN.substring(0, 20) + '...')
+  } else {
+    console.error('   错误详情：', error.message)
+    console.error('   完整错误：', error)
+  }
+  process.exit(1)
+}).then(async () => {
+  console.log('✅ Telegram 机器人已启动')
   
   // 启动后立即执行一次汇率更新
   await updateAllRealtimeRates()
@@ -2132,7 +2180,7 @@ bot.launch().then(async () => {
       // 直接导入getChat函数，避免动态导入的性能问题
       const { getChat } = await import('./state.js')
       await performAutoDailyCutoff((botId, chatId) => {
-        return getChat(botId || process.env.BOT_TOKEN, chatId)
+        return getChat(botId || BOT_TOKEN, chatId)
       })
     } catch (e) {
       console.error('[定时任务] 自动日切检查失败:', e)
