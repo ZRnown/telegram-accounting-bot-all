@@ -660,7 +660,8 @@ bot.use(async (ctx, next) => {
       // 对于其他命令，不回复（避免频繁提示），让用户使用内联菜单
       return
     }
-    // 对于允许的命令，继续处理（不在这里 return）
+    // 私聊不走绑定/允许校验，直接继续处理
+    return next()
   }
   const botId = await ensureCurrentBotId()
   const chatId = await ensureDbChat(ctx, chatState)
