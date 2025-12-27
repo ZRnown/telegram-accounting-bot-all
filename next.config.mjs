@@ -90,7 +90,7 @@ const nextConfig = {
         headers: [
           // 🛡️ 管理面板额外保护
           { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'" },
+          // CSP已经由全局配置处理，这里不再重复设置
         ],
       },
     ]
