@@ -36,13 +36,13 @@ const nextConfig = {
           {
             key: 'Content-Security-Policy',
             value: process.env.NODE_ENV === 'production' ? [
-              // 生产环境：更严格的安全策略
+              // 生产环境：允许必要脚本和Cloudflare统计
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'", // 生产构建需要
+              "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com", // 生产构建和CF统计需要
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data: https:",
-              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org",
+              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org https://static.cloudflareinsights.com",
               "frame-src 'none'",
               "object-src 'none'",
               "base-uri 'self'",
@@ -50,13 +50,13 @@ const nextConfig = {
               "frame-ancestors 'none'",
               "upgrade-insecure-requests"
             ].join('; ') : [
-              // 开发环境：允许开发工具
+              // 开发环境：允许开发工具和Cloudflare统计
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data: https:",
-              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org ws://localhost:* http://localhost:*",
+              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org https://static.cloudflareinsights.com ws://localhost:* http://localhost:*",
               "frame-src 'none'",
               "object-src 'none'",
               "base-uri 'self'",
