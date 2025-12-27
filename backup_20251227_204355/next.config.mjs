@@ -32,36 +32,22 @@ const nextConfig = {
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' },
           // 🛡️ 权限策略 - 禁用不必要的浏览器功能
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
-          // 🛡️ 内容安全策略 - 根据环境调整
+          // 🛡️ 内容安全策略 - 最高安全级别
           {
             key: 'Content-Security-Policy',
-            value: process.env.NODE_ENV === 'production' ? [
-              // 生产环境：更严格的安全策略
+            value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'", // 生产构建需要
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https: blob:",
-              "font-src 'self' data: https:",
-              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org",
+              "script-src 'self'",
+              "style-src 'self' 'unsafe-inline'", // Radix UI需要
+              "img-src 'self' data: https:",
+              "font-src 'self' data:",
+              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org",
               "frame-src 'none'",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",
               "frame-ancestors 'none'",
               "upgrade-insecure-requests"
-            ].join('; ') : [
-              // 开发环境：允许开发工具
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https: blob:",
-              "font-src 'self' data: https:",
-              "connect-src 'self' https://apilist.tronscanapi.com https://api.telegram.org wss://api.telegram.org ws://localhost:* http://localhost:*",
-              "frame-src 'none'",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "frame-ancestors 'none'"
             ].join('; ')
           },
         ],

@@ -628,9 +628,9 @@ async function updateAllRealtimeRates() {
       })
     } catch (e) {
     logger.error('[定时任务] 自动日切检查失败', e)
-    }
   }
-  
+}
+
 // 启动机器人，明确指定允许的更新类型以确保接收chat_member事件
 bot.launch({
   allowedUpdates: [
@@ -664,7 +664,7 @@ bot.launch({
 
   // 设置指令菜单 (仅私聊)
   const commands = [{ command: 'start', description: '开始使用' }]
-    await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
+  await bot.telegram.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
   await bot.telegram.setMyCommands([], { scope: { type: 'all_group_chats' } }) // 群聊清除菜单
 
 }).catch((err) => {
