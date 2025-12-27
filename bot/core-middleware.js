@@ -72,7 +72,7 @@ export function registerCoreMiddleware(bot) {
             boundToken4: boundToken ? `${boundToken.slice(0, 4)}...` : '',
         })
 
-        const notBound = !dbChat?.botId || (boundToken ? boundToken !== currentToken : (dbChat?.botId !== botId))
+        const notBound = !dbChat?.botId || dbChat?.botId !== botId
 
         // 仅对文本消息给出提醒，且加频率限制，避免 429
         if (notBound) {

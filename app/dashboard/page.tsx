@@ -47,40 +47,43 @@ function DashboardPageInner() {
   const [featureCache, setFeatureCache] = useState<Record<string, { items: Array<{ feature: string; enabled: boolean }>; loading?: boolean }>>({})
   const [featureSaving, setFeatureSaving] = useState<Record<string, boolean>>({})
   // 🔥 快捷设置缓存（地址验证、删除账单确认、计算器）
-  const [quickSettingsCache, setQuickSettingsCache] = useState<Record<string, { addressVerificationEnabled: boolean; deleteBillConfirm: boolean; calculatorEnabled: boolean; loading?: boolean }>>({})
+  const [quickSettingsCache, setQuickSettingsCache] = useState<Record<string, { addressVerificationEnabled: boolean; deleteBillConfirm: boolean; calculatorEnabled: boolean; showAuthPrompt: boolean; loading?: boolean }>>({})
   const [quickSettingsSaving, setQuickSettingsSaving] = useState<Record<string, boolean>>({})
   const [showCreateBot, setShowCreateBot] = useState<boolean>(false)
   const [createForm, setCreateForm] = useState<{ token: string; enabled: boolean }>({ token: "", enabled: true })
-  const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, { 
+  const [broadcastDrafts, setBroadcastDrafts] = useState<Record<string, {
     open: boolean
     message: string
     sending?: boolean
     selectedChatIds?: string[] // 🔥 新增：选中的群组ID
     selectedGroupIds?: string[] // 🔥 新增：选中的分组ID
     showSelector?: boolean // 🔥 新增：是否显示选择器
+    creating?: boolean // 🔥 新增：创建状态
+    pending?: boolean // 🔥 新增：待处理状态
   }>>({})
   // 🔥 新增：分组管理状态
   const [chatGroups, setChatGroups] = useState<Record<string, Array<{ id: string; name: string; description: string | null; chatCount: number }>>>({})
-  const [groupDialogs, setGroupDialogs] = useState<Record<string, { open: boolean; editing?: { id: string; name: string; description: string | null } }>>({})
+  const [groupDialogs, setGroupDialogs] = useState<Record<string, {
+    open: boolean
+    editing?: { id: string; name: string; description: string | null }
+    creating?: boolean
+    pending?: boolean
+    selectedGroupId?: string
+  }>>({})
+
+  // 欢迎指令设置对话框
+  const [welcomeDialog, setWelcomeDialog] = useState<{
+    open: boolean
+    botId?: string
+    loading?: boolean
+    saving?: boolean
+    message?: string
+  }>({ open: false })
   const [groupForm, setGroupForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
   const [groupSaving, setGroupSaving] = useState<Record<string, boolean>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
   const [batchSaving, setBatchSaving] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set()) // 🔥 批量选中状态
-  // 每个机器人的命令别名弹窗与数据
-  const [aliasDialogs, setAliasDialogs] = useState<Record<string, {
-    open: boolean
-    loading?: boolean
-    saving?: boolean
-    exactPairs: Array<{ key: string; value: string }>
-    commands?: Array<{ type: string; key: string; title: string; desc?: string; examples?: string[]; group?: string }>
-    mappedExact?: Record<string, string[]>
-    mappedPrefix?: Record<string, string[]>
-    draftsExact?: Record<string, string>
-    draftsPrefix?: Record<string, string>
-    modesExact?: Record<string, 'alias' | 'replace'>
-    modesPrefix?: Record<string, 'alias' | 'replace'>
-  }>>({})
   
   // 🔥 确认对话框状态
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -480,123 +483,6 @@ function DashboardPageInner() {
     }
   }, [mounted, chatId])
 
-  // 辅助：打开并加载某个机器人的命令别名
-  const openAliasDialog = useCallback(async (botId: string) => {
-    setAliasDialogs((m) => ({ ...m, [botId]: { open: true, loading: true, saving: false, exactPairs: [], commands: [], mappedExact: {}, mappedPrefix: {}, draftsExact: {}, draftsPrefix: {}, modesExact: {}, modesPrefix: {} } }))
-    try {
-      const token = typeof window !== 'undefined' ? (localStorage.getItem('auth_token') || '') : ''
-      const [aliasRes, cmdsRes] = await Promise.all([
-        fetch(`/api/bots/${encodeURIComponent(botId)}/command-aliases`),
-        fetch(`/api/bots/${encodeURIComponent(botId)}/commands`, { headers: token ? { 'x-auth-token': token } as any : undefined })
-      ])
-      const toPairs = (obj: any) => Object.entries(obj || {}).map(([k, v]) => ({ key: String(k), value: String(v) }))
-      let exactPairs: Array<{ key: string; value: string }> = []
-      let prefixPairs: Array<{ key: string; value: string }> = []
-      if (aliasRes.ok) {
-        const j = await aliasRes.json().catch(() => ({}))
-        exactPairs = toPairs(j?.exact_map)
-        prefixPairs = toPairs(j?.prefix_map)
-      }
-      let commands: Array<{ type: string; key: string; title: string; desc?: string; examples?: string[]; group?: string }> = []
-      if (cmdsRes.ok) {
-        const data = await cmdsRes.json().catch(() => ({}))
-        commands = Array.isArray(data?.commands) ? data.commands : []
-      }
-      // 按目标key聚合成 per-command 的别名列表
-      const mappedExact: Record<string, string[]> = {}
-      for (const p of exactPairs) {
-        if (!p?.value) continue
-        if (!mappedExact[p.value]) mappedExact[p.value] = []
-        mappedExact[p.value].push(p.key)
-      }
-      const mappedPrefix: Record<string, string[]> = {}
-      for (const p of prefixPairs) {
-        if (!p?.value) continue
-        if (!mappedPrefix[p.value]) mappedPrefix[p.value] = []
-        mappedPrefix[p.value].push(p.key)
-      }
-      setAliasDialogs((m) => ({
-        ...m,
-        [botId]: {
-          open: true,
-          loading: false,
-          saving: false,
-          exactPairs,
-          commands,
-          mappedExact,
-          mappedPrefix,
-          draftsExact: {},
-          draftsPrefix: {},
-          modesExact: {},
-          modesPrefix: {},
-        }
-      }))
-    } catch {
-      setAliasDialogs((m) => ({ ...m, [botId]: { open: true, loading: false, saving: false, exactPairs: [], commands: [], mappedExact: {}, mappedPrefix: {}, draftsExact: {}, draftsPrefix: {}, modesExact: {}, modesPrefix: {} } }))
-    }
-  }, [])
-
-  const closeAliasDialog = useCallback((botId: string) => {
-    setAliasDialogs((m) => ({ ...m, [botId]: { ...(m[botId] || { exactPairs: [] }), open: false } }))
-  }, [])
-
-  const saveAliasDialog = useCallback(async (botId: string) => {
-    const data = aliasDialogs[botId]
-    if (!data) return
-    const pairsToObj = (arr: Array<{ key: string; value: string }>) => {
-      const out: Record<string, string> = {}
-      for (const it of arr) {
-        const k = (it.key || '').trim()
-        const v = (it.value || '').trim()
-        if (!k || !v) continue
-        if (k.length > 100 || v.length > 100) continue
-        if (out[k] != null) continue
-        out[k] = v
-      }
-      return out
-    }
-    // 从 per-command 映射构建 map（别名 -> 规范命令）
-    const exactFromMapped: Record<string, string> = {}
-    const prefixFromMapped: Record<string, string> = {}
-    Object.entries(data.mappedExact || {}).forEach(([target, aliases]) => {
-      (aliases || []).forEach((a) => {
-        const kk = String(a || '').trim()
-        if (!kk || kk.length > 100) return
-        if (exactFromMapped[kk] != null) return
-        exactFromMapped[kk] = target
-      })
-    })
-    Object.entries(data.mappedPrefix || {}).forEach(([target, aliases]) => {
-      (aliases || []).forEach((a) => {
-        const kk = String(a || '').trim()
-        if (!kk || kk.length > 100) return
-        if (prefixFromMapped[kk] != null) return
-        prefixFromMapped[kk] = target
-      })
-    })
-    // 合并高级表格模式的编辑（保持兼容）
-    const exactPairsObj = pairsToObj(data.exactPairs || [])
-    const payload = {
-      exact_map: { ...exactPairsObj, ...exactFromMapped },
-      prefix_map: { ...prefixFromMapped },
-    }
-    try {
-      setAliasDialogs((m) => ({ ...m, [botId]: { ...(m[botId] || { exactPairs: [] }), saving: true } }))
-      const token = localStorage.getItem('auth_token') || ''
-      const res = await fetch(`/api/bots/${encodeURIComponent(botId)}/command-aliases`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': token }, body: JSON.stringify(payload)
-      })
-      if (!res.ok) {
-        const msg = await res.text().catch(() => '')
-        throw new Error(msg || '保存失败')
-      }
-      toast({ title: '已保存', description: '命令别名稍后在该机器人生效' })
-      setAliasDialogs((m) => ({ ...m, [botId]: { ...(m[botId] || { exactPairs: [] }), saving: false } }))
-    } catch (e) {
-      setAliasDialogs((m) => ({ ...m, [botId]: { ...(m[botId] || { exactPairs: [] }), saving: false } }))
-      toast({ title: '错误', description: (e as Error).message || '保存失败', variant: 'destructive' })
-    }
-  }, [aliasDialogs, toast])
 
   // 🔥 使用 useMemo 优化计算（必须在所有条件返回之前）
   const manualAddedSet = useMemo(() => getManualAddedSet(), [groups])
@@ -1003,10 +889,6 @@ function DashboardPageInner() {
                           <>
                             <button
                               className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
-                              onClick={() => openAliasDialog(bot.id)}
-                            >命令别名配置</button>
-                            <button
-                              className="px-3 py-1.5 text-xs border rounded-md hover:bg-slate-50"
                               onClick={() => router.push(`/admin/custom-commands?botId=${encodeURIComponent(bot.id)}`)}
                             >自定义指令</button>
                           </>
@@ -1033,6 +915,26 @@ function DashboardPageInner() {
                             }
                           }}
                         >删除机器人</button>
+                        <button
+                          className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                          onClick={async () => {
+                            setWelcomeDialog({ open: true, botId: bot.id, loading: true, message: '' })
+                            try {
+                              const token = localStorage.getItem('auth_token') || ''
+                              const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/welcome-message`, {
+                                headers: { 'x-auth-token': token }
+                              })
+                              if (res.ok) {
+                                const data = await res.json().catch(() => ({}))
+                                setWelcomeDialog(prev => ({ ...prev, loading: false, message: data.message || '' }))
+                              } else {
+                                setWelcomeDialog(prev => ({ ...prev, loading: false }))
+                              }
+                            } catch {
+                              setWelcomeDialog(prev => ({ ...prev, loading: false }))
+                            }
+                          }}
+                        >欢迎指令设置</button>
                       </div>
                       {broadcastDrafts[bot.id]?.open && (
                         <div className="space-y-2 text-sm">
@@ -1214,226 +1116,7 @@ function DashboardPageInner() {
               )}
             </div>
 
-            {/* 命令别名配置弹窗（按机器人） */}
-            {isAdmin && bots.map((bot) => {
-              const dlg = aliasDialogs[bot.id]
-              if (!dlg) return null
-              return (
-                <Dialog key={`alias-${bot.id}`} open={!!dlg.open} onOpenChange={(open) => open ? openAliasDialog(bot.id) : closeAliasDialog(bot.id)}>
-                  <DialogContent className="w-[98vw] max-w-none sm:max-w-none max-h-[80vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>⚙️ 命令别名配置 - {bot.name}</DialogTitle>
-                      <DialogDescription>
-                        说明：
-                        <br />
-                        - 整句映射：当消息与左侧“别名”完全一致时，替换为右侧“规范命令”。
-                      </DialogDescription>
-                    </DialogHeader>
-
-                    {/* 基于命令清单逐项配置 */}
-                    <div className="mt-2">
-                      <div className="text-sm font-medium mb-2">基于命令清单逐项配置</div>
-                      {dlg.loading ? (
-                        <div className="text-sm text-slate-500">加载中...</div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                          {(dlg.commands || []).map((c, i) => {
-                            const isExact = c.type === 'exact'
-                            const aliases = isExact ? (dlg.mappedExact?.[c.key] || []) : (dlg.mappedPrefix?.[c.key] || [])
-                            const draft = isExact ? (dlg.draftsExact?.[c.key] || '') : (dlg.draftsPrefix?.[c.key] || '')
-                            // 计算当前“替换指令”目标：即在哪个目标命令下包含了本命令key作为别名
-                            const findReplacementTarget = () => {
-                              const map = isExact ? (dlg.mappedExact || {}) : (dlg.mappedPrefix || {})
-                              for (const [target, list] of Object.entries(map)) {
-                                if (target === c.key) continue
-                                if ((list || []).includes(c.key)) return target
-                              }
-                              return ''
-                            }
-                            const currentReplacement = findReplacementTarget()
-                            const currentMode = (isExact ? dlg.modesExact?.[c.key] : dlg.modesPrefix?.[c.key]) || (currentReplacement ? 'replace' : 'alias')
-                            const setReplacement = (nextTarget: string) => {
-                              setAliasDialogs(m => {
-                                const cur = m[bot.id]
-                                const map = isExact ? { ...(cur.mappedExact || {}) } : { ...(cur.mappedPrefix || {}) }
-                                // 移除所有目标下的本命令key
-                                Object.keys(map).forEach((t) => {
-                                  const list = Array.from(map[t] || [])
-                                  map[t] = list.filter(x => x !== c.key)
-                                })
-                                if (nextTarget) {
-                                  const list = Array.from(map[nextTarget] || [])
-                                  if (!list.includes(c.key)) list.push(c.key)
-                                  map[nextTarget] = list
-                                }
-                                if (isExact) {
-                                  return { ...m, [bot.id]: { ...cur, mappedExact: map } }
-                                } else {
-                                  return { ...m, [bot.id]: { ...cur, mappedPrefix: map } }
-                                }
-                              })
-                            }
-                            return (
-                              <div key={`cmd-${i}`} className="border rounded p-3">
-                                <div className="text-sm font-medium">{c.title || c.key}</div>
-                                {c.desc && <div className="text-xs text-slate-600 mt-0.5">{c.desc}</div>}
-                                {Array.isArray(c.examples) && c.examples.length > 0 && (
-                                  <div className="text-xs text-slate-500 mt-1">示例：{c.examples.join('，')}</div>
-                                )}
-                                <div className="mt-2 flex items-center gap-4">
-                                  <label className="text-xs flex items-center gap-1">
-                                    <input
-                                      type="radio"
-                                      name={`mode-${bot.id}-${c.key}`}
-                                      checked={currentMode === 'alias'}
-                                      onChange={() => {
-                                        // 切到“增加别名”，需要清除替换关系
-                                        setReplacement('')
-                                        setAliasDialogs(m => {
-                                          const cur = m[bot.id]
-                                          if (isExact) {
-                                            return { ...m, [bot.id]: { ...cur, modesExact: { ...(cur.modesExact || {}), [c.key]: 'alias' } } }
-                                          }
-                                          return { ...m, [bot.id]: { ...cur, modesPrefix: { ...(cur.modesPrefix || {}), [c.key]: 'alias' } } }
-                                        })
-                                      }}
-                                    /> 增加别名
-                                  </label>
-                                  <label className="text-xs flex items-center gap-1">
-                                    <input
-                                      type="radio"
-                                      name={`mode-${bot.id}-${c.key}`}
-                                      checked={currentMode === 'replace'}
-                                      onChange={() => {
-                                        setAliasDialogs(m => {
-                                          const cur = m[bot.id]
-                                          if (isExact) {
-                                            return { ...m, [bot.id]: { ...cur, modesExact: { ...(cur.modesExact || {}), [c.key]: 'replace' } } }
-                                          }
-                                          return { ...m, [bot.id]: { ...cur, modesPrefix: { ...(cur.modesPrefix || {}), [c.key]: 'replace' } } }
-                                        })
-                                      }}
-                                    /> 替换指令
-                                  </label>
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2 items-center">
-                                  {aliases.map((a, idx) => (
-                                    <span key={`tag-${i}-${idx}`} className="inline-flex items-center gap-1 text-xs bg-slate-100 border rounded px-2 py-0.5">
-                                      {a}
-                                      <button
-                                        className="text-red-600"
-                                        onClick={() => {
-                                          setAliasDialogs(m => {
-                                            const cur = m[bot.id]
-                                            if (isExact) {
-                                              const next = { ...(cur.mappedExact || {}) }
-                                              const list = Array.from(next[c.key] || [])
-                                              next[c.key] = list.filter(x => x !== a)
-                                              return { ...m, [bot.id]: { ...cur, mappedExact: next } }
-                                            } else {
-                                              const next = { ...(cur.mappedPrefix || {}) }
-                                              const list = Array.from(next[c.key] || [])
-                                              next[c.key] = list.filter(x => x !== a)
-                                              return { ...m, [bot.id]: { ...cur, mappedPrefix: next } }
-                                            }
-                                          })
-                                        }}
-                                      >×</button>
-                                    </span>
-                                  ))}
-                                </div>
-                                <div className="mt-2 flex gap-2">
-                                  <input
-                                    className="border rounded px-2 py-1 text-sm flex-1"
-                                    placeholder={isExact ? (currentMode === 'replace' ? '输入要替换为本指令的整句' : '新增别名（整句）') : (currentMode === 'replace' ? '输入要替换为本指令的前缀' : '新增前缀')}
-                                    value={draft}
-                                    onChange={e => setAliasDialogs(m => ({
-                                      ...m,
-                                      [bot.id]: {
-                                        ...m[bot.id],
-                                        ...(isExact
-                                          ? { draftsExact: { ...(m[bot.id].draftsExact || {}), [c.key]: e.target.value } }
-                                          : { draftsPrefix: { ...(m[bot.id].draftsPrefix || {}), [c.key]: e.target.value } }
-                                        )
-                                      }
-                                    }))}
-                                  />
-                                  <button
-                                    className="text-xs border rounded px-2 py-1 hover:bg-slate-50"
-                                    onClick={() => {
-                                      const val = (draft || '').trim()
-                                      if (!val) {
-                                        toast({ title: '提示', description: '请输入要添加的内容', variant: 'destructive' })
-                                        return
-                                      }
-                                      if (val.length > 100) {
-                                        toast({ title: '提示', description: '输入过长（最多100个字符）', variant: 'destructive' })
-                                        return
-                                      }
-                                      setAliasDialogs(m => {
-                                        const cur = m[bot.id]
-                                        if (isExact) {
-                                          const next = { ...(cur.mappedExact || {}) }
-                                          if (currentMode === 'replace') {
-                                            // 从所有 exact 目标中移除该短语
-                                            Object.keys(next).forEach(t => {
-                                              next[t] = (next[t] || []).filter(x => x !== val)
-                                            })
-                                          } else {
-                                            if ((next[c.key] || []).includes(val)) {
-                                              toast({ title: '提示', description: '该别名已存在', variant: 'destructive' })
-                                              return m
-                                            }
-                                          }
-                                          const list = Array.from(next[c.key] || [])
-                                          if (!list.includes(val)) list.push(val)
-                                          next[c.key] = list
-                                          const nd = { ...(cur.draftsExact || {}) }
-                                          nd[c.key] = ''
-                                          return { ...m, [bot.id]: { ...cur, mappedExact: next, draftsExact: nd } }
-                                        } else {
-                                          const next = { ...(cur.mappedPrefix || {}) }
-                                          if (currentMode === 'replace') {
-                                            // 从所有 prefix 目标中移除该前缀
-                                            Object.keys(next).forEach(t => {
-                                              next[t] = (next[t] || []).filter(x => x !== val)
-                                            })
-                                          } else {
-                                            if ((next[c.key] || []).includes(val)) {
-                                              toast({ title: '提示', description: '该前缀已存在', variant: 'destructive' })
-                                              return m
-                                            }
-                                          }
-                                          const list = Array.from(next[c.key] || [])
-                                          if (!list.includes(val)) list.push(val)
-                                          next[c.key] = list
-                                          const nd = { ...(cur.draftsPrefix || {}) }
-                                          nd[c.key] = ''
-                                          return { ...m, [bot.id]: { ...cur, mappedPrefix: next, draftsPrefix: nd } }
-                                        }
-                                      })
-                                    }}
-                                  >添加</button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    
-
-                    <div className="mt-4 flex justify-end gap-2">
-                      <button className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50" onClick={() => closeAliasDialog(bot.id)}>取消</button>
-                      <button className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50" disabled={!!dlg.saving} onClick={() => saveAliasDialog(bot.id)}>
-                        {dlg.saving ? '保存中...' : '保存'}
-                      </button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )
-            })}
+            {/* ✅ 修正：删除了中间导致报错的残留代码，直接衔接分组对话框逻辑 */}
 
             {bots.map((bot) => {
               const dlg = groupDialogs[bot.id]
@@ -2071,7 +1754,7 @@ function DashboardPageInner() {
                                         setFeatureCache((c) => ({ ...c, [chatId]: { items: [] } }))
                                       }
                                       // 同步拉取快捷设置（计算器等）
-                                      setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: true } }))
+                                      setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, loading: true } }))
                                       try {
                                         const sres = await fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
                                         if (sres.ok) {
@@ -2081,13 +1764,14 @@ function DashboardPageInner() {
                                             addressVerificationEnabled: settings.addressVerificationEnabled ?? false,
                                             deleteBillConfirm: settings.deleteBillConfirm ?? false,
                                             calculatorEnabled: settings.calculatorEnabled ?? true,
+                                            showAuthPrompt: settings.showAuthPrompt ?? true,
                                             loading: false
                                           }}))
                                         } else {
-                                          setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: false } }))
+                                          setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, loading: false } }))
                                         }
                                       } catch {
-                                        setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, loading: false } }))
+                                        setQuickSettingsCache((c) => ({ ...c, [chatId]: { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, loading: false } }))
                                       }
                                     }}
                                   >{expandedRows[it.id] ? '⬆️ 收起' : '⚙️ 功能'}</button>
@@ -2221,7 +1905,7 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), addressVerificationEnabled: e.target.checked }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true }), addressVerificationEnabled: e.target.checked }
                                               }))
                                             }}
                                           />
@@ -2235,7 +1919,7 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), deleteBillConfirm: e.target.checked }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true }), deleteBillConfirm: e.target.checked }
                                               }))
                                             }}
                                           />
@@ -2249,12 +1933,42 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true }), calculatorEnabled: e.target.checked }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true }), calculatorEnabled: e.target.checked }
                                               }))
                                             }}
                                           />
                                           <span>计算器</span>
                                         </label>
+                                        <label className="inline-flex items-center gap-2 text-sm">
+                                          <input
+                                            type="checkbox"
+                                            checked={quickSettingsCache[it.id]?.showAuthPrompt ?? true}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true }), showAuthPrompt: e.target.checked }
+                                              }))
+                                            }}
+                                          />
+                                          <span>显示授权提示</span>
+                                        </label>
+                                        <div className="mt-2">
+                                          <label className="block text-sm font-medium mb-1">欢迎消息</label>
+                                          <textarea
+                                            className="w-full px-3 py-2 border rounded-md text-sm"
+                                            placeholder="机器人加入群组后发送的欢迎消息，支持 Markdown 格式"
+                                            rows={2}
+                                            value={quickSettingsCache[it.id]?.welcomeMessage || ''}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '' }), welcomeMessage: e.target.value }
+                                              }))
+                                            }}
+                                          />
+                                        </div>
                                         <button
                                           className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
                                           disabled={quickSettingsSaving[it.id]}
@@ -2270,7 +1984,9 @@ function DashboardPageInner() {
                                                 body: JSON.stringify({
                                                   addressVerificationEnabled: settings.addressVerificationEnabled,
                                                   deleteBillConfirm: settings.deleteBillConfirm,
-                                                  calculatorEnabled: settings.calculatorEnabled
+                                                  calculatorEnabled: settings.calculatorEnabled,
+                                                  showAuthPrompt: settings.showAuthPrompt,
+                                                  welcomeMessage: settings.welcomeMessage || null
                                                 })
                                               })
                                               if (!res.ok) {
@@ -2336,6 +2052,77 @@ function DashboardPageInner() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 欢迎指令设置对话框 */}
+      <Dialog open={welcomeDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setWelcomeDialog({ open: false })
+        }
+      }}>
+        <DialogContent className="w-[98vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle>🎉 欢迎指令设置</DialogTitle>
+            <DialogDescription>
+              设置机器人拉群成功后自动发送的欢迎消息
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2">欢迎消息内容</label>
+            <textarea
+              className="w-full px-3 py-2 border rounded-md text-sm min-h-[100px]"
+              placeholder="输入欢迎消息内容，支持 Markdown 格式。如果留空则不发送欢迎消息。"
+              value={welcomeDialog.message || ''}
+              onChange={(e) => setWelcomeDialog(prev => ({ ...prev, message: e.target.value }))}
+              disabled={welcomeDialog.loading || welcomeDialog.saving}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              💡 支持 Markdown 格式，可使用表情符号和格式化文本
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-6">
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+              onClick={() => setWelcomeDialog({ open: false })}
+              disabled={welcomeDialog.saving}
+            >
+              取消
+            </button>
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+              disabled={welcomeDialog.loading || welcomeDialog.saving}
+              onClick={async () => {
+                if (!welcomeDialog.botId) return
+
+                setWelcomeDialog(prev => ({ ...prev, saving: true }))
+                try {
+                  const token = localStorage.getItem('auth_token') || ''
+                  const res = await fetch(`/api/bots/${encodeURIComponent(welcomeDialog.botId!)}/welcome-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+                    body: JSON.stringify({ message: welcomeDialog.message || null })
+                  })
+
+                  if (!res.ok) {
+                    const msg = await res.text().catch(() => '')
+                    throw new Error(msg || '保存失败')
+                  }
+
+                  toast({ title: '成功', description: '欢迎消息设置已保存' })
+                  setWelcomeDialog({ open: false })
+                } catch (e) {
+                  toast({ title: '错误', description: (e as Error).message || '保存失败', variant: 'destructive' })
+                } finally {
+                  setWelcomeDialog(prev => ({ ...prev, saving: false }))
+                }
+              }}
+            >
+              {welcomeDialog.saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

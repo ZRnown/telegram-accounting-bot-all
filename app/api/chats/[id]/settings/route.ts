@@ -23,6 +23,8 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         hideOrderButton: setting?.hideOrderButton ?? false,
         deleteBillConfirm: setting?.deleteBillConfirm ?? false, // 🔥 删除账单确认功能
         calculatorEnabled: setting?.calculatorEnabled ?? true, // 🔥 计算器功能开关
+        showAuthPrompt: setting?.showAuthPrompt ?? true, // 🔥 显示授权提示开关
+        welcomeMessage: setting?.welcomeMessage ?? '', // 🔥 拉群欢迎消息
       },
     })
   } catch (e) {
@@ -48,6 +50,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       hideOrderButton?: boolean
       deleteBillConfirm?: boolean // 🔥 删除账单确认功能
       calculatorEnabled?: boolean // 🔥 计算器功能开关
+      showAuthPrompt?: boolean // 🔥 显示授权提示开关
+      welcomeMessage?: string | null // 🔥 拉群欢迎消息
     }
 
     // Update Chat.title if provided
@@ -81,6 +85,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.hideOrderButton === 'boolean') patchData.hideOrderButton = body.hideOrderButton
     if (typeof body.deleteBillConfirm === 'boolean') patchData.deleteBillConfirm = body.deleteBillConfirm // 🔥 删除账单确认功能
     if (typeof body.calculatorEnabled === 'boolean') patchData.calculatorEnabled = body.calculatorEnabled // 🔥 计算器功能开关
+    if (typeof body.showAuthPrompt === 'boolean') patchData.showAuthPrompt = body.showAuthPrompt // 🔥 显示授权提示开关
+    if (body.welcomeMessage !== undefined) patchData.welcomeMessage = body.welcomeMessage // 🔥 拉群欢迎消息
 
     // 🔥 优化：只要有传入任何设置字段就允许保存（即使值为默认值）
     // 如果patchData为空但传入了设置字段，仍然允许保存（可能是保存默认值）
@@ -93,6 +99,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       'hideOrderButton',
       'deleteBillConfirm',
       'calculatorEnabled',
+      'showAuthPrompt',
+      'welcomeMessage',
       'feePercent',
       'fixedRate',
       'realtimeRate',

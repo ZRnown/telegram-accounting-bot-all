@@ -8,17 +8,18 @@ datasource db {
 }
 
 model Bot {
-  id           String           @id @default(cuid())
-  name         String
-  description  String?
-  token        String
-  proxyUrl     String?
-  enabled      Boolean          @default(true)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  featureFlags BotFeatureFlag[]
-  chats        Chat[]
-  chatGroups   ChatGroup[]
+  id             String           @id @default(cuid())
+  name           String
+  description    String?
+  token          String
+  proxyUrl       String?
+  enabled        Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  welcomeMessage String?          // 🔥 机器人欢迎消息设置
+  featureFlags   BotFeatureFlag[]
+  chats          Chat[]
+  chatGroups     ChatGroup[]
 }
 
 model BotFeatureFlag {
@@ -96,6 +97,8 @@ model Setting {
   deleteBillConfirm          Boolean        @default(false) // 🔥 删除账单确认功能（发送删除账单后会有二次确认）
   accountingEnabled          Boolean        @default(true) // 🔥 记账功能开关，默认开启
   calculatorEnabled          Boolean        @default(true) // 🔥 计算器功能开关，默认开启
+  showAuthPrompt             Boolean        @default(true) // 🔥 是否在被拉进非授权群时显示授权提示，默认开启
+  welcomeMessage             String?        // 🔥 新增：拉群成功后的欢迎消息
   chat                       Chat           @relation(fields: [chatId], references: [id])
 }
 

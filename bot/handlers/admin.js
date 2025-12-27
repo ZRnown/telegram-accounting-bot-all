@@ -29,7 +29,11 @@ export function registerBotLeave(bot) {
         prisma.setting.deleteMany({ where: { chatId } }),
         prisma.operator.deleteMany({ where: { chatId } }),
         prisma.addressVerification.deleteMany({ where: { chatId } }),
-        prisma.featureWarningLog.deleteMany({ where: { chatId } })
+        prisma.featureWarningLog.deleteMany({ where: { chatId } }),
+        prisma.bill.deleteMany({ where: { chatId } }),
+        prisma.income.deleteMany({ where: { chatId } }),
+        prisma.dispatch.deleteMany({ where: { chatId } }),
+        prisma.commission.deleteMany({ where: { chatId } })
       ])
 
       await prisma.chat.delete({ where: { id: chatId } }).catch(() => { })

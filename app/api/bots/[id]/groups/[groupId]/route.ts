@@ -1,18 +1,21 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 // 更新分组
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string; groupId: string }> }) {
   try {
+    const unauth = assertAdmin(req) // 🔥 添加安全检查
+    if (unauth) return unauth
+
     const { id, groupId } = await context.params
     const body = await req.json().catch(() => ({})) as { name?: string; description?: string }
-    
-    // 验证分组是否存在且属于该机器人
+
     const existing = await prisma.chatGroup.findFirst({
       where: { id: groupId, botId: id }
     })
     if (!existing) {
-      return Response.json({ error: '分组不存在' }, { status: 404 })
+      return Response.json({ error: '分组不存在或不属于该机器人' }, { status: 404 })
     }
 
     // 如果更新名称，检查是否与其他分组重名
@@ -56,24 +59,35 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 // 删除分组
 export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string; groupId: string }> }) {
   try {
+    const unauth = assertAdmin(req) // 🔥 添加安全检查
+    if (unauth) return unauth
+
     const { id, groupId } = await context.params
-    
+
+    console.log(`[Delete Group] Attempting to delete group ${groupId} for bot ${id}`) // 🔥 添加日志
+
     // 验证分组是否存在且属于该机器人
     const existing = await prisma.chatGroup.findFirst({
       where: { id: groupId, botId: id }
     })
+
     if (!existing) {
-      return Response.json({ error: '分组不存在' }, { status: 404 })
+      console.log(`[Delete Group] Not found. GroupId: ${groupId}, BotId: ${id}`)
+      return Response.json({ error: '分组不存在或不属于该机器人' }, { status: 404 })
     }
 
-    // 删除分组（会自动将关联的群组 groupId 设为 null）
+    // 如果 Prisma schema 中 Chat.groupId 是可选的，删除分组会自动置空（如果没设置 onDelete 行为，手动置空更安全）
+    await prisma.chat.updateMany({
+        where: { groupId: groupId },
+        data: { groupId: null }
+    })
     await prisma.chatGroup.delete({
       where: { id: groupId }
     })
 
     return Response.json({ ok: true })
-  } catch (e) {
-    console.error(e)
+  } catch (e: any) {
+    console.error('[Delete Group] Error:', e)
     return Response.json({ error: 'Server error' }, { status: 500 })
   }
 }

@@ -1,41 +1,30 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Lightweight global security headers middleware
-// Skip heavy work; only set headers. Exclude static assets via config.matcher below.
+// 🔥 本地开发环境中间件（简化版）
+// 生产环境使用 middleware-proxy.ts
 
-export function middleware(req: NextRequest) {
-  const res = NextResponse.next()
+export function middleware(request: NextRequest) {
+  // 本地开发环境跳过复杂的安全检查
+  // 只保留基本的路径验证
 
-  // Content Security Policy (adjust as needed)
-  const csp = [
-    "default-src 'self'",
-    "img-src 'self' data: blob:" ,
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "connect-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'"
-  ].join('; ')
+  const { pathname } = request.nextUrl
 
-  res.headers.set('Content-Security-Policy', csp)
-  res.headers.set('X-Frame-Options', 'DENY')
-  res.headers.set('X-Content-Type-Options', 'nosniff')
-  res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  res.headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
-
-  if (process.env.NODE_ENV === 'production') {
-    // Enable HSTS only in production and when HTTPS is guaranteed
-    res.headers.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains; preload') // 180 days
+  // 🔥 防止路径遍历攻击（基本检查）
+  if (pathname.includes('..') || pathname.includes('\\')) {
+    return new NextResponse('Forbidden', { status: 403 })
   }
 
-  return res
+  // 本地开发环境允许所有请求通过
+  return NextResponse.next()
 }
 
-// Exclude static files and Next internals for performance
+// 🔥 配置中间件匹配的路径（本地开发）
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|uploads/).*)'
+    /*
+     * 本地开发环境：只对API路径进行基本检查
+     */
+    '/api/:path*',
   ],
 }

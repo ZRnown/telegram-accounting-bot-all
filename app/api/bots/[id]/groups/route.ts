@@ -1,11 +1,15 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 // 获取所有分组
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req) // 🔥 添加安全检查
+    if (unauth) return unauth
+
     const { id } = await context.params
-    const groups = await prisma.chatGroup.findMany({
+    const groups: any[] = await prisma.chatGroup.findMany({
       where: { botId: id },
       include: {
         _count: {
@@ -14,7 +18,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       },
       orderBy: { createdAt: 'asc' }
     })
-    return Response.json(groups.map(g => ({
+    return Response.json(groups.map((g: any) => ({
       id: g.id,
       name: g.name,
       description: g.description,
@@ -31,6 +35,9 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 // 创建分组
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req) // 🔥 添加安全检查
+    if (unauth) return unauth
+
     const { id } = await context.params
     const body = await req.json().catch(() => ({})) as { name?: string; description?: string }
     const name = (body.name || '').trim()

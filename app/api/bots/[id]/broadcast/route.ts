@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     })
     
     // 过滤出群组（ID 以 - 开头，即负数）
-    const groupChats = chats.filter(chat => chat.id.startsWith('-'))
+    const groupChats = chats.filter((chat: any) => chat.id.startsWith('-'))
     
     if (!groupChats.length) return Response.json({ error: '暂无已允许使用的群组' }, { status: 400 })
 

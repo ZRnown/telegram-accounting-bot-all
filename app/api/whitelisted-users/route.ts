@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     })
 
     // 🔥 兜底：如果 username 为 null，使用 userId 占位，避免前端显示为空
-    const users = usersRaw.map((u) => ({
+    const users = usersRaw.map((u: any) => ({
       ...u,
       username: u.username || (u.userId ? `user_${u.userId}` : 'unknown')
     }))

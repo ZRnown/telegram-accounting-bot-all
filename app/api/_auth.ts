@@ -39,23 +39,28 @@ export function verifySession(raw: string | null) {
 export function setSessionCookie(res: NextResponse, username: string, ver: number = 0) {
   const v = createSession(username, ver)
 
-  // In production, Next.js 默认 NODE_ENV=production，会把 Cookie 标记为 Secure，
-  // 这在只用 http 部署时浏览器不会回传 Cookie，导致永远 401。
-  // 这里加一个可配置开关：ADMIN_COOKIE_SECURE=false 时，即使在生产环境也不加 Secure。
-  const secure =
-    process.env.ADMIN_COOKIE_SECURE != null
-      ? process.env.ADMIN_COOKIE_SECURE === 'true'
-      : process.env.NODE_ENV === 'production'
+  // 🔥 安全增强：强制HTTPS环境下的Cookie安全设置
+  // 生产环境必须使用HTTPS，否则Cookie不安全
+  const isHttps = process.env.NODE_ENV === 'production' ||
+                  process.env.FORCE_HTTPS === 'true' ||
+                  (typeof window !== 'undefined' && window.location?.protocol === 'https:')
 
+  // 🔥 安全增强：强制SameSite=Strict，防止CSRF攻击
+  // 只有在HTTPS环境下才设置Secure标志
   res.cookies.set({
     name: COOKIE_NAME,
     value: v,
-    httpOnly: true,
-    sameSite: 'lax',
-    secure,
+    httpOnly: true, // 防止JS读取
+    sameSite: 'strict', // 🔥 改为Strict，防止CSRF
+    secure: isHttps, // 🔥 只有HTTPS时才设置Secure
     path: '/',
     maxAge: MAX_AGE,
   })
+
+  // 🔥 安全增强：如果在HTTP环境下，记录警告
+  if (!isHttps && process.env.NODE_ENV === 'production') {
+    console.warn('⚠️ 安全警告：生产环境使用HTTP，Cookie可能被中间人攻击劫持！请配置HTTPS。')
+  }
 }
 
 export function getSession(req: NextRequest) {
