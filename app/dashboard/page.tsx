@@ -2180,7 +2180,7 @@ function DashboardPageInner() {
               disabled={nonWhitelistDialog.loading || nonWhitelistDialog.saving}
             />
             <p className="text-xs text-slate-500 mt-1">
-              💡 支持 Markdown 格式，可使用表情符号和格式化文本
+              💡 可用变量：{'{inviter}'} (邀请人), {'{chat}'} (群名), {'{id}'} (邀请人ID)
             </p>
           </div>
 

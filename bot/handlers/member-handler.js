@@ -222,12 +222,12 @@ export function registerMemberHandlers(bot) {
                         logger.info('[my_chat_member] 检测到群组重新启用，开始重新初始化', { chatId })
                         // 这里会继续执行下面的新加入逻辑
                     } else {
-                        // 仅更新标题和绑定关系
-                        await prisma.chat.update({
-                            where: { id: chatId },
-                            data: { title, botId }
-                        }).catch(() => {})
-                        return
+                    // 仅更新标题和绑定关系
+                    await prisma.chat.update({
+                        where: { id: chatId },
+                        data: { title, botId }
+                    }).catch(() => {})
+                    return
                     }
                 }
 
@@ -275,8 +275,9 @@ export function registerMemberHandlers(bot) {
                     update: {
                         title,
                         botId,
-                        // 如果是自动授权，则更新状态；否则保持原样，不覆盖可能已有的设置
-                        ...(autoAllowed ? { status: 'APPROVED', allowed: true } : {}),
+                        // 🔥 修复点：如果检测到白名单，强制更新为 APPROVED，否则保持原样 (undefined)
+                        status: autoAllowed ? 'APPROVED' : undefined,
+                        allowed: autoAllowed ? true : undefined,
                         // 总是更新邀请人信息
                         invitedBy: actionUserId || null,
                         invitedByUsername: actionUsername || null
@@ -360,32 +361,33 @@ export function registerMemberHandlers(bot) {
                         select: { nonWhitelistWelcomeMessage: true, showAuthPrompt: true }
                     })
 
-                    const customMsg = settings?.nonWhitelistWelcomeMessage?.trim()
-                    if (customMsg && settings?.showAuthPrompt !== false) {
-                        // 使用自定义的非白名单欢迎消息
+                    if (settings?.showAuthPrompt !== false) {
+                        const customMsg = settings?.nonWhitelistWelcomeMessage?.trim()
+
+                        // 确定要发送的消息
+                        const msgToSend = customMsg || (
+                            `🚫 *未授权警告*\n\n` +
+                            `本群尚未被授权使用。\n` +
+                            `请联系管理员在后台通过审核，或由白名单用户邀请入群。`
+                        )
+
+                        // 🔥 替换变量
+                        const finalMsg = msgToSend
+                            .replace('{inviter}', actionUsername || actionFullName || '未知用户')
+                            .replace('{chat}', title)
+                            .replace('{id}', actionUserId)
+
                         try {
-                            await ctx.reply(customMsg, { parse_mode: 'Markdown' })
-                            logger.info('[my_chat_member] ✅ 非白名单自定义欢迎消息发送成功', { chatId, msgLength: customMsg.length })
+                            await ctx.reply(finalMsg, { parse_mode: 'Markdown' })
+                            logger.info('[my_chat_member] ✅ 非白名单提醒消息发送成功', { chatId, msgLength: finalMsg.length })
                         } catch (e) {
-                            logger.warn('[my_chat_member] ⚠️ 非白名单自定义消息Markdown发送失败，尝试纯文本', { chatId, error: e.message })
+                            logger.warn('[my_chat_member] ⚠️ 非白名单提醒消息Markdown发送失败，尝试纯文本', { chatId, error: e.message })
                             try {
-                                await ctx.reply(customMsg)
-                                logger.info('[my_chat_member] ✅ 非白名单自定义欢迎消息(纯文本)发送成功', { chatId, msgLength: customMsg.length })
+                                await ctx.reply(finalMsg)
+                                logger.info('[my_chat_member] ✅ 非白名单提醒消息(纯文本)发送成功', { chatId, msgLength: finalMsg.length })
                             } catch (e2) {
-                                logger.error('[my_chat_member] ❌ 非白名单自定义欢迎消息发送失败', { chatId, error: e2.message })
+                                logger.error('[my_chat_member] ❌ 非白名单提醒消息发送失败', { chatId, error: e2.message })
                             }
-                        }
-                    } else if (settings?.showAuthPrompt !== false) {
-                        // 使用默认提示消息
-                        const defaultMsg = `🤖 *机器人已入群*\n\n` +
-                            `⚠️ 本群尚未授权。\n` +
-                            `邀请人：${actionUsername || actionFullName} (ID: ${actionUserId})\n\n` +
-                            `请联系管理员在后台通过审核，或由白名单用户邀请。`
-                        try {
-                            await ctx.reply(defaultMsg, { parse_mode: 'Markdown' })
-                            logger.info('[my_chat_member] ✅ 非白名单默认提示消息发送成功', { chatId })
-                        } catch (e) {
-                            logger.error('[my_chat_member] ❌ 非白名单默认提示消息发送失败', { chatId, error: e.message })
                         }
                     } else {
                         logger.info('[my_chat_member] ℹ️ 非白名单用户拉群，但showAuthPrompt被禁用，不发送消息', { chatId })
