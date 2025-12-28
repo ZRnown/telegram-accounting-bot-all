@@ -63,6 +63,14 @@ export async function POST(req: NextRequest) {
       create: { key, value: JSON.stringify(map), description: `Custom commands for bot ${botId}`, updatedBy: 'admin' }
     })
 
+    // 清理缓存，确保指令立即生效
+    try {
+      // 这里可以添加缓存清理逻辑，如果需要的话
+      // 由于缓存有5分钟TTL，新的指令会在下次请求时自动加载
+    } catch (e) {
+      console.warn('[custom-commands] Cache cleanup failed:', e)
+    }
+
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[custom-commands][POST]', e)

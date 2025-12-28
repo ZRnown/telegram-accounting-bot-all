@@ -69,13 +69,42 @@ async function loadCustomCommandsForBot(botId) {
     if (CUSTOM_CMDS_CACHE.map && now - CUSTOM_CMDS_CACHE.ts < 5 * 60 * 1000) return CUSTOM_CMDS_CACHE.map
 
     try {
-        // 获取所有属于该机器人的群组
+        let map = {}
+
+        // 1. 加载后台管理设置的自定义指令（按机器人维度）
+        const adminCmdsKey = `customcmds:bot:${botId}`
+        const adminCmdsRow = await prisma.globalConfig.findUnique({
+            where: { key: adminCmdsKey },
+            select: { value: true }
+        }).catch(() => null)
+
+        if (adminCmdsRow?.value) {
+            try {
+                const adminCmds = JSON.parse(adminCmdsRow.value) || {}
+                for (const [trigger, payload] of Object.entries(adminCmds)) {
+                    if (payload && typeof payload === 'object') {
+                        const cmd = payload
+                        // 转换为统一格式，确保URL有效
+                        const imageUrl = cmd.imageUrl?.trim()
+                        const resolvedImageUrl = imageUrl ? resolveImageUrl(imageUrl) : null
+                        const validImageUrl = resolvedImageUrl && isValidImageUrl(resolvedImageUrl) ? resolvedImageUrl : null
+
+                        map[trigger.toLowerCase()] = {
+                            text: cmd.text || '',
+                            imageUrl: validImageUrl
+                        }
+                    }
+                }
+            } catch (e) {
+                logger.warn('[loadCustomCommandsForBot] Failed to parse admin commands:', e)
+            }
+        }
+
+        // 2. 加载群组内设置的自定义指令（向后兼容）
         const chats = await prisma.chat.findMany({
             where: { botId },
             select: { id: true }
         })
-
-        let map = {}
 
         // 从每个群组加载自定义指令
         for (const chat of chats) {
@@ -159,4 +188,12 @@ export function registerCustomCommandHandlers(bot) {
             return next()
         }
     })
+}
+
+/**
+ * 清理自定义指令缓存
+ */
+export function clearCustomCommandCache() {
+  CUSTOM_CMDS_CACHE.map = null
+  CUSTOM_CMDS_CACHE.ts = 0
 }

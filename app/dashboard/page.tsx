@@ -943,7 +943,7 @@ function DashboardPageInner() {
                               setWelcomeDialog(prev => ({ ...prev, loading: false }))
                             }
                           }}
-                        >欢迎指令设置</button>
+                        >白名单欢迎</button>
                         <button
                           className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
                           onClick={async () => {
