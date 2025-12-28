@@ -9,7 +9,7 @@ const nextConfig = {
   // 🔥 安全增强：输出独立构建，优化安全
   output: 'standalone',
 
-  // 🔥 修复 Turbopack 配置问题
+  // 🔥 明确配置 Turbopack（解决兼容性问题）
   turbopack: {},
 
   // 🛡️ 最高安全级别配置
