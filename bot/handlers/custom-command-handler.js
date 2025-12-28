@@ -2,6 +2,35 @@ import { prisma } from '../../lib/db.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import logger from '../logger.js'
 
+const BACKEND_URL = process.env.BACKEND_URL
+
+/**
+ * 将相对URL转换为绝对URL
+ */
+function resolveImageUrl(url) {
+    if (!url) return url
+
+    // 如果已经是绝对URL，直接返回
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url
+    }
+
+    // 如果是相对路径，拼接后端URL
+    if (url.startsWith('/')) {
+        if (BACKEND_URL) {
+            try {
+                const baseUrl = new URL(BACKEND_URL)
+                return `${baseUrl.protocol}//${baseUrl.host}${url}`
+            } catch (e) {
+                logger.warn('[resolveImageUrl] Invalid BACKEND_URL:', BACKEND_URL)
+                return url
+            }
+        }
+    }
+
+    return url
+}
+
 // 验证URL是否有效
 function isValidImageUrl(url) {
     if (!url || typeof url !== 'string') return false
@@ -78,7 +107,8 @@ async function loadCustomCommandsForBot(botId) {
                     const payload = JSON.parse(cmdRow.value)
                     // 转换为统一格式，确保URL有效
                     const imageUrl = payload.imageUrl?.trim()
-                    const validImageUrl = imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) ? imageUrl : null
+                    const resolvedImageUrl = imageUrl ? resolveImageUrl(imageUrl) : null
+                    const validImageUrl = resolvedImageUrl && isValidImageUrl(resolvedImageUrl) ? resolvedImageUrl : null
 
                     map[trigger.toLowerCase()] = {
                         text: payload.content,

@@ -4,6 +4,35 @@ import { hasPermissionWithWhitelist } from '../helpers.js'
 import { getChat } from '../state.js'
 import { ensureDbChat } from '../database.js'
 
+const BACKEND_URL = process.env.BACKEND_URL
+
+/**
+ * 将相对URL转换为绝对URL
+ */
+function resolveImageUrl(url) {
+    if (!url) return url
+
+    // 如果已经是绝对URL，直接返回
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url
+    }
+
+    // 如果是相对路径，拼接后端URL
+    if (url.startsWith('/')) {
+        if (BACKEND_URL) {
+            try {
+                const baseUrl = new URL(BACKEND_URL)
+                return `${baseUrl.protocol}//${baseUrl.host}${url}`
+            } catch (e) {
+                console.warn('[resolveImageUrl] Invalid BACKEND_URL:', BACKEND_URL)
+                return url
+            }
+        }
+    }
+
+    return url
+}
+
 async function getIndex(chatId) {
   const row = await prisma.globalConfig.findUnique({ where: { key: `customcmd_index:${chatId}` }, select: { value: true } }).catch(() => null)
   if (!row?.value) return []
@@ -78,7 +107,7 @@ export function registerCustomCommands(bot, ensureChat) {
     const trigger = (ctx.match[1] || '').trim()
     const imageUrl = (ctx.match[2] || '').trim()
     const existing = await getCmd(chatId, trigger) || { content: '' }
-    existing.imageUrl = imageUrl
+    existing.imageUrl = resolveImageUrl(imageUrl)
     if (!existing.parseMode) existing.parseMode = 'Markdown'
     await setCmd(chatId, trigger, existing)
 

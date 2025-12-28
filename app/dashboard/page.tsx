@@ -79,6 +79,15 @@ function DashboardPageInner() {
     saving?: boolean
     message?: string
   }>({ open: false })
+
+  // 非白名单提醒设置对话框
+  const [nonWhitelistDialog, setNonWhitelistDialog] = useState<{
+    open: boolean
+    botId?: string
+    loading?: boolean
+    saving?: boolean
+    message?: string
+  }>({ open: false })
   const [groupForm, setGroupForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
   const [groupSaving, setGroupSaving] = useState<Record<string, boolean>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
@@ -935,6 +944,26 @@ function DashboardPageInner() {
                             }
                           }}
                         >欢迎指令设置</button>
+                        <button
+                          className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                          onClick={async () => {
+                            setNonWhitelistDialog({ open: true, botId: bot.id, loading: true, message: '' })
+                            try {
+                              const token = localStorage.getItem('auth_token') || ''
+                              const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/non-whitelist-message`, {
+                                headers: { 'x-auth-token': token }
+                              })
+                              if (res.ok) {
+                                const data = await res.json().catch(() => ({}))
+                                setNonWhitelistDialog(prev => ({ ...prev, loading: false, message: data.message || '' }))
+                              } else {
+                                setNonWhitelistDialog(prev => ({ ...prev, loading: false }))
+                              }
+                            } catch {
+                              setNonWhitelistDialog(prev => ({ ...prev, loading: false }))
+                            }
+                          }}
+                        >非白名单提醒</button>
                       </div>
                       {broadcastDrafts[bot.id]?.open && (
                         <div className="space-y-2 text-sm">
@@ -1985,22 +2014,6 @@ function DashboardPageInner() {
                                             }}
                                           />
                                         </div>
-                                        <div className="mt-2">
-                                          <label className="block text-sm font-medium mb-1">非白名单欢迎消息</label>
-                                          <textarea
-                                            className="w-full px-3 py-2 border rounded-md text-sm"
-                                            placeholder="非白名单用户拉机器人进群后的欢迎消息，支持 Markdown 格式。留空则使用默认消息。"
-                                            rows={2}
-                                            value={quickSettingsCache[it.id]?.nonWhitelistWelcomeMessage || ''}
-                                            onChange={(e) => {
-                                              const chatId = it.id
-                                              setQuickSettingsCache((c) => ({
-                                                ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '', nonWhitelistWelcomeMessage: '' }), nonWhitelistWelcomeMessage: e.target.value }
-                                              }))
-                                            }}
-                                          />
-                                        </div>
                                         <button
                                           className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
                                           disabled={quickSettingsSaving[it.id]}
@@ -2153,6 +2166,77 @@ function DashboardPageInner() {
               }}
             >
               {welcomeDialog.saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 非白名单提醒设置对话框 */}
+      <Dialog open={nonWhitelistDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setNonWhitelistDialog({ open: false })
+        }
+      }}>
+        <DialogContent className="w-[98vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle>🚫 非白名单提醒设置</DialogTitle>
+            <DialogDescription>
+              设置非白名单用户拉机器人进群时发送的提醒消息
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2">提醒消息内容</label>
+            <textarea
+              className="w-full px-3 py-2 border rounded-md text-sm min-h-[100px]"
+              placeholder="输入提醒消息内容，支持 Markdown 格式。如果留空则使用默认消息。"
+              value={nonWhitelistDialog.message || ''}
+              onChange={(e) => setNonWhitelistDialog(prev => ({ ...prev, message: e.target.value }))}
+              disabled={nonWhitelistDialog.loading || nonWhitelistDialog.saving}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              💡 支持 Markdown 格式，可使用表情符号和格式化文本
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-6">
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+              onClick={() => setNonWhitelistDialog({ open: false })}
+              disabled={nonWhitelistDialog.saving}
+            >
+              取消
+            </button>
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+              disabled={nonWhitelistDialog.loading || nonWhitelistDialog.saving}
+              onClick={async () => {
+                if (!nonWhitelistDialog.botId) return
+
+                setNonWhitelistDialog(prev => ({ ...prev, saving: true }))
+                try {
+                  const token = localStorage.getItem('auth_token') || ''
+                  const res = await fetch(`/api/bots/${encodeURIComponent(nonWhitelistDialog.botId!)}/non-whitelist-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+                    body: JSON.stringify({ message: nonWhitelistDialog.message || null })
+                  })
+
+                  if (!res.ok) {
+                    const msg = await res.text().catch(() => '')
+                    throw new Error(msg || '保存失败')
+                  }
+
+                  toast({ title: '成功', description: '非白名单提醒设置已保存' })
+                  setNonWhitelistDialog({ open: false })
+                } catch (e) {
+                  toast({ title: '错误', description: (e as Error).message || '保存失败', variant: 'destructive' })
+                } finally {
+                  setNonWhitelistDialog(prev => ({ ...prev, saving: false }))
+                }
+              }}
+            >
+              {nonWhitelistDialog.saving ? '保存中...' : '保存'}
             </button>
           </div>
         </DialogContent>

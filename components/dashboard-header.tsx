@@ -168,14 +168,6 @@ export function DashboardHeader({
                 title="返回主页"
               >返回主页</Button>
             )}
-            {isAdmin && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => router.push('/admin/logs')}
-                title="系统日志"
-              >系统日志</Button>
-            )}
             {!compact && (
               <Button variant="outline" size="sm" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
