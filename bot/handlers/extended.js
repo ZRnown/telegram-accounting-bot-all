@@ -1849,15 +1849,31 @@ export function registerFeatureToggles(bot, ensureChat) {
   // 添加操作员
   bot.hears(/^添加操作员\s+(.+)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
-    if (!chat) return
+    if (!chat) {
+      console.error('[添加操作员] chat is null')
+      return ctx.reply('❌ 无法获取群组信息')
+    }
+
+    if (!chat.id) {
+      console.error('[添加操作员] chat.id is null')
+      return ctx.reply('❌ 群组ID无效')
+    }
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以添加操作员。')
     }
 
-    const usernamesText = ctx.match[1].trim()
-    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', ''))
+    const usernamesText = ctx.match[1]?.trim()
+    if (!usernamesText) {
+      return ctx.reply('❌ 请提供要添加的操作员用户名，例如：添加操作员 @user1 @user2')
+    }
+
+    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', '')).filter(u => u.length > 0)
+
+    if (usernames.length === 0) {
+      return ctx.reply('❌ 未找到有效的用户名')
+    }
 
     try {
       let added = 0
@@ -1881,15 +1897,31 @@ export function registerFeatureToggles(bot, ensureChat) {
   // 删除操作员
   bot.hears(/^删除操作员\s+(.+)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
-    if (!chat) return
+    if (!chat) {
+      console.error('[删除操作员] chat is null')
+      return ctx.reply('❌ 无法获取群组信息')
+    }
+
+    if (!chat.id) {
+      console.error('[删除操作员] chat.id is null')
+      return ctx.reply('❌ 群组ID无效')
+    }
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以删除操作员。')
     }
 
-    const usernamesText = ctx.match[1].trim()
-    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', ''))
+    const usernamesText = ctx.match[1]?.trim()
+    if (!usernamesText) {
+      return ctx.reply('❌ 请提供要删除的操作员用户名，例如：删除操作员 @user1 @user2')
+    }
+
+    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', '')).filter(u => u.length > 0)
+
+    if (usernames.length === 0) {
+      return ctx.reply('❌ 未找到有效的用户名')
+    }
 
     try {
       let deleted = 0

@@ -111,22 +111,19 @@ export function registerMemberHandlers(bot) {
                         const settings = await prisma.setting.findUnique({
                             where: { chatId },
                             select: {
-                                welcomeMessage: true,
-                                showWelcomeMessage: true
+                                welcomeMessage: true
                             }
                         })
 
                         logger.debug('[chat_member][settings-check]', {
                             chatId,
                             hasSettings: !!settings,
-                            welcomeMessage: settings?.welcomeMessage?.substring(0, 50) + '...',
-                            showWelcomeMessage: settings?.showWelcomeMessage
+                            welcomeMessage: settings?.welcomeMessage?.substring(0, 50) + '...'
                         })
 
-                        // 检查是否启用欢迎消息
-                        if (settings?.showWelcomeMessage === false) {
-                            logger.info('[chat_member][welcome-disabled]', { chatId, userId })
-                            return
+                        // 如果没有设置欢迎消息，则使用默认消息
+                        if (!settings?.welcomeMessage) {
+                            logger.info('[chat_member][using-default-welcome]', { chatId, userId })
                         }
 
                         let welcomeText = settings?.welcomeMessage || '欢迎加入群组！您现在可以使用机器人功能了。'
