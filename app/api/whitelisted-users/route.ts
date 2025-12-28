@@ -20,11 +20,51 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    // 🔥 兜底：如果 username 为 null，使用 userId 占位，避免前端显示为空
-    const users = usersRaw.map((u: any) => ({
-      ...u,
-      username: u.username || (u.userId ? `user_${u.userId}` : 'unknown')
-    }))
+    // 🔥 改进：尝试通过 Telegram API 实时获取用户名，如果失败则使用存储的用户名或友好的显示名
+    const users = []
+    for (const u of usersRaw) {
+      let displayName = u.username
+
+      // 如果没有用户名，尝试实时获取
+      if (!displayName) {
+        try {
+          const bot = await prisma.bot.findFirst({
+            where: { enabled: true },
+            select: { token: true }
+          })
+
+          if (bot?.token) {
+            const response = await fetch(
+              `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${u.userId}`,
+              { signal: AbortSignal.timeout(3000) }
+            )
+            const data = await response.json()
+
+            if (data.ok && data.result) {
+              const user = data.result
+              displayName = user.username ? `@${user.username}` :
+                          (user.first_name || user.last_name) ?
+                          `${user.first_name || ''} ${user.last_name || ''}`.trim() :
+                          `用户${u.userId}`
+
+              // 顺便更新数据库中的用户名
+              await prisma.whitelistedUser.update({
+                where: { userId: u.userId },
+                data: { username: displayName }
+              }).catch(() => {})
+            }
+          }
+        } catch (e) {
+          // API调用失败，使用友好的默认名称
+          displayName = `用户${u.userId}`
+        }
+      }
+
+      users.push({
+        ...u,
+        username: displayName || `用户${u.userId}`
+      })
+    }
     
     return NextResponse.json({ items: users })
   } catch (error) {
@@ -75,11 +115,11 @@ export async function POST(req: NextRequest) {
 
           if (data.ok && data.result) {
             const user = data.result
-            username = user.username ? `@${user.username}` : 
-                      (user.first_name || user.last_name) ? 
+            username = user.username ? `@${user.username}` :
+                      (user.first_name || user.last_name) ?
                       `${user.first_name || ''} ${user.last_name || ''}`.trim() :
-                      null
-            
+                      `用户${userId}`
+
             console.log('[whitelisted-users][telegram-api-success]', { userId, username })
           }
         }

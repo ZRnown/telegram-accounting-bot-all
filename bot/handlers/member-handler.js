@@ -246,11 +246,17 @@ export function registerMemberHandlers(bot) {
                         logger.info('[my_chat_member] ✅ 邀请人是白名单用户，自动授权', { inviter: actionUserId, username: actionUsername })
 
                         // 顺便更新白名单用户的用户名
-                        if (actionUsername && actionUsername !== whitelistedUser.username) {
+                        const newUsername = actionUsername || (actionFullName ? actionFullName : null)
+                        if (newUsername && newUsername !== whitelistedUser.username) {
                             await prisma.whitelistedUser.update({
                                 where: { userId: actionUserId },
-                                data: { username: actionUsername }
+                                data: { username: newUsername }
                             }).catch(() => {})
+                            logger.info('[my_chat_member] ✅ 更新白名单用户显示名', {
+                                userId: actionUserId,
+                                oldName: whitelistedUser.username,
+                                newName: newUsername
+                            })
                         }
                     } else {
                         logger.info('[my_chat_member] ❌ 邀请人不在白名单中', { inviter: actionUserId, username: actionUsername })
