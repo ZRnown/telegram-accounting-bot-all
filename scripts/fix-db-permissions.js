@@ -10,7 +10,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
+const __dirname = path.dirname(__filename)
 
 function getDbPath() {
   // 从环境变量获取数据库路径
@@ -30,6 +30,7 @@ async function fixDatabasePermissions() {
   console.log('🔍 检查数据库权限...')
   console.log(`📍 数据库路径: ${dbPath}`)
   console.log(`📁 数据库目录: ${dbDir}`)
+  console.log(`🔧 环境变量 DATABASE_URL: ${process.env.DATABASE_URL || '未设置'}`)
 
   try {
     // 检查目录是否存在
@@ -88,7 +89,9 @@ async function fixDatabasePermissions() {
   }
 }
 
-// 如果直接运行此脚本
-if (import.meta.url === `file://${process.argv[1]}`) {
-  fixDatabasePermissions()
-}
+// 直接运行脚本
+console.log('🚀 启动数据库权限修复脚本...')
+fixDatabasePermissions().catch((error) => {
+  console.error('❌ 脚本执行失败:', error.message)
+  process.exit(1)
+})
