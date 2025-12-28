@@ -1,7 +1,8 @@
-// 扩展功能处理器：USDT查询、管理员群发
+// 扩展功能处理器：USDT查询、管理员群发、功能开关
 import { prisma } from '../../lib/db.js'
 import { hasPermissionWithWhitelist, buildInlineKb, isAdmin } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
+import { ensureDefaultFeatures } from '../constants.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
 const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
@@ -1706,6 +1707,263 @@ export function registerGroupList(bot) {
     } catch (e) {
       console.error('[分组列表]', e)
       await ctx.reply('❌ 查询分组列表失败')
+    }
+  })
+}
+
+/**
+ * 注册功能开关处理器
+ */
+export function registerFeatureToggles(bot, ensureChat) {
+  // 开启所有功能
+  bot.hears(/^开启所有功能$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      // 启用所有功能
+      await ensureDefaultFeatures(chat.id, prisma, true)
+      await ctx.reply('✅ 已开启所有功能')
+    } catch (e) {
+      console.error('[开启所有功能]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 关闭所有功能
+  bot.hears(/^关闭所有功能$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      // 禁用所有功能
+      await prisma.chatFeatureFlag.updateMany({
+        where: { chatId: chat.id },
+        data: { enabled: false }
+      })
+      await ctx.reply('✅ 已关闭所有功能')
+    } catch (e) {
+      console.error('[关闭所有功能]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 打开计算器
+  bot.hears(/^打开计算器$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      await prisma.setting.update({
+        where: { chatId: chat.id },
+        data: { calculatorEnabled: true }
+      })
+      await ctx.reply('✅ 已打开计算器功能')
+    } catch (e) {
+      console.error('[打开计算器]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 关闭计算器
+  bot.hears(/^关闭计算器$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      await prisma.setting.update({
+        where: { chatId: chat.id },
+        data: { calculatorEnabled: false }
+      })
+      await ctx.reply('✅ 已关闭计算器功能')
+    } catch (e) {
+      console.error('[关闭计算器]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 开启地址验证
+  bot.hears(/^开启地址验证$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      await prisma.setting.update({
+        where: { chatId: chat.id },
+        data: { addressVerificationEnabled: true }
+      })
+      await ctx.reply('✅ 已开启地址验证功能')
+    } catch (e) {
+      console.error('[开启地址验证]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 关闭地址验证
+  bot.hears(/^关闭地址验证$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
+    }
+
+    try {
+      await prisma.setting.update({
+        where: { chatId: chat.id },
+        data: { addressVerificationEnabled: false }
+      })
+      await ctx.reply('✅ 已关闭地址验证功能')
+    } catch (e) {
+      console.error('[关闭地址验证]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 添加操作员
+  bot.hears(/^添加操作员\s+(.+)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以添加操作员。')
+    }
+
+    const usernamesText = ctx.match[1].trim()
+    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', ''))
+
+    try {
+      let added = 0
+      for (const username of usernames) {
+        if (username) {
+          await prisma.operator.upsert({
+            where: { chatId_username: { chatId: chat.id, username } },
+            update: {},
+            create: { chatId: chat.id, username }
+          })
+          added++
+        }
+      }
+      await ctx.reply(`✅ 已添加 ${added} 个操作员`)
+    } catch (e) {
+      console.error('[添加操作员]', e)
+      await ctx.reply('❌ 添加操作员失败，请稍后重试')
+    }
+  })
+
+  // 删除操作员
+  bot.hears(/^删除操作员\s+(.+)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 权限检查：仅管理员可操作
+    if (!isAdmin(ctx)) {
+      return ctx.reply('⚠️ 权限不足。只有管理员可以删除操作员。')
+    }
+
+    const usernamesText = ctx.match[1].trim()
+    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', ''))
+
+    try {
+      let deleted = 0
+      for (const username of usernames) {
+        if (username) {
+          const result = await prisma.operator.deleteMany({
+            where: { chatId: chat.id, username }
+          })
+          deleted += result.count
+        }
+      }
+      await ctx.reply(`✅ 已删除 ${deleted} 个操作员`)
+    } catch (e) {
+      console.error('[删除操作员]', e)
+      await ctx.reply('❌ 删除操作员失败，请稍后重试')
+    }
+  })
+
+  // 查询工时
+  bot.hears(/^查询工时$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    try {
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+
+      // 查询今日营业时长（有记账记录的时段）
+      const todayItems = await prisma.billItem.findMany({
+        where: {
+          bill: {
+            chatId: chat.id,
+            openedAt: {
+              gte: today
+            }
+          }
+        },
+        select: {
+          createdAt: true
+        },
+        orderBy: {
+          createdAt: 'asc'
+        }
+      })
+
+      // 计算今日营业时长
+      let todayHours = 0
+      if (todayItems.length > 0) {
+        const firstRecord = todayItems[0].createdAt
+        const lastRecord = todayItems[todayItems.length - 1].createdAt
+        const duration = lastRecord.getTime() - firstRecord.getTime()
+        todayHours = Math.round(duration / (1000 * 60 * 60) * 10) / 10 // 保留1位小数
+      }
+
+      // 查询本月累计营业天数
+      const monthDays = await prisma.bill.count({
+        where: {
+          chatId: chat.id,
+          openedAt: {
+            gte: thisMonth
+          }
+        }
+      })
+
+      const message = `⏰ *营业时长查询*\n\n` +
+        `📅 今日营业时长：${todayHours} 小时\n` +
+        `📊 本月营业天数：${monthDays} 天\n` +
+        `🎯 平均每日时长：${monthDays > 0 ? Math.round(todayHours * 10) / 10 : 0} 小时`
+
+      await ctx.reply(message, { parse_mode: 'Markdown' })
+    } catch (e) {
+      console.error('[查询工时]', e)
+      await ctx.reply('❌ 查询失败，请稍后重试')
     }
   })
 }

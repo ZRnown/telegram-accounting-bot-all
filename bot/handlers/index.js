@@ -38,7 +38,7 @@ import { registerCustomCommands } from './custom.js'
 import { registerDisplayMode, registerAccountingModes, registerCommissionMode } from './modes.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo, registerListGroups } from './admin.js'
 import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
-import { registerCheckUSDT, registerBroadcast, registerGroupBroadcast, registerBroadcastButtons, registerGroupManagement, registerGroupManagementButtons, registerGroupManagementText, registerGroupList } from './extended.js'
+import { registerCheckUSDT, registerBroadcast, registerGroupBroadcast, registerBroadcastButtons, registerGroupManagement, registerGroupManagementButtons, registerGroupManagementText, registerGroupList, registerFeatureToggles } from './extended.js'
 
 /**
  * 注册所有命令处理器
@@ -118,5 +118,6 @@ export function registerAllHandlers(bot, ensureChat) {
   registerGroupManagementButtons(bot)
   registerGroupManagementText(bot)
   registerGroupList(bot)
+  registerFeatureToggles(bot, ensureChat) // 🔥 功能开关处理器
 }
 
