@@ -37,7 +37,6 @@ import {
   registerAllBill
 } from './bill.js'
 import { registerZ0, registerLZ, registerLW, registerLK, registerZAmountU, registerZAmount } from './okx.js'
-import { registerCustomCommands } from './custom.js'
 import { registerCustomCommandHandlers } from './custom-command-handler.js'
 import { registerDisplayMode, registerAccountingModes, registerCommissionMode } from './modes.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo, registerListGroups } from './admin.js'
@@ -57,7 +56,6 @@ export function registerAllHandlers(bot, ensureChat) {
   registerCommandMenuAction(bot)
   registerViewBill(bot, ensureChat)
   // 自定义指令（文本+图片）
-  registerCustomCommands(bot, ensureChat)
   registerCustomCommandHandlers(bot) // 🔥 自定义指令处理器
   
   // 记账相关

@@ -100,53 +100,6 @@ async function loadCustomCommandsForBot(botId) {
             }
         }
 
-        // 2. 加载群组内设置的自定义指令（向后兼容）
-        const chats = await prisma.chat.findMany({
-            where: { botId },
-            select: { id: true }
-        })
-
-        // 从每个群组加载自定义指令
-        for (const chat of chats) {
-            const chatId = chat.id
-            const indexKey = `customcmd_index:${chatId}`
-            const indexRow = await prisma.globalConfig.findUnique({
-                where: { key: indexKey },
-                select: { value: true }
-            }).catch(() => null)
-
-            if (!indexRow?.value) continue
-
-            let index = []
-            try {
-                index = JSON.parse(indexRow.value) || []
-            } catch { }
-
-            // 为每个触发词加载指令内容
-            for (const trigger of index) {
-                const cmdKey = `customcmd:${chatId}:${trigger}`
-                const cmdRow = await prisma.globalConfig.findUnique({
-                    where: { key: cmdKey },
-                    select: { value: true }
-                }).catch(() => null)
-
-                if (!cmdRow?.value) continue
-
-                try {
-                    const payload = JSON.parse(cmdRow.value)
-                    // 转换为统一格式，确保URL有效
-                    const imageUrl = payload.imageUrl?.trim()
-                    const resolvedImageUrl = imageUrl ? resolveImageUrl(imageUrl) : null
-                    const validImageUrl = resolvedImageUrl && isValidImageUrl(resolvedImageUrl) ? resolvedImageUrl : null
-
-                    map[trigger.toLowerCase()] = {
-                        text: payload.content,
-                        imageUrl: validImageUrl
-                    }
-                } catch { }
-            }
-        }
-
         CUSTOM_CMDS_CACHE.map = map
         CUSTOM_CMDS_CACHE.ts = now
         return map
