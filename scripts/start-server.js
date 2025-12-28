@@ -23,9 +23,8 @@ for (let i = 0; i < args.length; i++) {
 // 设置环境变量
 process.env.PORT = port;
 
-// 启动standalone服务器
-const serverPath = join(__dirname, '..', '.next', 'standalone', 'server.js');
-const child = spawn('node', [serverPath, ...args], {
+// 启动Next.js服务器（普通模式）
+const child = spawn('npx', ['next', 'start', '--port', port, ...args], {
   stdio: 'inherit',
   env: process.env
 });
