@@ -88,6 +88,15 @@ function DashboardPageInner() {
     saving?: boolean
     message?: string
   }>({ open: false })
+
+  // 欢迎消息设置对话框
+  const [welcomeMessageDialog, setWelcomeMessageDialog] = useState<{
+    open: boolean
+    botId?: string
+    loading?: boolean
+    saving?: boolean
+    message?: string
+  }>({ open: false })
   const [groupForm, setGroupForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
   const [groupSaving, setGroupSaving] = useState<Record<string, boolean>>({})
   const [manualAdd, setManualAdd] = useState<{ open: boolean; chatId: string; botId: string; saving?: boolean; error?: string }>({ open: false, chatId: '', botId: '' })
@@ -964,6 +973,26 @@ function DashboardPageInner() {
                             }
                           }}
                         >非白名单提醒</button>
+                        <button
+                          className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+                          onClick={async () => {
+                            setWelcomeMessageDialog({ open: true, botId: bot.id, loading: true, message: '' })
+                            try {
+                              const token = localStorage.getItem('auth_token') || ''
+                              const res = await fetch(`/api/bots/${encodeURIComponent(bot.id)}/welcome-message`, {
+                                headers: { 'x-auth-token': token }
+                              })
+                              if (res.ok) {
+                                const data = await res.json().catch(() => ({}))
+                                setWelcomeMessageDialog(prev => ({ ...prev, loading: false, message: data.message || '' }))
+                              } else {
+                                setWelcomeMessageDialog(prev => ({ ...prev, loading: false }))
+                              }
+                            } catch {
+                              setWelcomeMessageDialog(prev => ({ ...prev, loading: false }))
+                            }
+                          }}
+                        >欢迎消息设置</button>
                       </div>
                       {broadcastDrafts[bot.id]?.open && (
                         <div className="space-y-2 text-sm">
@@ -1983,22 +2012,6 @@ function DashboardPageInner() {
                                           <span>显示授权提示</span>
                                         </label>
                                         <div className="mt-2">
-                                          <label className="block text-sm font-medium mb-1">欢迎消息</label>
-                                          <textarea
-                                            className="w-full px-3 py-2 border rounded-md text-sm"
-                                            placeholder="机器人加入群组后发送的欢迎消息，支持 Markdown 格式"
-                                            rows={2}
-                                            value={quickSettingsCache[it.id]?.welcomeMessage || ''}
-                                            onChange={(e) => {
-                                              const chatId = it.id
-                                              setQuickSettingsCache((c) => ({
-                                                ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '', nonWhitelistWelcomeMessage: '' }), welcomeMessage: e.target.value }
-                                              }))
-                                            }}
-                                          />
-                                        </div>
-                                        <div className="mt-2">
                                           <label className="block text-sm font-medium mb-1">未授权提示消息</label>
                                           <textarea
                                             className="w-full px-3 py-2 border rounded-md text-sm"
@@ -2237,6 +2250,77 @@ function DashboardPageInner() {
               }}
             >
               {nonWhitelistDialog.saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 欢迎消息设置对话框 */}
+      <Dialog open={welcomeMessageDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setWelcomeMessageDialog({ open: false })
+        }
+      }}>
+        <DialogContent className="w-[98vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle>💬 欢迎消息设置</DialogTitle>
+            <DialogDescription>
+              设置机器人加入群组后发送的欢迎消息
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2">欢迎消息内容</label>
+            <textarea
+              className="w-full px-3 py-2 border rounded-md text-sm min-h-[100px]"
+              placeholder="输入欢迎消息内容，支持 Markdown 格式。如果留空则不发送欢迎消息。"
+              value={welcomeMessageDialog.message || ''}
+              onChange={(e) => setWelcomeMessageDialog(prev => ({ ...prev, message: e.target.value }))}
+              disabled={welcomeMessageDialog.loading || welcomeMessageDialog.saving}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              💡 支持 Markdown 格式，可使用表情符号和格式化文本
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-6">
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50"
+              onClick={() => setWelcomeMessageDialog({ open: false })}
+              disabled={welcomeMessageDialog.saving}
+            >
+              取消
+            </button>
+            <button
+              className="px-3 py-1.5 text-sm border rounded-md hover:bg-slate-50 disabled:opacity-50"
+              disabled={welcomeMessageDialog.loading || welcomeMessageDialog.saving}
+              onClick={async () => {
+                if (!welcomeMessageDialog.botId) return
+
+                setWelcomeMessageDialog(prev => ({ ...prev, saving: true }))
+                try {
+                  const token = localStorage.getItem('auth_token') || ''
+                  const res = await fetch(`/api/bots/${encodeURIComponent(welcomeMessageDialog.botId!)}/welcome-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+                    body: JSON.stringify({ message: welcomeMessageDialog.message || null })
+                  })
+
+                  if (!res.ok) {
+                    const msg = await res.text().catch(() => '')
+                    throw new Error(msg || '保存失败')
+                  }
+
+                  toast({ title: '成功', description: '欢迎消息设置已保存' })
+                  setWelcomeMessageDialog({ open: false })
+                } catch (e) {
+                  toast({ title: '错误', description: (e as Error).message || '保存失败', variant: 'destructive' })
+                } finally {
+                  setWelcomeMessageDialog(prev => ({ ...prev, saving: false }))
+                }
+              }}
+            >
+              {welcomeMessageDialog.saving ? '保存中...' : '保存'}
             </button>
           </div>
         </DialogContent>

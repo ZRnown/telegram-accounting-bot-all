@@ -75,8 +75,8 @@ async function loadCustomCommandsForBot(botId) {
         const adminCmdsKey = `customcmds:bot:${botId}`
         const adminCmdsRow = await prisma.globalConfig.findUnique({
             where: { key: adminCmdsKey },
-            select: { value: true }
-        }).catch(() => null)
+                select: { value: true }
+            }).catch(() => null)
 
         if (adminCmdsRow?.value) {
             try {
@@ -84,14 +84,14 @@ async function loadCustomCommandsForBot(botId) {
                 for (const [trigger, payload] of Object.entries(adminCmds)) {
                     if (payload && typeof payload === 'object') {
                         const cmd = payload
-                        // 转换为统一格式，确保URL有效
+                    // 转换为统一格式，确保URL有效
                         const imageUrl = cmd.imageUrl?.trim()
                         const resolvedImageUrl = imageUrl ? resolveImageUrl(imageUrl) : null
                         const validImageUrl = resolvedImageUrl && isValidImageUrl(resolvedImageUrl) ? resolvedImageUrl : null
 
-                        map[trigger.toLowerCase()] = {
+                    map[trigger.toLowerCase()] = {
                             text: cmd.text || '',
-                            imageUrl: validImageUrl
+                        imageUrl: validImageUrl
                         }
                     }
                 }
