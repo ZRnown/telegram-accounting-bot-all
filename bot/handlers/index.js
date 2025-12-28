@@ -28,17 +28,21 @@ import {
   registerShowHistory,
   registerShowIncomeHistory,
   registerShowDispatchHistory,
+  registerUndo,
   registerUndoIncome,
   registerUndoDispatch,
+  registerUserBill,
   registerMyBill,
   registerAllBill
 } from './bill.js'
 import { registerZ0, registerLZ, registerLW, registerLK, registerZAmountU, registerZAmount } from './okx.js'
 import { registerCustomCommands } from './custom.js'
+import { registerCustomCommandHandlers } from './custom-command-handler.js'
 import { registerDisplayMode, registerAccountingModes, registerCommissionMode } from './modes.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo, registerListGroups } from './admin.js'
 import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
 import { registerCheckUSDT, registerBroadcast, registerGroupBroadcast, registerBroadcastButtons, registerGroupManagement, registerGroupManagementButtons, registerGroupManagementText, registerGroupList, registerFeatureToggles } from './extended.js'
+import { registerMessageHandlers } from './message-handler.js'
 
 /**
  * 注册所有命令处理器
@@ -53,6 +57,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerViewBill(bot, ensureChat)
   // 自定义指令（文本+图片）
   registerCustomCommands(bot, ensureChat)
+  registerCustomCommandHandlers(bot) // 🔥 自定义指令处理器
   
   // 记账相关
   registerStartAccounting(bot, ensureChat)
@@ -73,8 +78,10 @@ export function registerAllHandlers(bot, ensureChat) {
   registerShowHistory(bot, ensureChat)
   registerShowIncomeHistory(bot, ensureChat) // 🔥 查看入款历史（最多500条）
   registerShowDispatchHistory(bot, ensureChat) // 🔥 查看下发历史（最多500条）
+  registerUndo(bot, ensureChat) // 🔥 通用撤销功能（回复消息说"撤销"）
   registerUndoIncome(bot, ensureChat)
   registerUndoDispatch(bot, ensureChat)
+  registerUserBill(bot, ensureChat) // 🔥 指定账单：回复消息查看指定人记录
   registerMyBill(bot, ensureChat)
   registerAllBill(bot, ensureChat) // 🔥 全部账单：总
   
@@ -119,5 +126,8 @@ export function registerAllHandlers(bot, ensureChat) {
   registerGroupManagementText(bot)
   registerGroupList(bot)
   registerFeatureToggles(bot, ensureChat) // 🔥 功能开关处理器
+
+  // 消息处理器（地址验证、白名单检测等）
+  registerMessageHandlers(bot)
 }
 

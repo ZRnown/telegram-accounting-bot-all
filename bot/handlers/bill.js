@@ -568,6 +568,94 @@ export function registerUndoIncome(bot, ensureChat) {
 }
 
 /**
+ * 撤销功能（通用）
+ * 🔥 支持回复消息说"撤销"来撤销对应的入款或下发记录
+ */
+export function registerUndo(bot, ensureChat) {
+  bot.hears(/^撤销$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
+    }
+
+    const replyToMessage = ctx.message.reply_to_message
+    if (!replyToMessage || !replyToMessage.message_id) {
+      return ctx.reply('❌ 请回复要撤销的消息')
+    }
+
+    const chatId = await ensureDbChat(ctx, chat)
+
+    // 尝试撤销入款
+    let result = await deleteIncomeByMessageId(chatId, replyToMessage.message_id)
+    let recordType = '入款'
+
+    if (!result) {
+      // 如果不是入款，尝试撤销下发
+      result = await deleteDispatchByMessageId(chatId, replyToMessage.message_id)
+      recordType = '下发'
+    }
+
+    if (!result) {
+      return ctx.reply('❌ 未找到对应的入款或下发记录')
+    }
+
+    // 重新同步内存中的账单数据
+    try {
+      const { bill } = await getOrCreateTodayBill(chatId)
+      if (bill) {
+        // 同步入款记录
+        const incomeItems = await prisma.billItem.findMany({
+          where: { billId: bill.id, type: 'INCOME' },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            amount: true, rate: true, usdt: true, replier: true, operator: true,
+            displayName: true, userId: true, messageId: true, createdAt: true,
+          },
+        })
+        chat.current.incomes = incomeItems.map((i) => ({
+          amount: Number(i.amount || 0),
+          rate: i.rate != null ? Number(i.rate) : undefined,
+          createdAt: new Date(i.createdAt),
+          replier: i.replier || '',
+          operator: i.operator || '',
+          displayName: i.displayName || null,
+          userId: i.userId ? Number(i.userId) : null,
+          messageId: i.messageId || null,
+        }))
+
+        // 同步下发记录
+        const dispatchItems = await prisma.billItem.findMany({
+          where: { billId: bill.id, type: 'DISPATCH' },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            amount: true, usdt: true, replier: true, operator: true,
+            displayName: true, userId: true, messageId: true, createdAt: true,
+          },
+        })
+        chat.current.dispatches = dispatchItems.map((d) => ({
+          amount: Number(d.amount || 0),
+          usdt: d.usdt != null ? Number(d.usdt) : undefined,
+          createdAt: new Date(d.createdAt),
+          replier: d.replier || '',
+          operator: d.operator || '',
+          displayName: d.displayName || null,
+          userId: d.userId ? Number(d.userId) : null,
+          messageId: d.messageId || null,
+        }))
+      }
+      chat._billLastSync = 0
+    } catch (e) {
+      console.error('[撤销][sync-from-db-failed]', e)
+    }
+
+    const amountStr = recordType === '入款' ? result.amount : `${result.usdt}U`
+    await ctx.reply(`✅ 已撤销${recordType}记录：${amountStr}`, { ...(await buildInlineKb(ctx)) })
+  })
+}
+
+/**
  * 撤销下发
  * 🔥 支持回复消息撤销指定记录，如果没有回复则撤销最后一条
  */
@@ -759,6 +847,93 @@ export function registerAllBill(bot, ensureChat) {
     } catch (e) {
       console.error('查询全部账单失败', e)
       await ctx.reply('❌ 查询失败，请稍后重试')
+    }
+  })
+}
+
+/**
+ * 指定账单（回复消息查看指定人的记录）
+ */
+export function registerUserBill(bot, ensureChat) {
+  bot.hears(/^账单$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有记账权限。只有管理员、操作员或白名单用户可以操作。')
+    }
+
+    const replyToMessage = ctx.message.reply_to_message
+    if (!replyToMessage || !replyToMessage.from) {
+      return ctx.reply('❌ 请回复要查看账单的用户消息')
+    }
+
+    const targetUserId = replyToMessage.from.id
+    const targetUsername = replyToMessage.from.username || replyToMessage.from.first_name || '未知用户'
+    const chatId = await ensureDbChat(ctx, chat)
+
+    try {
+      // 获取今天的账单
+      const { bill } = await getOrCreateTodayBill(chatId)
+      if (!bill) {
+        return ctx.reply('❌ 当前没有账单')
+      }
+
+      // 查询指定用户的账单项
+      const items = await prisma.billItem.findMany({
+        where: {
+          billId: bill.id,
+          userId: targetUserId.toString()
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100, // 最多显示100条
+        select: {
+          type: true,
+          amount: true,
+          usdt: true,
+          rate: true,
+          replier: true,
+          displayName: true,
+          messageId: true,
+          createdAt: true,
+        },
+      })
+
+      if (items.length === 0) {
+        return ctx.reply(`❌ 用户 @${targetUsername} 在当前账单中没有记录`)
+      }
+
+      const lines = []
+      lines.push(`📋 @${targetUsername} 的账单记录（共 ${items.length} 条）：\n`)
+
+      let totalIncome = 0
+      let totalDispatch = 0
+
+      items.forEach((item, index) => {
+        const time = new Date(item.createdAt).toLocaleString('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+
+        if (item.type === 'INCOME') {
+          const amount = Number(item.amount || 0)
+          totalIncome += amount
+          lines.push(`${index + 1}. ${time} +${amount}元 ${item.displayName || ''}`)
+        } else if (item.type === 'DISPATCH') {
+          const usdt = Number(item.usdt || 0)
+          totalDispatch += usdt
+          lines.push(`${index + 1}. ${time} 下发 ${usdt}U ${item.displayName || ''}`)
+        }
+      })
+
+      lines.push(`\n📊 汇总：+${totalIncome}元，下发 ${totalDispatch}U`)
+
+      await ctx.reply(lines.join('\n'), { ...(await buildInlineKb(ctx)) })
+    } catch (e) {
+      console.error('查询指定用户账单失败', e)
+      await ctx.reply('❌ 查询账单失败，请稍后重试')
     }
   })
 }

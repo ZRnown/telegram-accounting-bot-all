@@ -3,7 +3,7 @@ import { prisma } from '../../lib/db.js'
 import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
-import { safeCalculate, getChat } from '../state.js'
+import { safeCalculate, getChat, ensureChat } from '../state.js'
 import { syncSettingsToMemory } from '../database.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
@@ -87,9 +87,21 @@ export function registerCheckUSDT(bot, ensureChat) {
           }
 
           if (transactions.length > 0) {
-            // 统计交易次数
+            // 统计所有交易次数（不仅仅是最近10条）
             let outgoingCount = 0
             let incomingCount = 0
+
+            // 先统计所有交易的类型
+            transactions.forEach(tx => {
+              let from = tx.ownerAddress || tx.contractData?.owner_address || ''
+              let to = tx.toAddress || tx.contractData?.to_address || ''
+              const isIncoming = to === address
+              if (isIncoming) {
+                incomingCount++
+              } else {
+                outgoingCount++
+              }
+            })
 
             recentTransactions = transactions.slice(0, 10).map(tx => {
               // 处理 TronScan API 返回的数据结构
@@ -99,23 +111,22 @@ export function registerCheckUSDT(bot, ensureChat) {
               let timestamp = tx.timestamp
               let txID = tx.hash || tx.txID || tx.id || ''
 
-              // 获取交易金额
-              if (tx.contractData?.amount) {
-                // TRX 交易，金额需要除以 1000000
-                amount = Number(tx.contractData.amount) / 1000000
+              // 获取交易金额 - 修复 USDT 转账金额解析
+              if (tx.contractData) {
+                // TRC20 代币转账（包括 USDT）
+                if (tx.contractData.amount) {
+                  amount = Number(tx.contractData.amount) / Math.pow(10, tx.contractData.decimals || 6)
+                }
               } else if (tx.amount) {
-                // 备用金额字段
+                // TRX 原生转账
                 amount = Number(tx.amount) / 1000000
+              } else if (tx.value) {
+                // 备用字段
+                amount = Number(tx.value) / 1000000
               }
 
               // 判断是转入还是转出
               const isIncoming = to === address
-              if (isIncoming) {
-                incomingCount++
-              } else {
-                outgoingCount++
-              }
-
               const direction = isIncoming ? '入' : '出'
 
               return {
@@ -240,9 +251,11 @@ export function registerBroadcast(bot) {
   bot.hears(/^全员广播$/, async (ctx) => {
     const userId = String(ctx.from?.id || '')
 
-    // 🔥 严格校验是否为超级管理员
-    if (!(await isAdmin(ctx))) {
-      return
+    // 🔥 只允许管理员和白名单用户使用群发功能
+    const chat = getChat(botId, String(ctx.chat?.id || ''))
+    const hasPermission = await isAdmin(ctx) || (chat ? await hasPermissionWithWhitelist(ctx, chat) : false)
+    if (!hasPermission) {
+      return ctx.reply('⚠️ 权限不足。只有管理员或白名单用户可以使用群发功能。')
     }
 
     // 设置广播状态
@@ -504,9 +517,11 @@ export function registerGroupManagement(bot) {
   bot.hears(/^分组管理$/i, async (ctx) => {
     const userId = String(ctx.from?.id || '')
 
-    // 🔥 只有超级管理员能管理分组
-    if (!(await isAdmin(ctx))) {
-      return ctx.reply('❌ 权限不足')
+    // 🔥 只有管理员或操作员能管理分组
+    const chat = ensureChat(ctx)
+    const hasPermission = await isAdmin(ctx) || (chat ? await hasOperatorPermission(ctx, chat) : false)
+    if (!hasPermission) {
+      return ctx.reply('❌ 权限不足，只有管理员或操作员可以使用分组管理功能')
     }
 
     try {
@@ -2060,7 +2075,8 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx)
+      const chat = getChat(botId, chatId)
+      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx, chat)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
         return
@@ -2107,7 +2123,8 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx)
+      const chat = getChat(botId, chatId)
+      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx, chat)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
         return

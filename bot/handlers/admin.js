@@ -53,14 +53,15 @@ export function registerBotLeave(bot) {
  */
 export function registerListGroups(bot) {
   bot.hears(/^群列表$/i, async (ctx) => {
-    // 仅在私聊或群内管理员/白名单可用
+    // 仅在私聊或群内管理员/操作员可用
     try {
       const isPrivate = ctx.chat?.type === 'private'
       if (!isPrivate) {
         // 在群聊中，要求有权限
         const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
-        if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-          return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
+        const hasPermission = await isAdmin(ctx) || (chat ? await hasOperatorPermission(ctx, chat) : false)
+        if (!hasPermission) {
+          return ctx.reply('⚠️ 您没有权限。只有管理员或操作员可以执行此操作。')
         }
       }
 
@@ -233,7 +234,7 @@ export function registerAdminInfo(bot) {
       if (setting?.everyoneAllowed) {
         text += `【✅ 权限设置】\n• 所有人可操作\n\n`
       } else if (otherOperators.length > 0) {
-        text += `【👤 操作员】\n${otherOperators.map(op => `• ${op}`).join('\n')}\n\n`
+        text += `【👤 操作员】\n${otherOperators.map(op => `• @${op}`).join('\n')}\n\n`
       } else {
         text += `【👤 操作员】\n• 仅管理员可操作\n\n`
       }
