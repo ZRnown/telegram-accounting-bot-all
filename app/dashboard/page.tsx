@@ -672,9 +672,31 @@ function DashboardPageInner() {
                           <td className="py-3 px-4 text-slate-600">
                             {new Date(user.createdAt).toLocaleString('zh-CN')}
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3 px-4 text-right space-x-2">
                             <button
-                              className="px-3 py-1 text-xs border rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+                              className="px-2 py-1 text-xs border rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch('/api/whitelisted-users', {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId: user.userId })
+                                  })
+                                  if (res.ok) {
+                                    await loadWhitelistedUsers()
+                                    toast({ title: '成功', description: '用户名已刷新' })
+                                  } else {
+                                    toast({ title: '错误', description: '刷新失败', variant: 'destructive' })
+                                  }
+                                } catch (e) {
+                                  toast({ title: '错误', description: '刷新失败', variant: 'destructive' })
+                                }
+                              }}
+                            >
+                              刷新
+                            </button>
+                            <button
+                              className="px-2 py-1 text-xs border rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600"
                               onClick={() => removeWhitelistedUser(user.userId)}
                             >
                               删除

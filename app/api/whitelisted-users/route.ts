@@ -2,6 +2,44 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { assertAdmin, rateLimit } from '@/app/api/_auth'
 
+// 刷新单个用户的显示名
+async function refreshUserDisplayName(userId: string) {
+  try {
+    const bot = await prisma.bot.findFirst({
+      where: { enabled: true },
+      select: { token: true }
+    })
+
+    if (!bot?.token) return null
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${userId}`,
+      { signal: AbortSignal.timeout(3000) }
+    )
+    const data = await response.json()
+
+    if (data.ok && data.result) {
+      const user = data.result
+      const displayName = user.username ? `@${user.username}` :
+                        (user.first_name || user.last_name) ?
+                        `${user.first_name || ''} ${user.last_name || ''}`.trim() :
+                        `用户${userId}`
+
+      // 更新数据库
+      await prisma.whitelistedUser.update({
+        where: { userId },
+        data: { username: displayName }
+      }).catch(() => {})
+
+      return displayName
+    }
+  } catch (e) {
+    console.log('[refreshUserDisplayName] 失败:', e.message)
+  }
+
+  return null
+}
+
 // GET: 获取白名单用户列表
 export async function GET(req: NextRequest) {
   try {
@@ -20,49 +58,63 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    // 🔥 改进：尝试通过 Telegram API 实时获取用户名，如果失败则使用存储的用户名或友好的显示名
+    // 🔥 改进：总是尝试通过 Telegram API 获取最新的用户名，优先使用API结果
     const users = []
     for (const u of usersRaw) {
       let displayName = u.username
 
-      // 如果没有用户名，尝试实时获取
-      if (!displayName) {
-        try {
-          const bot = await prisma.bot.findFirst({
-            where: { enabled: true },
-            select: { token: true }
-          })
+      // 总是尝试获取最新的用户信息（即使数据库中有用户名）
+      try {
+        const bot = await prisma.bot.findFirst({
+          where: { enabled: true },
+          select: { token: true }
+        })
 
-          if (bot?.token) {
-            const response = await fetch(
-              `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${u.userId}`,
-              { signal: AbortSignal.timeout(3000) }
-            )
-            const data = await response.json()
+        if (bot?.token) {
+          const response = await fetch(
+            `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${u.userId}`,
+            { signal: AbortSignal.timeout(3000) }
+          )
+          const data = await response.json()
 
-            if (data.ok && data.result) {
-              const user = data.result
-              displayName = user.username ? `@${user.username}` :
-                          (user.first_name || user.last_name) ?
-                          `${user.first_name || ''} ${user.last_name || ''}`.trim() :
-                          `用户${u.userId}`
+          if (data.ok && data.result) {
+            const user = data.result
+            const apiDisplayName = user.username ? `@${user.username}` :
+                                (user.first_name || user.last_name) ?
+                                `${user.first_name || ''} ${user.last_name || ''}`.trim() :
+                                null
 
-              // 顺便更新数据库中的用户名
-              await prisma.whitelistedUser.update({
-                where: { userId: u.userId },
-                data: { username: displayName }
-              }).catch(() => {})
+            if (apiDisplayName) {
+              displayName = apiDisplayName
+
+              // 更新数据库中的用户名
+              if (displayName !== u.username) {
+                await prisma.whitelistedUser.update({
+                  where: { userId: u.userId },
+                  data: { username: displayName }
+                }).catch((e) => {
+                  console.log('[whitelisted-users] 更新用户名失败:', e.message)
+                })
+              }
             }
           }
-        } catch (e) {
-          // API调用失败，使用友好的默认名称
+        }
+      } catch (e) {
+        console.log('[whitelisted-users] 获取用户名失败:', e.message)
+        // API调用失败时，如果数据库中有用户名就使用数据库的，否则使用友好的默认名称
+        if (!displayName || displayName.startsWith('user_') || displayName.startsWith('用户')) {
           displayName = `用户${u.userId}`
         }
       }
 
+      // 最后的兜底
+      if (!displayName || displayName.startsWith('user_')) {
+        displayName = `用户${u.userId}`
+      }
+
       users.push({
         ...u,
-        username: displayName || `用户${u.userId}`
+        username: displayName
       })
     }
     
@@ -115,11 +167,11 @@ export async function POST(req: NextRequest) {
 
           if (data.ok && data.result) {
             const user = data.result
-            username = user.username ? `@${user.username}` :
-                      (user.first_name || user.last_name) ?
+            username = user.username ? `@${user.username}` : 
+                      (user.first_name || user.last_name) ? 
                       `${user.first_name || ''} ${user.last_name || ''}`.trim() :
                       `用户${userId}`
-
+            
             console.log('[whitelisted-users][telegram-api-success]', { userId, username })
           }
         }
@@ -173,6 +225,35 @@ export async function DELETE(req: NextRequest) {
   } catch (error) {
     console.error('[whitelisted-users][DELETE]', error)
     return NextResponse.json({ error: 'Failed to delete whitelisted user' }, { status: 500 })
+  }
+}
+
+// PATCH: 刷新用户显示名
+export async function PATCH(req: NextRequest) {
+  try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
+    const body = await req.json()
+    const { userId } = body
+
+    if (!userId) {
+      return NextResponse.json({ error: 'userId is required' }, { status: 400 })
+    }
+
+    const newDisplayName = await refreshUserDisplayName(userId)
+
+    if (newDisplayName) {
+      return NextResponse.json({
+        success: true,
+        username: newDisplayName
+      })
+    } else {
+      return NextResponse.json({ error: 'Failed to refresh username' }, { status: 500 })
+    }
+  } catch (error) {
+    console.error('[whitelisted-users][PATCH]', error)
+    return NextResponse.json({ error: 'Failed to refresh username' }, { status: 500 })
   }
 }
 
