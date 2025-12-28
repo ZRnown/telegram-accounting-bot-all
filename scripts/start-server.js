@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
-const { spawn } = require('child_process');
-const path = require('path');
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // 解析命令行参数
 const args = process.argv.slice(2);
@@ -20,7 +24,7 @@ for (let i = 0; i < args.length; i++) {
 process.env.PORT = port;
 
 // 启动standalone服务器
-const serverPath = path.join(__dirname, '..', '.next', 'standalone', 'server.js');
+const serverPath = join(__dirname, '..', '.next', 'standalone', 'server.js');
 const child = spawn('node', [serverPath, ...args], {
   stdio: 'inherit',
   env: process.env
