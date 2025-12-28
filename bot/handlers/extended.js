@@ -3,6 +3,7 @@ import { prisma } from '../../lib/db.js'
 import { hasPermissionWithWhitelist, buildInlineKb, isAdmin } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
+import { safeCalculate } from '../state.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
 const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
@@ -1804,8 +1805,12 @@ export function registerFeatureToggles(bot, ensureChat) {
 
   // 开启地址验证
   bot.hears(/^开启地址验证$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) return
+    // 首先检查是否是群组消息
+    if (!ctx.chat || ctx.chat.type === 'private') {
+      return ctx.reply('❌ 此命令只能在群组中使用')
+    }
+
+    const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
@@ -1813,9 +1818,16 @@ export function registerFeatureToggles(bot, ensureChat) {
     }
 
     try {
-      await prisma.setting.update({
-        where: { chatId: chat.id },
-        data: { addressVerificationEnabled: true }
+      // 确保设置记录存在
+      await prisma.setting.upsert({
+        where: { chatId },
+        update: { addressVerificationEnabled: true },
+        create: {
+          chatId,
+          addressVerificationEnabled: true,
+          accountingEnabled: true,
+          calculatorEnabled: true
+        }
       })
       await ctx.reply('✅ 已开启地址验证功能')
     } catch (e) {
@@ -1826,8 +1838,12 @@ export function registerFeatureToggles(bot, ensureChat) {
 
   // 关闭地址验证
   bot.hears(/^关闭地址验证$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) return
+    // 首先检查是否是群组消息
+    if (!ctx.chat || ctx.chat.type === 'private') {
+      return ctx.reply('❌ 此命令只能在群组中使用')
+    }
+
+    const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
@@ -1835,9 +1851,15 @@ export function registerFeatureToggles(bot, ensureChat) {
     }
 
     try {
-      await prisma.setting.update({
-        where: { chatId: chat.id },
-        data: { addressVerificationEnabled: false }
+      await prisma.setting.upsert({
+        where: { chatId },
+        update: { addressVerificationEnabled: false },
+        create: {
+          chatId,
+          addressVerificationEnabled: false,
+          accountingEnabled: true,
+          calculatorEnabled: true
+        }
       })
       await ctx.reply('✅ 已关闭地址验证功能')
     } catch (e) {
@@ -1848,16 +1870,12 @@ export function registerFeatureToggles(bot, ensureChat) {
 
   // 添加操作员
   bot.hears(/^添加操作员\s+(.+)$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) {
-      console.error('[添加操作员] chat is null')
-      return ctx.reply('❌ 无法获取群组信息')
+    // 首先检查是否是群组消息
+    if (!ctx.chat || ctx.chat.type === 'private') {
+      return ctx.reply('❌ 此命令只能在群组中使用')
     }
 
-    if (!chat.id) {
-      console.error('[添加操作员] chat.id is null')
-      return ctx.reply('❌ 群组ID无效')
-    }
+    const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
@@ -1876,13 +1894,24 @@ export function registerFeatureToggles(bot, ensureChat) {
     }
 
     try {
+      // 确保群组记录存在
+      await prisma.chat.upsert({
+        where: { id: chatId },
+        update: {},
+        create: {
+          id: chatId,
+          title: ctx.chat.title || 'Unknown Group',
+          botId: await ensureCurrentBotId(bot)
+        }
+      })
+
       let added = 0
       for (const username of usernames) {
         if (username) {
           await prisma.operator.upsert({
-            where: { chatId_username: { chatId: chat.id, username } },
+            where: { chatId_username: { chatId, username } },
             update: {},
-            create: { chatId: chat.id, username }
+            create: { chatId, username }
           })
           added++
         }
@@ -1896,16 +1925,12 @@ export function registerFeatureToggles(bot, ensureChat) {
 
   // 删除操作员
   bot.hears(/^删除操作员\s+(.+)$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) {
-      console.error('[删除操作员] chat is null')
-      return ctx.reply('❌ 无法获取群组信息')
+    // 首先检查是否是群组消息
+    if (!ctx.chat || ctx.chat.type === 'private') {
+      return ctx.reply('❌ 此命令只能在群组中使用')
     }
 
-    if (!chat.id) {
-      console.error('[删除操作员] chat.id is null')
-      return ctx.reply('❌ 群组ID无效')
-    }
+    const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
     if (!isAdmin(ctx)) {
@@ -1928,7 +1953,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       for (const username of usernames) {
         if (username) {
           const result = await prisma.operator.deleteMany({
-            where: { chatId: chat.id, username }
+            where: { chatId, username }
           })
           deleted += result.count
         }
@@ -1942,8 +1967,11 @@ export function registerFeatureToggles(bot, ensureChat) {
 
   // 查询工时
   bot.hears(/^查询工时$/i, async (ctx) => {
-    const chat = ensureChat(ctx)
-    if (!chat) return
+    // 可以是私聊或群聊
+    const chatId = ctx.chat?.id ? String(ctx.chat.id) : null
+    if (!chatId) {
+      return ctx.reply('❌ 无法获取聊天信息')
+    }
 
     try {
       const now = new Date()
@@ -1954,7 +1982,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       const todayItems = await prisma.billItem.findMany({
         where: {
           bill: {
-            chatId: chat.id,
+            chatId,
             openedAt: {
               gte: today
             }
@@ -1980,7 +2008,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       // 查询本月累计营业天数
       const monthDays = await prisma.bill.count({
         where: {
-          chatId: chat.id,
+          chatId,
           openedAt: {
             gte: thisMonth
           }
@@ -1996,6 +2024,42 @@ export function registerFeatureToggles(bot, ensureChat) {
     } catch (e) {
       console.error('[查询工时]', e)
       await ctx.reply('❌ 查询失败，请稍后重试')
+    }
+  })
+
+  // 独立计算器功能
+  bot.hears(/^(\d+(?:\.\d+)?[\+\-\*\/\^]\d+(?:\.\d+)?(?:[\+\-\*\/\^]\d+(?:\.\d+)?)*)$/i, async (ctx) => {
+    const expression = ctx.match[1]?.trim()
+    if (!expression) return
+
+    // 检查计算器是否启用（如果是群聊）
+    if (ctx.chat && ctx.chat.type !== 'private') {
+      const chatId = String(ctx.chat.id)
+      try {
+        const setting = await prisma.setting.findUnique({
+          where: { chatId },
+          select: { calculatorEnabled: true }
+        })
+        if (setting && setting.calculatorEnabled === false) {
+          // 计算器已关闭，不响应
+          return
+        }
+      } catch (e) {
+        // 忽略数据库错误，默认允许计算
+      }
+    }
+
+    try {
+      // 使用safeCalculate函数计算结果
+      const result = safeCalculate(expression)
+      if (result !== null && Number.isFinite(result)) {
+        // 格式化结果，避免过长的显示
+        const formattedResult = Number.isInteger(result) ? result : result.toFixed(2)
+        await ctx.reply(`🧮 \`${expression} = ${formattedResult}\``)
+      }
+    } catch (e) {
+      // 计算失败，静默忽略
+      console.log('[计算器] 计算失败:', expression, e.message)
     }
   })
 }

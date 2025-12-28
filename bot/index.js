@@ -529,49 +529,6 @@ registerAllHandlers(bot, ensureChat)
 // 🔥 使用模块化的权限检查中间件（减少代码，提升性能）
 bot.use(createPermissionMiddleware())
 
-// 设置群全体禁言/解除禁言（不影响管理员）。禁言时为操作员名单单独放行发言。
-// ⚠️ 注意：此功能需要机器人拥有管理员权限（限制成员权限）
-async function setChatMute(ctx, enable) {
-  const chatId = ctx.chat.id
-  if (enable) {
-    // 全体禁言（默认权限全部关闭）
-    await ctx.telegram.setChatPermissions(chatId, {
-      can_send_messages: false,
-      can_send_media_messages: false,
-      can_send_polls: false,
-      can_send_other_messages: false,
-      can_add_web_page_previews: false,
-      can_change_info: false,
-      can_invite_users: false,
-      can_pin_messages: false,
-    })
-    // 放行操作员（非管理员）
-    const chat = ensureChat(ctx)
-    if (chat && chat.operatorIds.size > 0) {
-      for (const uid of chat.operatorIds) {
-        try {
-          await ctx.telegram.restrictChatMember(chatId, uid, {
-            can_send_messages: true,
-            can_send_media_messages: true,
-            can_send_polls: true,
-            can_send_other_messages: true,
-            can_add_web_page_previews: true,
-          })
-        } catch {}
-      }
-    }
-  } else {
-    // 恢复默认允许发言
-    await ctx.telegram.setChatPermissions(chatId, {
-      can_send_messages: true,
-      can_send_media_messages: true,
-      can_send_polls: true,
-      can_send_other_messages: true,
-      can_add_web_page_previews: true,
-      can_invite_users: true,
-    })
-  }
-}
 
 // 全局错误捕获：被群踢出等错误时避免进程退出
 bot.catch(async (err, ctx) => {

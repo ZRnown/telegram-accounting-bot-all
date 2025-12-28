@@ -8,7 +8,6 @@
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start",
-    "bot": "node bot/index.js",
     "bot:multi": "node bot/manager.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
