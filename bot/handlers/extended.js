@@ -4,6 +4,7 @@ import { hasPermissionWithWhitelist, buildInlineKb, isAdmin } from '../helpers.j
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
 import { safeCalculate } from '../state.js'
+import { syncSettingsToMemory } from '../database.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
 const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
@@ -1916,6 +1917,16 @@ export function registerFeatureToggles(bot, ensureChat) {
           added++
         }
       }
+
+      // 更新内存中的操作员列表
+      const chat = await prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { id: true, title: true }
+      })
+      if (chat) {
+        await syncSettingsToMemory(ctx, { id: chatId, title: chat.title }, chatId, true)
+      }
+
       await ctx.reply(`✅ 已添加 ${added} 个操作员`)
     } catch (e) {
       console.error('[添加操作员]', e)
@@ -1958,6 +1969,16 @@ export function registerFeatureToggles(bot, ensureChat) {
           deleted += result.count
         }
       }
+
+      // 更新内存中的操作员列表
+      const chat = await prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { id: true, title: true }
+      })
+      if (chat) {
+        await syncSettingsToMemory(ctx, { id: chatId, title: chat.title }, chatId, true)
+      }
+
       await ctx.reply(`✅ 已删除 ${deleted} 个操作员`)
     } catch (e) {
       console.error('[删除操作员]', e)
