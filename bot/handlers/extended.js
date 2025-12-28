@@ -2100,7 +2100,6 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 更新内存状态
-      const chat = getChat(botId, chatId)
       chat.muteMode = false
       syncSettingsToMemory(ctx, chat, chatId)
 
@@ -2148,7 +2147,6 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 更新内存状态
-      const chat = getChat(botId, chatId)
       chat.muteMode = true
       syncSettingsToMemory(ctx, chat, chatId)
 
