@@ -1,6 +1,6 @@
 // 扩展功能处理器：USDT查询、管理员群发、功能开关
 import { prisma } from '../../lib/db.js'
-import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasAdminPermission, hasOperatorPermission } from '../helpers.js'
+import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
 import { safeCalculate, getChat } from '../state.js'
@@ -2060,7 +2060,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const hasPermission = await hasAdminPermission(ctx) || await hasOperatorPermission(ctx)
+      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
         return
@@ -2107,7 +2107,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const hasPermission = await hasAdminPermission(ctx) || await hasOperatorPermission(ctx)
+      const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
         return
