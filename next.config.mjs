@@ -6,8 +6,8 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
   poweredByHeader: false, // 隐藏X-Powered-By头
 
-  // 🔥 安全增强：输出独立构建，优化安全
-  output: 'standalone',
+  // 🔥 切换到普通部署模式（非standalone）
+  // output: 'standalone',
 
   // 🔥 明确配置 Turbopack（解决兼容性问题）
   turbopack: {},
