@@ -3,7 +3,8 @@ import { prisma } from '../../lib/db.js'
 import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
-import { safeCalculate, getChat, ensureChat } from '../state.js'
+import { safeCalculate, getChat } from '../state.js'
+import { ensureChat } from '../bot-identity.js'
 import { syncSettingsToMemory } from '../database.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
