@@ -190,6 +190,14 @@ export function registerMemberHandlers(bot) {
             const actionUsername = from?.username ? `@${from.username}` : null
             const actionFullName = `${from?.first_name || ''} ${from?.last_name || ''}`.trim()
 
+            logger.info('[my_chat_member] 触发者信息', {
+                actionUserId,
+                actionUsername,
+                actionFullName,
+                hasMyChatMemberFrom: !!ctx.myChatMember?.from,
+                hasCtxFrom: !!ctx.from
+            })
+
             logger.info('[my_chat_member]', {
                 chatId,
                 title,
@@ -203,12 +211,24 @@ export function registerMemberHandlers(bot) {
                 const isNewJoin = !oldStatus || oldStatus === 'left' || oldStatus === 'kicked'
 
                 if (!isNewJoin) {
-                    // 仅更新标题和绑定关系
-                    await prisma.chat.update({
+                    // 检查是否需要重新初始化（比如之前被禁用了）
+                    const existingChat = await prisma.chat.findUnique({
                         where: { id: chatId },
-                        data: { title, botId }
-                    }).catch(() => {})
-                    return
+                        select: { allowed: true, status: true }
+                    })
+
+                    // 如果群组之前被禁用，现在重新启用，需要重新初始化
+                    if (existingChat && (!existingChat.allowed || existingChat.status === 'BLOCKED')) {
+                        logger.info('[my_chat_member] 检测到群组重新启用，开始重新初始化', { chatId })
+                        // 这里会继续执行下面的新加入逻辑
+                    } else {
+                        // 仅更新标题和绑定关系
+                        await prisma.chat.update({
+                            where: { id: chatId },
+                            data: { title, botId }
+                        }).catch(() => {})
+                        return
+                    }
                 }
 
                 logger.info('[my_chat_member] 机器人新加入群组，开始权限检查', { chatId })
@@ -223,7 +243,7 @@ export function registerMemberHandlers(bot) {
 
                     if (whitelistedUser) {
                         autoAllowed = true
-                        logger.info('[my_chat_member] ✅ 邀请人是白名单用户，自动授权', { inviter: actionUserId })
+                        logger.info('[my_chat_member] ✅ 邀请人是白名单用户，自动授权', { inviter: actionUserId, username: actionUsername })
 
                         // 顺便更新白名单用户的用户名
                         if (actionUsername && actionUsername !== whitelistedUser.username) {
@@ -232,7 +252,11 @@ export function registerMemberHandlers(bot) {
                                 data: { username: actionUsername }
                             }).catch(() => {})
                         }
+                    } else {
+                        logger.info('[my_chat_member] ❌ 邀请人不在白名单中', { inviter: actionUserId, username: actionUsername })
                     }
+                } else {
+                    logger.warn('[my_chat_member] ⚠️ 无法获取邀请人信息', { chatId, title })
                 }
 
                 // 2. 更新或创建群组记录
