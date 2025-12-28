@@ -18,7 +18,8 @@ import {
   registerShowCurrency,
   registerSetDailyCutoff,
   registerOverDepositLimit,
-  registerCalculatorToggle
+  registerCalculatorToggle,
+  registerSetHeader
 } from './settings.js'
 import {
   registerShowBill,
@@ -94,6 +95,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerSetCurrency(bot, ensureChat)
   registerShowCurrency(bot, ensureChat)
   registerSetDailyCutoff(bot, ensureChat)
+  registerSetHeader(bot, ensureChat)
   // registerGlobalCutoff - 已删除，改为后台设置
   registerOverDepositLimit(bot, ensureChat)
   registerCalculatorToggle(bot, ensureChat)

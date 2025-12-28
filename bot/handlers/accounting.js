@@ -898,6 +898,7 @@ export function registerDispatch(bot, ensureChat) {
       operator: operatorUsername || replierUsername,
       displayName,
       userId,
+      messageId: ctx.message.message_id,
     })
 
     try {
@@ -913,6 +914,7 @@ export function registerDispatch(bot, ensureChat) {
           operator: operatorUsername || replierUsername || null,
           displayName: displayName || null, // 🔥 保存用户昵称
           userId: userId ? String(userId) : null, // 🔥 保存用户ID
+          messageId: ctx.message.message_id, // 🔥 保存消息ID用于撤销
           createdAt: new Date(),
         }
       })

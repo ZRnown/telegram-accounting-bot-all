@@ -26,6 +26,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         showAuthPrompt: setting?.showAuthPrompt ?? true, // 🔥 显示授权提示开关
         welcomeMessage: setting?.welcomeMessage ?? '', // 🔥 拉群欢迎消息
         authPromptMessage: setting?.authPromptMessage ?? '', // 🔥 未授权提示消息
+        nonWhitelistWelcomeMessage: setting?.nonWhitelistWelcomeMessage ?? '', // 🔥 非白名单欢迎消息
       },
     })
   } catch (e) {
@@ -54,6 +55,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       showAuthPrompt?: boolean // 🔥 显示授权提示开关
       welcomeMessage?: string | null // 🔥 拉群欢迎消息
       authPromptMessage?: string | null // 🔥 未授权提示消息
+      nonWhitelistWelcomeMessage?: string | null // 🔥 非白名单欢迎消息
     }
 
     // Update Chat.title if provided
@@ -90,6 +92,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.showAuthPrompt === 'boolean') patchData.showAuthPrompt = body.showAuthPrompt // 🔥 显示授权提示开关
     if (body.welcomeMessage !== undefined) patchData.welcomeMessage = body.welcomeMessage // 🔥 拉群欢迎消息
     if (body.authPromptMessage !== undefined) patchData.authPromptMessage = body.authPromptMessage // 🔥 未授权提示消息
+    if (body.nonWhitelistWelcomeMessage !== undefined) patchData.nonWhitelistWelcomeMessage = body.nonWhitelistWelcomeMessage // 🔥 非白名单欢迎消息
 
     // 🔥 优化：只要有传入任何设置字段就允许保存（即使值为默认值）
     // 如果patchData为空但传入了设置字段，仍然允许保存（可能是保存默认值）
@@ -105,6 +108,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       'showAuthPrompt',
       'welcomeMessage',
       'authPromptMessage',
+      'nonWhitelistWelcomeMessage',
       'feePercent',
       'fixedRate',
       'realtimeRate',

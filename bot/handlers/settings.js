@@ -5,6 +5,28 @@ import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, getEffectiveRate, f
 import { formatMoney } from '../utils.js'
 
 /**
+ * 设置标题
+ */
+export function registerSetHeader(bot, ensureChat) {
+  bot.hears(/^设置标题\s+(.+)$/i, async (ctx) => {
+    const chat = ensureChat(ctx)
+    if (!chat) return
+
+    // 🔥 优化：使用统一的权限检查函数
+    if (!(await hasPermissionWithWhitelist(ctx, chat))) {
+      return ctx.reply('⚠️ 您没有权限。只有管理员、操作人或白名单用户可以操作。')
+    }
+
+    const chatId = await ensureDbChat(ctx, chat)
+    const title = ctx.match[1]?.trim()
+    if (!title) return ctx.reply('⚠️ 请输入标题内容。')
+
+    await updateSettings(chatId, { headerText: title })
+    await ctx.reply(`✅ 标题已设置为：${title}`, { ...(await buildInlineKb(ctx)) })
+  })
+}
+
+/**
  * 设置费率
  */
 export function registerSetFee(bot, ensureChat) {

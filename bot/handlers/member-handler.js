@@ -287,7 +287,14 @@ export function registerMemberHandlers(bot) {
 
                     // B. 发送欢迎语
                     const welcomeMsg = await getWelcomeMessage(botId)
-                    const msgToSend = welcomeMsg || (
+                    // 获取自定义的白名单欢迎消息
+                    const settings = await prisma.setting.findUnique({
+                        where: { chatId },
+                        select: { welcomeMessage: true }
+                    })
+
+                    const customWelcomeMsg = settings?.welcomeMessage?.trim()
+                    const msgToSend = customWelcomeMsg || welcomeMsg || (
                         `✅ *机器人已激活*\n\n` +
                         `感谢白名单用户 ${actionUsername || actionFullName} 的邀请。\n` +
                         `本群已自动授权，功能已全部开启，您可以直接开始记账。\n\n` +
@@ -302,14 +309,30 @@ export function registerMemberHandlers(bot) {
                     }
 
                 } else {
-                    // 非白名单用户邀请，提示需审核
-                    await ctx.reply(
-                        `🤖 *机器人已入群*\n\n` +
-                        `⚠️ 本群尚未授权。\n` +
-                        `邀请人：${actionUsername || actionFullName} (ID: ${actionUserId})\n\n` +
-                        `请联系管理员在后台通过审核，或由白名单用户邀请。`,
-                        { parse_mode: 'Markdown' }
-                    )
+                    // 非白名单用户邀请，发送自定义欢迎消息或默认提示
+                    const settings = await prisma.setting.findUnique({
+                        where: { chatId },
+                        select: { nonWhitelistWelcomeMessage: true, showAuthPrompt: true }
+                    })
+
+                    const customMsg = settings?.nonWhitelistWelcomeMessage?.trim()
+                    if (customMsg && settings?.showAuthPrompt !== false) {
+                        // 使用自定义的非白名单欢迎消息
+                        try {
+                            await ctx.reply(customMsg, { parse_mode: 'Markdown' })
+                        } catch (e) {
+                            // Markdown 失败回退到纯文本
+                            await ctx.reply(customMsg).catch(() => {})
+                        }
+                    } else if (settings?.showAuthPrompt !== false) {
+                        // 使用默认提示消息
+                        await ctx.reply(
+                            `🤖 *机器人已入群*\n\n` +
+                            `⚠️ 本群尚未授权。\n` +
+                            `邀请人：${actionUsername || actionFullName} (ID: ${actionUserId})\n\n` +
+                            `请联系管理员在后台通过审核，或由白名单用户邀请。`,
+                            { parse_mode: 'Markdown' }
+                        )
                     }
                 }
 

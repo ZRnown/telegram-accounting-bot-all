@@ -1964,7 +1964,7 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '' }), welcomeMessage: e.target.value }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '', nonWhitelistWelcomeMessage: '' }), welcomeMessage: e.target.value }
                                               }))
                                             }}
                                           />
@@ -1980,7 +1980,23 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '' }), authPromptMessage: e.target.value }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '', nonWhitelistWelcomeMessage: '' }), authPromptMessage: e.target.value }
+                                              }))
+                                            }}
+                                          />
+                                        </div>
+                                        <div className="mt-2">
+                                          <label className="block text-sm font-medium mb-1">非白名单欢迎消息</label>
+                                          <textarea
+                                            className="w-full px-3 py-2 border rounded-md text-sm"
+                                            placeholder="非白名单用户拉机器人进群后的欢迎消息，支持 Markdown 格式。留空则使用默认消息。"
+                                            rows={2}
+                                            value={quickSettingsCache[it.id]?.nonWhitelistWelcomeMessage || ''}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '', nonWhitelistWelcomeMessage: '' }), nonWhitelistWelcomeMessage: e.target.value }
                                               }))
                                             }}
                                           />
@@ -2003,7 +2019,8 @@ function DashboardPageInner() {
                                                   calculatorEnabled: settings.calculatorEnabled,
                                                   showAuthPrompt: settings.showAuthPrompt,
                                                   welcomeMessage: settings.welcomeMessage || null,
-                                                  authPromptMessage: settings.authPromptMessage || null
+                                                  authPromptMessage: settings.authPromptMessage || null,
+                                                  nonWhitelistWelcomeMessage: settings.nonWhitelistWelcomeMessage || null
                                                 })
                                               })
                                               if (!res.ok) {

@@ -2,6 +2,7 @@
 import { prisma } from '../../lib/db.js'
 import { ensureDbChat } from '../database.js'
 import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, hasOperatorPermission, getEffectiveRate, getDisplayCurrencySymbol } from '../helpers.js'
+import { ensureChat } from '../bot-identity.js'
 import { setGlobalDailyCutoffHour } from '../utils.js'
 import { getChat } from '../state.js'
 
@@ -58,7 +59,7 @@ export function registerListGroups(bot) {
       const isPrivate = ctx.chat?.type === 'private'
       if (!isPrivate) {
         // 在群聊中，要求有权限
-        const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
+        const chat = ensureChat(ctx)
         const hasPermission = await isAdmin(ctx) || (chat ? await hasOperatorPermission(ctx, chat) : false)
         if (!hasPermission) {
           return ctx.reply('⚠️ 您没有权限。只有管理员或操作员可以执行此操作。')
