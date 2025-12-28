@@ -204,7 +204,7 @@ export async function hasOperatorPermission(ctx, chat) {
   if (chat.everyoneAllowed) return true
   if (await isAdmin(ctx)) return true
 
-  const username = ctx.from?.username ? `@${ctx.from.username}` : null
+  const username = ctx.from?.username || null
   if (username && chat.operators.has(username)) return true
 
   return false

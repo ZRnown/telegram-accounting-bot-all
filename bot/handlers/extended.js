@@ -1,9 +1,9 @@
 // 扩展功能处理器：USDT查询、管理员群发、功能开关
 import { prisma } from '../../lib/db.js'
-import { hasPermissionWithWhitelist, buildInlineKb, isAdmin } from '../helpers.js'
+import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasAdminPermission, hasOperatorPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
-import { safeCalculate } from '../state.js'
+import { safeCalculate, getChat } from '../state.js'
 import { syncSettingsToMemory } from '../database.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
@@ -2048,6 +2048,100 @@ export function registerFeatureToggles(bot, ensureChat) {
     }
   })
 
+  // 上课功能
+  bot.hears(/^(上课|开始上课)$/i, async (ctx) => {
+    try {
+      const chatId = String(ctx.chat.id)
+
+      // 检查是否为群组
+      if (ctx.chat.type === 'private') {
+        await ctx.reply('⚠️ 此功能仅适用于群组')
+        return
+      }
+
+      // 检查权限
+      const hasPermission = await hasAdminPermission(ctx) || await hasOperatorPermission(ctx)
+      if (!hasPermission) {
+        await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
+        return
+      }
+
+      // 解除禁言
+      try {
+        await ctx.telegram.setChatPermissions(chatId, {
+          can_send_messages: true,
+          can_send_media_messages: true,
+          can_send_polls: true,
+          can_send_other_messages: true,
+          can_add_web_page_previews: true,
+          can_change_info: true,
+          can_invite_users: true,
+          can_pin_messages: true
+        })
+      } catch (e) {
+        console.error('[上课] 解除禁言失败:', e.message)
+        // 继续执行，不影响其他功能
+      }
+
+      // 更新内存状态
+      const chat = getChat(botId, chatId)
+      chat.muteMode = false
+      syncSettingsToMemory(ctx, chat, chatId)
+
+      await ctx.reply('📚 上课—本群已开始营业')
+    } catch (e) {
+      console.error('[上课]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
+  // 下课功能
+  bot.hears(/^下课$/i, async (ctx) => {
+    try {
+      const chatId = String(ctx.chat.id)
+
+      // 检查是否为群组
+      if (ctx.chat.type === 'private') {
+        await ctx.reply('⚠️ 此功能仅适用于群组')
+        return
+      }
+
+      // 检查权限
+      const hasPermission = await hasAdminPermission(ctx) || await hasOperatorPermission(ctx)
+      if (!hasPermission) {
+        await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
+        return
+      }
+
+      // 设置禁言（只允许管理员发送消息）
+      try {
+        await ctx.telegram.setChatPermissions(chatId, {
+          can_send_messages: false, // 禁言普通成员
+          can_send_media_messages: false,
+          can_send_polls: false,
+          can_send_other_messages: false,
+          can_add_web_page_previews: false,
+          can_change_info: false,
+          can_invite_users: false,
+          can_pin_messages: false
+        })
+      } catch (e) {
+        console.error('[下课] 设置禁言失败:', e.message)
+        // 继续执行，不影响其他功能
+      }
+
+      // 更新内存状态
+      const chat = getChat(botId, chatId)
+      chat.muteMode = true
+      syncSettingsToMemory(ctx, chat, chatId)
+
+      await ctx.reply('🏁 下课—本群今日已下课\n\n如需交易，请在该群恢复营业后在群内交易！\n\n切勿私下交易！')
+    } catch (e) {
+      console.error('[下课]', e)
+      await ctx.reply('❌ 操作失败，请稍后重试')
+    }
+  })
+
   // 独立计算器功能
   bot.hears(/^(\d+(?:\.\d+)?[\+\-\*\/\^]\d+(?:\.\d+)?(?:[\+\-\*\/\^]\d+(?:\.\d+)?)*)$/i, async (ctx) => {
     const expression = ctx.match[1]?.trim()
@@ -2074,9 +2168,12 @@ export function registerFeatureToggles(bot, ensureChat) {
       // 使用safeCalculate函数计算结果
       const result = safeCalculate(expression)
       if (result !== null && Number.isFinite(result)) {
-        // 格式化结果，避免过长的显示
-        const formattedResult = Number.isInteger(result) ? result : result.toFixed(2)
-        await ctx.reply(`🧮 \`${expression} = ${formattedResult}\``)
+        // 格式化结果为一位小数
+        const formattedResult = result.toFixed(1)
+        // 回复原消息而不是直接发送
+        await ctx.reply(`${expression} = ${formattedResult}`, {
+          reply_to_message_id: ctx.message.message_id
+        })
       }
     } catch (e) {
       // 计算失败，静默忽略

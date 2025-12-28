@@ -10,7 +10,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     const { id, groupId } = await context.params
     const body = await req.json().catch(() => ({})) as { name?: string; description?: string }
-
+    
     const existing = await prisma.chatGroup.findFirst({
       where: { id: groupId, botId: id }
     })
@@ -65,7 +65,7 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     const { id, groupId } = await context.params
 
     console.log(`[Delete Group] Attempting to delete group ${groupId} for bot ${id}`) // 🔥 添加日志
-
+    
     // 验证分组是否存在且属于该机器人
     const existing = await prisma.chatGroup.findFirst({
       where: { id: groupId, botId: id }
