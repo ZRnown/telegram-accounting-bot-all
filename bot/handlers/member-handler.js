@@ -335,7 +335,7 @@ export function registerMemberHandlers(bot) {
                         )
                     }
                 }
-
+            }
             // === 场景 B: 机器人被踢出或离开 ===
             else if (newStatus === 'left' || newStatus === 'kicked') {
                 logger.info('[my_chat_member] 机器人被移除，执行彻底清理', { chatId })
