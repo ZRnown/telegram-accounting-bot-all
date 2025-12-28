@@ -49,7 +49,16 @@ function stopBotProcess(botId) {
 }
 
 async function syncBotsOnce() {
-  const bots = await prisma.bot.findMany({ where: { enabled: true } })
+  const bots = await prisma.bot.findMany({
+    where: { enabled: true },
+    select: {
+      id: true,
+      name: true,
+      token: true, // 保留明文token用于启动机器人
+      proxyUrl: true,
+      enabled: true
+    }
+  })
   const running = new Set(children.keys())
   const shouldRun = new Set(bots.map(b => b.id))
 
