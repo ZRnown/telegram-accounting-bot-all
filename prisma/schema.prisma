@@ -11,7 +11,8 @@ model Bot {
   id             String           @id @default(cuid())
   name           String
   description    String?
-  token          String
+  token          String           // ⚠️  明文token，仅用于迁移，生产环境应移除
+  tokenHash      String?          // 🔥 哈希后的token，无法逆向
   proxyUrl       String?
   enabled        Boolean          @default(true)
   createdAt      DateTime         @default(now())

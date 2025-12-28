@@ -303,9 +303,15 @@ export function registerMemberHandlers(bot) {
 
                     try {
                         await ctx.reply(msgToSend, { parse_mode: 'Markdown' })
+                        logger.info('[my_chat_member] ✅ 白名单欢迎消息发送成功', { chatId, msgLength: msgToSend.length })
                     } catch (e) {
-                        // Markdown 失败回退到纯文本
-                        await ctx.reply(msgToSend).catch(() => {})
+                        logger.warn('[my_chat_member] ⚠️ Markdown发送失败，尝试纯文本', { chatId, error: e.message })
+                        try {
+                            await ctx.reply(msgToSend)
+                            logger.info('[my_chat_member] ✅ 白名单欢迎消息(纯文本)发送成功', { chatId, msgLength: msgToSend.length })
+                        } catch (e2) {
+                            logger.error('[my_chat_member] ❌ 白名单欢迎消息发送失败', { chatId, error: e2.message })
+                        }
                     }
 
                 } else {
@@ -320,19 +326,30 @@ export function registerMemberHandlers(bot) {
                         // 使用自定义的非白名单欢迎消息
                         try {
                             await ctx.reply(customMsg, { parse_mode: 'Markdown' })
+                            logger.info('[my_chat_member] ✅ 非白名单自定义欢迎消息发送成功', { chatId, msgLength: customMsg.length })
                         } catch (e) {
-                            // Markdown 失败回退到纯文本
-                            await ctx.reply(customMsg).catch(() => {})
+                            logger.warn('[my_chat_member] ⚠️ 非白名单自定义消息Markdown发送失败，尝试纯文本', { chatId, error: e.message })
+                            try {
+                                await ctx.reply(customMsg)
+                                logger.info('[my_chat_member] ✅ 非白名单自定义欢迎消息(纯文本)发送成功', { chatId, msgLength: customMsg.length })
+                            } catch (e2) {
+                                logger.error('[my_chat_member] ❌ 非白名单自定义欢迎消息发送失败', { chatId, error: e2.message })
+                            }
                         }
                     } else if (settings?.showAuthPrompt !== false) {
                         // 使用默认提示消息
-                        await ctx.reply(
-                            `🤖 *机器人已入群*\n\n` +
+                        const defaultMsg = `🤖 *机器人已入群*\n\n` +
                             `⚠️ 本群尚未授权。\n` +
                             `邀请人：${actionUsername || actionFullName} (ID: ${actionUserId})\n\n` +
-                            `请联系管理员在后台通过审核，或由白名单用户邀请。`,
-                            { parse_mode: 'Markdown' }
-                        )
+                            `请联系管理员在后台通过审核，或由白名单用户邀请。`
+                        try {
+                            await ctx.reply(defaultMsg, { parse_mode: 'Markdown' })
+                            logger.info('[my_chat_member] ✅ 非白名单默认提示消息发送成功', { chatId })
+                        } catch (e) {
+                            logger.error('[my_chat_member] ❌ 非白名单默认提示消息发送失败', { chatId, error: e.message })
+                        }
+                    } else {
+                        logger.info('[my_chat_member] ℹ️ 非白名单用户拉群，但showAuthPrompt被禁用，不发送消息', { chatId })
                     }
                 }
             }

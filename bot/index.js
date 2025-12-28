@@ -268,13 +268,15 @@ bot.on('message', async (ctx, next) => {
 })
 
 // Resolve current Bot record by token to support multi-bot state separation
-// 🔥 优化：使用更可靠的缓存，避免重复查询
+// 🔥 优化：使用安全token验证，避免明文比较
+import { verifyBotToken, hashToken } from '../lib/token-security.js'
+
 let CURRENT_BOT_ID = null
 let BOT_ID_INITIALIZING = false // 防止并发初始化
 async function ensureCurrentBotId() {
   // 🔥 如果已有缓存，直接返回
   if (CURRENT_BOT_ID) return CURRENT_BOT_ID
-  
+
   // 🔥 如果正在初始化，等待完成
   if (BOT_ID_INITIALIZING) {
     let waitCount = 0
@@ -284,15 +286,13 @@ async function ensureCurrentBotId() {
       if (CURRENT_BOT_ID) return CURRENT_BOT_ID
     }
   }
-  
+
   // 🔥 开始初始化
   BOT_ID_INITIALIZING = true
   try {
-    // Try find bot by token; if missing, create a minimal record
-    let row = await prisma.bot.findFirst({ 
-      where: { token: BOT_TOKEN },
-      select: { id: true } // 🔥 只选择需要的字段
-    }).catch(() => null)
+    // 使用安全token验证
+    const botId = await verifyBotToken(BOT_TOKEN)
+    let row = botId ? { id: botId } : null
     
     if (!row) {
       // try to get bot username for friendly name
@@ -332,8 +332,10 @@ async function ensureCurrentBotId() {
           console.error('[ensureCurrentBotId] 获取机器人信息失败:', e.message)
         }
       }
-      row = await prisma.bot.create({ 
-        data: { name, token: BOT_TOKEN, enabled: true },
+      // 🔥 安全：创建机器人时同时存储哈希token
+      const tokenHash = await hashToken(BOT_TOKEN)
+      row = await prisma.bot.create({
+        data: { name, token: BOT_TOKEN, tokenHash, enabled: true },
         select: { id: true } // 🔥 只选择需要的字段
       })
     }

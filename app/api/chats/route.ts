@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
         invitedBy: true, // 邀请人ID
         invitedByUsername: true, // 邀请人用户名
         groupId: true, // 🔥 新增：分组ID
-        bot: { select: { id: true, name: true, token: true } },
+        bot: { select: { id: true, name: true } }, // ❌ 移除token字段，避免泄露
         group: { select: { id: true, name: true } }, // 🔥 新增：分组信息
       },
     })

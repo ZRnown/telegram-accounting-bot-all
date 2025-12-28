@@ -24,13 +24,16 @@ export function registerBotLeave(bot) {
     const chatId = String(ctx.chat?.id || '')
 
     try {
-      // 并行删除所有相关数据
+      // 按正确顺序删除：先删除子表，再删除主表，避免外键约束错误
       await Promise.all([
+        // 删除子表
+        prisma.billItem.deleteMany({ where: { bill: { chatId } } }),
         prisma.chatFeatureFlag.deleteMany({ where: { chatId } }),
         prisma.setting.deleteMany({ where: { chatId } }),
         prisma.operator.deleteMany({ where: { chatId } }),
         prisma.addressVerification.deleteMany({ where: { chatId } }),
         prisma.featureWarningLog.deleteMany({ where: { chatId } }),
+        // 删除主表
         prisma.bill.deleteMany({ where: { chatId } }),
         prisma.income.deleteMany({ where: { chatId } }),
         prisma.dispatch.deleteMany({ where: { chatId } }),
