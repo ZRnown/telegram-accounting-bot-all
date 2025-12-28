@@ -7,7 +7,7 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "node .next/standalone/server.js",
+    "start": "node scripts/start-server.js",
     "bot:multi": "node bot/manager.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",

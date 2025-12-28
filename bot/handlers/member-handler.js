@@ -362,7 +362,7 @@ export function registerMemberHandlers(bot) {
                     })
 
                     if (settings?.showAuthPrompt !== false) {
-                        const customMsg = settings?.nonWhitelistWelcomeMessage?.trim()
+                    const customMsg = settings?.nonWhitelistWelcomeMessage?.trim()
 
                         // 确定要发送的消息
                         const msgToSend = customMsg || (
