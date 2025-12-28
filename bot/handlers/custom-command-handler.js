@@ -5,9 +5,24 @@ import logger from '../logger.js'
 // 验证URL是否有效
 function isValidImageUrl(url) {
     if (!url || typeof url !== 'string') return false
+
+    // 清理URL（移除可能的空白字符）
+    const cleanUrl = url.trim()
+    if (!cleanUrl) return false
+
     try {
-        const parsed = new URL(url)
-        return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname
+        const parsed = new URL(cleanUrl)
+        // 检查协议和主机名
+        if (!parsed.protocol || !parsed.hostname) return false
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+        if (!parsed.hostname || parsed.hostname.length === 0) return false
+
+        // 检查是否为私有/本地地址（Telegram API不允许）
+        const hostname = parsed.hostname.toLowerCase()
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') return false
+        if (hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) return false
+
+        return true
     } catch {
         return false
     }

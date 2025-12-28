@@ -272,6 +272,21 @@ export function registerMemberHandlers(bot) {
                     }
                 })
 
+                // 🔥 新增：为新群组自动获取实时汇率
+                try {
+                    const { fetchUsdtToFiatRate } = await import('../helpers.js')
+                    const rate = await fetchUsdtToFiatRate('cny') // 默认使用人民币汇率
+                    if (rate) {
+                        await prisma.setting.update({
+                            where: { chatId },
+                            data: { realtimeRate: rate, fixedRate: null }
+                        })
+                        logger.info('[my_chat_member] ✅ 自动设置实时汇率', { chatId, rate })
+                    }
+                } catch (e) {
+                    logger.warn('[my_chat_member] ⚠️ 自动获取汇率失败', { chatId, error: e.message })
+                }
+
                 // 4. 处理后续动作
                 if (autoAllowed) {
                     // A. 初始化功能开关
