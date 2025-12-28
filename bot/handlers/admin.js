@@ -8,6 +8,7 @@ import { getChat } from '../state.js'
 
 /**
  * 机器人退群
+ * 逻辑：彻底删除该群在数据库中的所有痕迹，然后退出群组
  */
 export function registerBotLeave(bot) {
   bot.hears(/^机器人退群$/i, async (ctx) => {
@@ -15,7 +16,7 @@ export function registerBotLeave(bot) {
       return ctx.reply('此命令仅在群组中使用')
     }
 
-    // 🔥 优化：使用统一的权限检查
+    // 权限检查：只有管理员或白名单用户可以执行
     const chat = getChat(process.env.BOT_TOKEN, String(ctx.chat?.id || ''))
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
       return ctx.reply('⚠️ 您没有权限。只有管理员或白名单用户可以执行此操作。')
@@ -24,28 +25,39 @@ export function registerBotLeave(bot) {
     const chatId = String(ctx.chat?.id || '')
 
     try {
-      // 按正确顺序删除：先删除子表，再删除主表，避免外键约束错误
+      await ctx.reply('🗑️ 正在清除本群数据并退出...')
+
+      // 1. 按正确顺序删除所有相关数据 (先子表后主表)
       await Promise.all([
-        // 删除子表
         prisma.billItem.deleteMany({ where: { bill: { chatId } } }),
         prisma.chatFeatureFlag.deleteMany({ where: { chatId } }),
-        prisma.setting.deleteMany({ where: { chatId } }),
+        prisma.setting.deleteMany({ where: { chatId } }), // 删除设置
         prisma.operator.deleteMany({ where: { chatId } }),
         prisma.addressVerification.deleteMany({ where: { chatId } }),
         prisma.featureWarningLog.deleteMany({ where: { chatId } }),
-        // 删除主表
         prisma.bill.deleteMany({ where: { chatId } }),
+        // 兼容旧表
         prisma.income.deleteMany({ where: { chatId } }),
         prisma.dispatch.deleteMany({ where: { chatId } }),
         prisma.commission.deleteMany({ where: { chatId } })
       ])
 
-      await prisma.chat.delete({ where: { id: chatId } }).catch(() => { })
+      // 2. 最后彻底删除 Chat 主表记录
+      // 这一步至关重要，删除了 Chat 记录后，下次进群才会触发"新群"逻辑
+      await prisma.chat.delete({ where: { id: chatId } }).catch((e) => {
+        // 如果记录不存在(P2025)，忽略错误
+        if (e.code !== 'P2025') console.error('删除Chat记录失败', e)
+      })
+
+      console.log('[机器人退群] 数据已清除，正在退出', { chatId })
+
+      // 3. 退出群组
       await ctx.leaveChat()
-      console.log('[机器人退群]', { chatId })
+
     } catch (e) {
-      console.error('[机器人退群]', e)
+      console.error('[机器人退群] 失败', e)
       try {
+        // 即使数据库操作失败，也尝试退出
         await ctx.leaveChat()
       } catch { }
     }

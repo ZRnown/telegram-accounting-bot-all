@@ -249,63 +249,34 @@ export function registerMessageHandlers(bot) {
                 }
             }
 
-            // 🔥 检查群组是否存在，如果不存在或未绑定，尝试补充白名单检测
-            const existingChat = await prisma.chat.findUnique({
-                where: { id: chatId },
-                select: { id: true, allowed: true, botId: true }
+            // 🔥 同样的白名单检测逻辑
+            const userId = String(ctx.from?.id || '')
+            const whitelistedUser = await prisma.whitelistedUser.findUnique({
+                where: { userId }
             })
+            const isWhitelisted = !!whitelistedUser
 
             const botId = await ensureCurrentBotId(bot)
 
-            // 如果群组不存在，或者未授权且未绑定机器人，尝试检测白名单
-            if (!existingChat || (!existingChat.allowed && !existingChat.botId)) {
-                // 🔥 备用白名单检测：从消息发送者检查
-                // 获取群成员列表，找出可能的邀请人
-                try {
-                    const userId = String(ctx.from?.id || '')
-                    const username = ctx.from?.username ? `@${ctx.from.username}` : null
+            const chatData = {
+                title,
+                botId
+            }
+            if (isWhitelisted) {
+                chatData.status = 'APPROVED'
+                chatData.allowed = true
+            }
 
-                    // 检查当前消息发送者是否在白名单中
-                    if (userId) {
-                        const whitelistedUser = await prisma.whitelistedUser.findUnique({
-                            where: { userId }
-                        })
-
-                        if (whitelistedUser) {
-                            // 找到白名单用户，自动授权该群组
-                            logger.info('[message][whitelist-detected]', { chatId, userId, username })
-
-                            // 🔥 如果用户名不同，更新白名单记录中的用户名
-                            if (username && username !== whitelistedUser.username) {
-                                await prisma.whitelistedUser.update({
-                                    where: { userId },
-                                    data: { username }
-                                }).catch((e) => {
-                                    logger.error('[message][username-update-error]', e)
-                                })
-                                logger.debug('[message][username-updated]', { userId, oldUsername: whitelistedUser.username, newUsername: username })
-                            }
-
-                            // ⚠️ 不在这里创建邀请记录，避免与 my_chat_member 事件重复
-                            // 邀请记录只在 my_chat_member 事件中创建
-
-                            // 自动授权：先确保 Chat 与 Setting 存在，再为群聊创建功能开关，避免外键错误
                             await Promise.all([
                                 prisma.chat.upsert({
                                     where: { id: chatId },
                                     create: {
                                         id: chatId,
-                                        title,
-                                        botId,
-                                        status: 'APPROVED',
-                                        allowed: true
+                        ...chatData,
+                        status: isWhitelisted ? 'APPROVED' : 'PENDING',
+                        allowed: isWhitelisted
                                     },
-                                    update: {
-                                        title,
-                                        botId,
-                                        status: 'APPROVED',
-                                        allowed: true
-                                    },
+                    update: chatData,
                                 }),
                                 prisma.setting.upsert({
                                     where: { chatId },
@@ -313,64 +284,8 @@ export function registerMessageHandlers(bot) {
                                     update: {},
                                 })
                             ])
-                            // 仅对群聊创建默认功能开关（chatId 以 '-' 开头），避免私聊外键冲突
-                            if (String(chatId).startsWith('-')) {
+            if (isWhitelisted && String(chatId).startsWith('-')) {
                                 await ensureDefaultFeatures(chatId, prisma)
-                            }
-
-                            logger.info('[message][auto-authorized]', { chatId, userId })
-                        } else {
-                            // 非白名单用户
-                            await Promise.all([
-                                prisma.chat.upsert({
-                                    where: { id: chatId },
-                                    create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
-                                    update: { title, botId },
-                                }),
-                                prisma.setting.upsert({
-                                    where: { chatId },
-                                    create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-                                    update: {},
-                                })
-                            ])
-                        }
-                    } else {
-                        await Promise.all([
-                            prisma.chat.upsert({
-                                where: { id: chatId },
-                                create: { id: chatId, title, status: 'PENDING', allowed: false },
-                                update: { title },
-                            }),
-                            prisma.setting.upsert({
-                                where: { chatId },
-                                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-                                update: {},
-                            })
-                        ])
-                    }
-                } catch (e) {
-                    logger.error('[message][whitelist-check-error]', e)
-                    await Promise.all([
-                        prisma.chat.upsert({
-                            where: { id: chatId },
-                            create: { id: chatId, title, status: 'PENDING', allowed: false },
-                            update: { title },
-                        }),
-                        prisma.setting.upsert({
-                            where: { chatId },
-                            create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-                            update: {},
-                        })
-                    ])
-                }
-            } else {
-                // 群组已存在，仅更新标题
-                await prisma.chat.update({
-                    where: { id: chatId },
-                    data: { title }
-                }).catch((e) => {
-                    logger.error('[message][title-update-error]', { chatId, error: e.message })
-                })
             }
 
             logger.debug('[message][upsert-ok]', { chatId })

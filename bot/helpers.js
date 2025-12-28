@@ -233,8 +233,18 @@ export async function hasPermissionWithWhitelist(ctx, chat) {
       const whitelistedUser = await prisma.whitelistedUser.findUnique({
         where: { userId }
       })
-      return !!whitelistedUser
-    } catch {
+
+      const hasPermission = !!whitelistedUser
+      console.log('[hasPermissionWithWhitelist]', {
+        userId,
+        username: ctx.from?.username,
+        hasPermission,
+        whitelistedUser: whitelistedUser ? 'found' : 'not found'
+      })
+
+      return hasPermission
+    } catch (error) {
+      console.error('[hasPermissionWithWhitelist] 数据库查询失败:', error.message)
       return false
     }
   }

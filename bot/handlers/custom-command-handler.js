@@ -2,7 +2,7 @@ import { prisma } from '../../lib/db.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import logger from '../logger.js'
 
-const BACKEND_URL = process.env.BACKEND_URL
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
 
 /**
  * 将相对URL转换为绝对URL
@@ -64,9 +64,9 @@ const CUSTOM_CMDS_CACHE = {
 }
 
 async function loadCustomCommandsForBot(botId) {
-    // 5分钟缓存
+    // 🔥 修复：减少缓存时间到1分钟，让修改更快生效
     const now = Date.now()
-    if (CUSTOM_CMDS_CACHE.map && now - CUSTOM_CMDS_CACHE.ts < 5 * 60 * 1000) return CUSTOM_CMDS_CACHE.map
+    if (CUSTOM_CMDS_CACHE.map && now - CUSTOM_CMDS_CACHE.ts < 1 * 60 * 1000) return CUSTOM_CMDS_CACHE.map
 
     try {
         let map = {}
@@ -112,35 +112,41 @@ async function loadCustomCommandsForBot(botId) {
 export function registerCustomCommandHandlers(bot) {
     bot.on('text', async (ctx, next) => {
         try {
-            const text = (ctx.message?.text || '').trim()
-            if (!text) return next()
-            const botId = await ensureCurrentBotId(bot)
-            const map = await loadCustomCommandsForBot(botId)
-            if (!map || typeof map !== 'object') return next()
-            const key = text.toLowerCase()
-            const item = map[key]
-            if (!item) return next()
+            let text = (ctx.message?.text || '').trim();
+            if (!text) return next();
 
-            const chatId = String(ctx.chat?.id || '')
-            // 简洁日志（命中）
-            logger.info('[customcmd][hit]', { chatId, name: key })
+            // 🔥 修复：支持 / 开头的指令触发，例如输入 "/小八" 也能触发 "小八"
+            const triggerText = text.startsWith('/') ? text.substring(1) : text;
 
+            const botId = await ensureCurrentBotId(bot);
+            const map = await loadCustomCommandsForBot(botId);
+
+            if (!map || typeof map !== 'object') return next();
+
+            // 匹配指令（忽略大小写）
+            const key = triggerText.toLowerCase();
+            const item = map[key];
+
+            if (!item) return next();
+
+            const chatId = String(ctx.chat?.id || '');
+            logger.info('[customcmd][hit]', { chatId, name: key });
+
+            // 发送逻辑
             if (item.imageUrl && isValidImageUrl(item.imageUrl) && item.text) {
-                await ctx.replyWithPhoto(item.imageUrl, { caption: item.text })
-                return
+                await ctx.replyWithPhoto(item.imageUrl, { caption: item.text });
             } else if (item.imageUrl && isValidImageUrl(item.imageUrl)) {
-                await ctx.replyWithPhoto(item.imageUrl)
-                return
+                await ctx.replyWithPhoto(item.imageUrl);
             } else if (item.text) {
-                await ctx.reply(item.text)
-                return
+                await ctx.reply(item.text);
             }
-            return next()
+
+            return; // 命中指令后停止向下传递
         } catch (e) {
-            logger.error('[customcmd][error]', e?.message || e)
-            return next()
+            logger.error('[customcmd][error]', e?.message || e);
+            return next();
         }
-    })
+    });
 }
 
 /**

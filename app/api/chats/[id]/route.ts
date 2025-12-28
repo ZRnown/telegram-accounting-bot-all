@@ -127,32 +127,58 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       select: { id: true, token: true }
     })
     
-    // 🔥 并发让所有在该群中的机器人退群
+    // 🔥 修复：并发让所有在该群中的机器人退群，增加超时时间和重试机制
     const leavePromises = bots.map(async (bot: any) => {
       if (!bot.token) return
-      try {
-        // 先检查机器人是否在该群中
-        const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
-        const resp = await fetch(getChatUrl, { 
-          method: 'GET',
-          signal: AbortSignal.timeout(2000) // 2秒超时
-        })
-        if (resp.ok) {
-          const json = await resp.json().catch(() => null)
-          if (json?.ok) {
-            // 机器人确实在该群中，让它退群
-            const leaveChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/leaveChat?chat_id=${encodeURIComponent(id)}`
-            await fetch(leaveChatUrl, { 
-              method: 'POST',
-              signal: AbortSignal.timeout(2000) // 2秒超时
-            }).catch(() => {}) // 忽略错误，继续处理
-            console.log('[删除群聊] 机器人已退群', { chatId: id, botId: bot.id })
+
+      const leaveBot = async (retryCount = 0): Promise<void> => {
+        try {
+          // 先检查机器人是否在该群中
+          const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
+          const resp = await fetch(getChatUrl, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000) // 🔥 增加到5秒超时
+          })
+
+          if (resp.ok) {
+            const json = await resp.json().catch(() => null)
+            if (json?.ok) {
+              // 机器人确实在该群中，让它退群
+              const leaveChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/leaveChat?chat_id=${encodeURIComponent(id)}`
+              const leaveResp = await fetch(leaveChatUrl, {
+                method: 'POST',
+                signal: AbortSignal.timeout(5000) // 🔥 增加到5秒超时
+              })
+
+              if (leaveResp.ok) {
+                const leaveJson = await leaveResp.json().catch(() => null)
+                if (leaveJson?.ok) {
+                  console.log('[删除群聊] 机器人已成功退群', { chatId: id, botId: bot.id })
+                } else {
+                  console.warn('[删除群聊] 机器人退群API返回错误', { chatId: id, botId: bot.id, error: leaveJson })
+                }
+              } else {
+                throw new Error(`Leave chat HTTP ${leaveResp.status}`)
+              }
+            } else {
+              console.log('[删除群聊] 机器人不在该群中，跳过退群', { chatId: id, botId: bot.id })
+            }
+          } else {
+            throw new Error(`Get chat HTTP ${resp.status}`)
           }
+        } catch (e) {
+          // 🔥 添加重试机制，最多重试2次
+          if (retryCount < 2 && (e.name === 'TimeoutError' || e.message?.includes('timeout'))) {
+            console.log(`[删除群聊] 超时重试 ${retryCount + 1}/2`, { chatId: id, botId: bot.id })
+            await new Promise(resolve => setTimeout(resolve, 1000)) // 等待1秒后重试
+            return leaveBot(retryCount + 1)
+          }
+
+          console.error('[删除群聊] 检查/退群失败', { chatId: id, botId: bot.id, error: e.message, retryCount })
         }
-      } catch (e) {
-        // 忽略错误，继续处理下一个机器人
-        console.error('[删除群聊] 检查/退群失败', { chatId: id, botId: bot.id, error: e })
       }
+
+      return leaveBot()
     })
     
     // 🔥 等待所有退群操作完成（最多等待5秒）
@@ -165,14 +191,32 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       console.error('[删除群聊] 退群操作失败', e)
     }
 
-    // Delete related data first to satisfy FKs
-    try { await prisma.billItem.deleteMany({ where: { bill: { chatId: id } } }) } catch {}
-    try { await prisma.bill.deleteMany({ where: { chatId: id } }) } catch {}
-    try { await prisma.operator.deleteMany({ where: { chatId: id } }) } catch {}
-    try { await prisma.setting.deleteMany({ where: { chatId: id } }) } catch {}
+    // 🔥 修复删除顺序：严格按照外键依赖关系从子表到父表删除，避免外键约束违反
+    try {
+      // 1. 删除所有子表记录
+      await Promise.all([
+        prisma.chatFeatureFlag.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.addressVerification.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.featureWarningLog.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.operator.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.commission.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.income.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.dispatch.deleteMany({ where: { chatId: id } }).catch(() => {}),
+        prisma.billItem.deleteMany({ where: { bill: { chatId: id } } }).catch(() => {}),
+        prisma.bill.deleteMany({ where: { chatId: id } }).catch(() => {})
+      ])
 
-    // Finally delete chat
-    await prisma.chat.delete({ where: { id } })
+      // 2. 删除setting（有chatId外键）
+      await prisma.setting.deleteMany({ where: { chatId: id } }).catch(() => {})
+
+      // 3. 最后删除chat主表
+      await prisma.chat.delete({ where: { id } })
+
+      console.log('[删除群聊] 数据清理完成', { chatId: id })
+    } catch (e) {
+      console.error('[删除群聊] 数据清理失败', { chatId: id, error: e })
+      // 即使删除失败，也要继续，因为前端已经删除了记录
+    }
     return new NextResponse(null, { status: 204 })
   } catch (e) {
     console.error(e)

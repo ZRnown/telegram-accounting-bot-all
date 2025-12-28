@@ -83,6 +83,149 @@ const bot = new Telegraf(BOT_TOKEN, {
 
 // 🔥 地址验证功能：每个群只确认一个地址
 
+// 🔥 处理my_chat_member事件（直接在中间件中处理，避免监听器冲突）
+bot.use(async (ctx, next) => {
+  if (ctx.update?.my_chat_member) {
+    console.log('[DEBUG] 收到my_chat_member update', {
+      updateId: ctx.update.update_id,
+      chatId: ctx.chat?.id,
+      chatTitle: ctx.chat?.title,
+      newStatus: ctx.update.my_chat_member.new_chat_member?.status,
+      oldStatus: ctx.update.my_chat_member.old_chat_member?.status,
+      hasFrom: !!ctx.update.my_chat_member.from,
+      fromId: ctx.update.my_chat_member.from?.id,
+      timestamp: new Date().toISOString()
+    })
+
+    // 🔥 直接在这里处理my_chat_member事件，避免监听器冲突
+    try {
+      const upd = ctx.update.my_chat_member
+      const chat = ctx.chat
+
+      if (!upd || !chat) {
+        console.log('[MIDDLEWARE] my_chat_member 数据不完整，跳过处理')
+        await next()
+        return
+      }
+
+      const newStatus = upd.new_chat_member?.status
+      const oldStatus = upd.old_chat_member?.status
+      const chatId = String(chat.id)
+
+      console.log('[MIDDLEWARE] 开始处理my_chat_member事件', {
+        chatId,
+        oldStatus,
+        newStatus,
+        hasFrom: !!upd.from
+      })
+
+      // 🔥 只有在真正的新加群情况下才处理（从外部状态进入群组）
+      if ((newStatus === 'member' || newStatus === 'administrator') &&
+          (oldStatus === 'left' || oldStatus === 'kicked' || !oldStatus)) {
+
+        console.log('[MIDDLEWARE] 检测到机器人新加群事件，开始处理欢迎逻辑')
+
+        try {
+          // 获取当前机器人的ID
+          const botId = await ensureCurrentBotId()
+
+          // 1. 获取机器人的自定义欢迎消息
+          const botRecord = await prisma.bot.findUnique({
+            where: { id: botId },
+            select: { welcomeMessage: true }
+          })
+
+          // 2. 获取非白名单提醒模板
+          const latestSetting = await prisma.setting.findFirst({
+            where: { chat: { botId }, nonWhitelistWelcomeMessage: { not: null } },
+            select: { nonWhitelistWelcomeMessage: true }
+          })
+
+          // 3. 检查邀请人是否在白名单中
+          let isWhitelisted = false
+          if (upd.from?.id) {
+            const whitelistedUser = await prisma.whitelistedUser.findUnique({
+              where: { userId: String(upd.from.id) }
+            })
+            isWhitelisted = !!whitelistedUser
+          }
+
+          // 4. 准备变量替换
+          const vars = {
+            '{inviter}': upd.from?.username ? `@${upd.from.username}` : (upd.from?.first_name || '未知用户'),
+            '{chat}': chat.title || '本群',
+            '{id}': upd.from?.id ? String(upd.from.id) : '未知'
+          };
+
+          const replaceVars = (str) => {
+            if (!str) return str;
+            let out = str;
+            for (const [k, v] of Object.entries(vars)) {
+              out = out.split(k).join(v);
+            }
+            return out;
+          };
+
+          console.log('[MIDDLEWARE] 消息模板获取结果', {
+            botId,
+            hasCustomWelcome: !!botRecord?.welcomeMessage,
+            hasCustomNonWhitelist: !!latestSetting?.nonWhitelistWelcomeMessage,
+            isWhitelisted
+          })
+
+          let messageToSend = ''
+          let messageType = ''
+
+          if (isWhitelisted) {
+            // 白名单用户：使用自定义欢迎消息
+            const rawMsg = botRecord?.welcomeMessage || `✅ *机器人已激活*\n\n欢迎白名单用户！`
+            messageToSend = replaceVars(rawMsg)
+            messageType = '白名单欢迎消息'
+          } else {
+            // 非白名单用户：使用自定义提醒消息
+            const customNonMsg = latestSetting?.nonWhitelistWelcomeMessage
+            const defaultNonMsg = `🚫 *未授权警告*\n\n本群尚未授权。邀请人: {inviter} (ID: {id})`
+            const rawMsg = customNonMsg || defaultNonMsg
+            messageToSend = replaceVars(rawMsg)
+            messageType = '非白名单提醒消息'
+          }
+
+          console.log(`[MIDDLEWARE] 准备发送${messageType}`, {
+            rawMessage: messageToSend.substring(0, 100) + (messageToSend.length > 100 ? '...' : ''),
+            messageType,
+            isWhitelisted
+          })
+
+          // 发送消息
+          await ctx.reply(messageToSend, { parse_mode: 'Markdown' }).catch(async () => {
+            await ctx.reply(messageToSend)
+          })
+
+          console.log(`[MIDDLEWARE] ${messageType}发送成功`)
+
+        } catch (e) {
+          console.error('[MIDDLEWARE] 处理欢迎逻辑失败', e)
+          // 降级：发送简单的默认消息
+          try {
+            await ctx.reply('✅ *机器人已激活*\n\n欢迎使用！', { parse_mode: 'Markdown' }).catch(async () => {
+              await ctx.reply('✅ 机器人已激活\n\n欢迎使用！')
+            })
+          } catch (fallbackError) {
+            console.error('[MIDDLEWARE] 降级消息也发送失败', fallbackError)
+          }
+        }
+      } else {
+        console.log('[MIDDLEWARE] 非新加群事件，跳过处理', { oldStatus, newStatus })
+      }
+
+    } catch (e) {
+      console.error('[MIDDLEWARE] 处理my_chat_member事件出错', e)
+    }
+  }
+
+  await next()
+})
+
 // 兜底：收到任何消息时，确保 chat 记录已 upsert 并绑定到当前机器人
 bot.on('message', async (ctx, next) => {
   try {
@@ -99,162 +242,89 @@ bot.on('message', async (ctx, next) => {
     }
     
     
-    // 🔥 检查群组是否存在，如果不存在或未绑定，尝试补充白名单检测
-    const existingChat = await prisma.chat.findUnique({ 
-      where: { id: chatId },
-      select: { id: true, allowed: true, botId: true }
+    // 🔥 核心修复：检查当前发消息的人是否是白名单
+    const userId = String(ctx.from?.id || '')
+    const whitelistedUser = await prisma.whitelistedUser.findUnique({
+      where: { userId }
     })
+    const isWhitelisted = !!whitelistedUser
     
     const botId = await ensureCurrentBotId()
     
-    // 如果群组不存在，或者未授权且未绑定机器人，尝试检测白名单
-    if (!existingChat || (!existingChat.allowed && !existingChat.botId)) {
-      // 🔥 备用白名单检测：从消息发送者检查
-      // 获取群成员列表，找出可能的邀请人
-      try {
-        const userId = String(ctx.from?.id || '')
-        const username = ctx.from?.username ? `@${ctx.from.username}` : null
-        
-        // 检查当前消息发送者是否在白名单中
-        if (userId) {
-          const whitelistedUser = await prisma.whitelistedUser.findUnique({
-            where: { userId }
-          })
-          
-          if (whitelistedUser) {
-            // 找到白名单用户，自动授权该群组
-            console.log('[message][whitelist-detected]', { chatId, userId, username })
-            
-            // 🔥 如果用户名不同，更新白名单记录中的用户名
-            if (username && username !== whitelistedUser.username) {
-              await prisma.whitelistedUser.update({
-                where: { userId },
-                data: { username }
-              }).catch((e) => {
-                if (process.env.DEBUG_BOT === 'true') {
-                  console.error('[message][username-update-error]', e)
-                }
-              })
-              if (process.env.DEBUG_BOT === 'true') {
-                console.log('[message][username-updated]', { userId, oldUsername: whitelistedUser.username, newUsername: username })
-              }
-            }
-            
-            // ⚠️ 不在这里创建邀请记录，避免与 my_chat_member 事件重复
-            // 邀请记录只在 my_chat_member 事件中创建
-            
-            // 自动授权：先确保 Chat 存在，再创建 Setting，避免外键错误
-            // 🔥 修复：先创建 Chat，确保成功后再创建 Setting
-            const chatResult = await prisma.chat.upsert({
-                where: { id: chatId },
-                create: { 
-                  id: chatId, 
-                  title, 
-                  botId,
-                  status: 'APPROVED', 
-                  allowed: true 
-                },
-                update: { 
-                  title,
-                  botId,
-                  status: 'APPROVED',
-                  allowed: true
-                },
-            }).catch((e) => {
-              console.error('[message][chat-upsert-error]', e)
-              return null
-            })
-            
-            // 只有 Chat 创建成功后才创建 Setting
-            if (chatResult) {
-              await prisma.setting.upsert({
-                where: { chatId },
-                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-                update: {},
-              }).catch((e) => {
-                console.error('[message][setting-upsert-error]', e)
-              })
-            }
-            // 仅对群聊创建默认功能开关（chatId 以 '-' 开头），避免私聊外键冲突
-            if (String(chatId).startsWith('-')) {
-              await ensureDefaultFeatures(chatId, prisma)
-            }
-            
-            console.log('[message][auto-authorized]', { chatId, userId })
-          } else {
-          // 非白名单用户：先创建 Chat，再创建 Setting
-          const chatResult = await prisma.chat.upsert({
-                where: { id: chatId },
-                create: { id: chatId, title, botId, status: 'PENDING', allowed: false },
-                update: { title, botId },
-          }).catch((e) => {
-            console.error('[message][chat-upsert-error]', e)
-            return null
-          })
-          
-          if (chatResult) {
-            await prisma.setting.upsert({
-                where: { chatId },
-                create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-                update: {},
-            }).catch((e) => {
-              console.error('[message][setting-upsert-error]', e)
-              })
-          }
-          }
-        } else {
-          // 先创建 Chat，再创建 Setting
-          const chatResult = await prisma.chat.upsert({
-              where: { id: chatId },
-              create: { id: chatId, title, status: 'PENDING', allowed: false },
-              update: { title },
-          }).catch((e) => {
-            console.error('[message][chat-upsert-error]', e)
-            return null
-          })
-          
-          if (chatResult) {
-            await prisma.setting.upsert({
-              where: { chatId },
-              create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-              update: {},
-            }).catch((e) => {
-              console.error('[message][setting-upsert-error]', e)
-            })
-          }
-        }
-      } catch (e) {
-        console.error('[message][whitelist-check-error]', e)
-        // 先创建 Chat，再创建 Setting
-        const chatResult = await prisma.chat.upsert({
+    const chatData = {
+      title,
+      botId
+    }
+    // 如果是白名单用户操作，强制提升群组权限
+    if (isWhitelisted) {
+      chatData.status = 'APPROVED'
+      chatData.allowed = true
+    }
+
+      const chatResult = await prisma.chat.upsert({
             where: { id: chatId },
-            create: { id: chatId, title, status: 'PENDING', allowed: false },
-            update: { title },
-        }).catch((e2) => {
-          console.error('[message][chat-upsert-error]', e2)
-          return null
+            create: {
+              id: chatId,
+        ...chatData,
+        status: isWhitelisted ? 'APPROVED' : 'PENDING',
+        allowed: isWhitelisted
+            },
+      update: chatData,
+      }).catch((e) => {
+        console.error('[message][chat-upsert-error]', e)
+        return null
+      })
+
+      if (chatResult) {
+        await prisma.setting.upsert({
+          where: { chatId },
+          create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
+          update: {},
+        }).catch((e) => {
+          console.error('[message][setting-upsert-error]', e)
         })
-        
-        if (chatResult) {
-          await prisma.setting.upsert({
-            where: { chatId },
-            create: { chatId, accountingEnabled: true }, // 🔥 默认开启记账
-            update: {},
-          }).catch((e2) => {
-            console.error('[message][setting-upsert-error]', e2)
-          })
+
+      // 如果触发了自动授权，确保功能开关也同步开启，并发送欢迎消息
+      if (isWhitelisted && String(chatId).startsWith('-')) {
+        await ensureDefaultFeatures(chatId, prisma)
+
+        // 检查是否已经发送过欢迎消息（避免重复发送）
+        const existingChat = await prisma.chat.findUnique({
+          where: { id: chatId },
+          select: { status: true, invitedBy: true }
+        })
+
+        // 如果群组之前是PENDING状态，现在变成APPROVED，说明是刚授权的
+        if (existingChat && existingChat.status === 'PENDING') {
+          logger.info('[message] 检测到白名单用户触发自动授权，发送欢迎消息', { chatId, userId })
+
+          try {
+            // 获取机器人欢迎消息
+            const botId = await ensureCurrentBotId()
+            const botRecord = await prisma.bot.findUnique({
+              where: { id: botId },
+              select: { welcomeMessage: true }
+            })
+
+            const welcomeMsg = botRecord?.welcomeMessage || `✅ *机器人已激活*\n\n白名单用户操作，本群已自动授权。`
+            const variables = {
+              '{inviter}': ctx.from?.username ? `@${ctx.from.username}` : (ctx.from?.first_name || '用户'),
+              '{chat}': title,
+              '{id}': userId
+            }
+
+            const finalMsg = welcomeMsg.replace(/\{(\w+)\}/g, (match, key) => variables[`{${key}}`] || match)
+
+            await ctx.reply(finalMsg, { parse_mode: 'Markdown' }).catch(() =>
+              ctx.reply(finalMsg)
+            )
+
+            logger.info('[message] 白名单欢迎消息发送成功', { chatId, userId })
+          } catch (e) {
+            logger.error('[message] 发送白名单欢迎消息失败', { chatId, userId, error: e.message })
+          }
         }
       }
-    } else {
-      // 群组已存在，仅更新标题
-      await prisma.chat.update({
-        where: { id: chatId },
-        data: { title }
-      }).catch((e) => {
-        if (process.env.DEBUG_BOT === 'true') {
-          console.error('[message][title-update-error]', { chatId, error: e.message })
-        }
-      })
     }
     
     // 🔥 调试日志：仅在 DEBUG_BOT=true 时输出
@@ -537,12 +607,12 @@ bot.on('text', async (ctx, next) => {
   }
 })
 
-// 🔥 注册成员变动处理器（统一管理机器人进出群）
-import { registerMemberHandlers } from './handlers/member-handler.js'
-registerMemberHandlers(bot)
-
 // 🔥 注册所有命令处理器（模块化）
 registerAllHandlers(bot, ensureChat)
+
+// 🔥 注册成员变动处理器（统一管理机器人进出群）- 放在最后，确保不被覆盖
+import { registerMemberHandlers } from './handlers/member-handler.js'
+registerMemberHandlers(bot)
 
 // 🔥 使用模块化的权限检查中间件（减少代码，提升性能）
 bot.use(createPermissionMiddleware())
@@ -593,9 +663,14 @@ async function updateAllRealtimeRates() {
       if (error.message.includes('readonly database') || error.message.includes('read-only')) {
         console.log('[定时任务] 检测到只读数据库，尝试修复权限...')
 
-        // 获取需要更新的设置
+        // 获取需要更新的设置（确保对应的chat存在，避免外键约束错误）
         const settings = await prisma.setting.findMany({
-          where: { fixedRate: null },
+          where: {
+            fixedRate: null,
+            chat: { // 使用 JOIN 确保chat存在
+              isNot: null
+            }
+          },
           select: { chatId: true }
         })
 
@@ -612,8 +687,43 @@ async function updateAllRealtimeRates() {
         }
 
         console.log(`[定时任务] 逐个更新完成，共处理 ${settings.length} 个群组`)
+      } else if (error.message.includes('Foreign key constraint')) {
+        // 外键约束错误：清理孤儿setting记录
+        console.log('[定时任务] 检测到外键约束错误，清理孤儿setting记录...')
+
+        try {
+          // 删除没有对应chat的setting记录
+          const orphanedSettings = await prisma.setting.findMany({
+            where: {
+              chat: null // 没有对应chat的setting记录
+            },
+            select: { chatId: true }
+          })
+
+          if (orphanedSettings.length > 0) {
+            console.log(`[定时任务] 发现 ${orphanedSettings.length} 个孤儿setting记录，正在清理...`)
+
+            for (const setting of orphanedSettings) {
+              await prisma.setting.delete({
+                where: { chatId: setting.chatId }
+              }).catch((deleteError) => {
+                console.error(`[定时任务] 删除孤儿setting记录失败 ${setting.chatId}:`, deleteError.message)
+              })
+            }
+
+            console.log('[定时任务] 孤儿setting记录清理完成，重新尝试汇率更新...')
+
+            // 清理后重新尝试更新
+            await prisma.setting.updateMany({
+              where: { fixedRate: null },
+              data: { realtimeRate: okxRate }
+            })
+          }
+        } catch (cleanupError) {
+          console.error('[定时任务] 清理孤儿记录失败:', cleanupError.message)
+        }
       } else {
-        throw error // 重新抛出非只读错误
+        throw error // 重新抛出其他错误
       }
     }
 

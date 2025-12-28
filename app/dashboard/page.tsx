@@ -205,7 +205,7 @@ function DashboardPageInner() {
       if (res.ok) {
         await loadWhitelistedUsers()
         setWhitelistForm({ userId: '', note: '' })
-        toast({ title: '成功', description: '添加成功！用户名已自动获取并显示在表格中。' })
+        toast({ title: '成功', description: '添加成功！用户身份已验证，用户名已获取并显示在表格中。' })
       } else {
         const json = await res.json()
         toast({ title: '错误', description: json.error || '添加失败', variant: 'destructive' })
@@ -613,7 +613,7 @@ function DashboardPageInner() {
                       value={whitelistForm.userId}
                       onChange={(e) => setWhitelistForm(f => ({ ...f, userId: e.target.value }))}
                     />
-                    <p className="text-xs text-slate-500 mt-1">💡 Telegram用户的数字ID（添加后用户名会自动显示在表格中）</p>
+                    <p className="text-xs text-slate-500 mt-1">💡 Telegram用户的数字ID（系统会验证用户存在性并自动获取用户名）</p>
                   </div>
                   <div>
                     <label className="block text-xs text-slate-600 mb-1">备注（可选）</label>

@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
       }
 
       users.push({
-        ...u,
+      ...u,
         username: displayName
       })
     }
@@ -150,40 +150,57 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '该用户ID已在白名单中' }, { status: 409 })
     }
 
-    // 🔥 优化：通过 Telegram Bot API 获取用户名
-    if (!username || !username.trim()) {
+    // 🔥 强制验证：通过 Telegram Bot API 验证用户ID并获取用户名
+    let userInfo = null
       try {
         const bot = await prisma.bot.findFirst({
           where: { enabled: true },
           select: { token: true }
         })
 
-        if (bot?.token) {
+      if (!bot?.token) {
+        return NextResponse.json({ error: '没有可用的机器人，无法验证用户ID' }, { status: 500 })
+      }
+
+      console.log('[whitelisted-users] 开始验证用户ID:', userId)
+
           const response = await fetch(
             `https://api.telegram.org/bot${bot.token}/getChat?chat_id=${userId}`,
-            { signal: AbortSignal.timeout(5000) }
+        { signal: AbortSignal.timeout(10000) } // 增加超时时间到10秒
           )
           const data = await response.json()
 
-          if (data.ok && data.result) {
-            const user = data.result
-            username = user.username ? `@${user.username}` : 
-                      (user.first_name || user.last_name) ? 
-                      `${user.first_name || ''} ${user.last_name || ''}`.trim() :
-                      `用户${userId}`
-            
-            console.log('[whitelisted-users][telegram-api-success]', { userId, username })
-          }
+      if (!data.ok) {
+        console.log('[whitelisted-users] Telegram API错误:', data)
+        if (data.error_code === 400 && data.description?.includes('chat not found')) {
+          return NextResponse.json({ error: '用户ID不存在，请检查输入是否正确' }, { status: 400 })
         }
-      } catch (e) {
-        console.log('[whitelisted-users][telegram-api-failed]', userId, (e as Error).message)
+        return NextResponse.json({ error: '无法验证用户ID，请稍后重试' }, { status: 500 })
       }
+
+      if (data.result) {
+        userInfo = data.result
+        console.log('[whitelisted-users] 用户验证成功:', {
+          userId,
+          username: userInfo.username,
+          first_name: userInfo.first_name,
+          last_name: userInfo.last_name
+        })
+      } else {
+        return NextResponse.json({ error: '无法获取用户信息' }, { status: 400 })
+          }
+
+      } catch (e) {
+      console.log('[whitelisted-users] API调用异常:', (e as Error).message)
+      return NextResponse.json({ error: '验证用户ID时发生网络错误，请稍后重试' }, { status: 500 })
     }
 
-    // 最终兜底：若仍无用户名，则使用 userId 代替，避免为 null
-    const finalUsername =
-      (username && username.trim()) ||
-      (userId ? `user_${userId}` : null)
+    // 生成最终的用户名
+    const finalUsername = username && username.trim() ? username.trim() :
+      userInfo.username ? `@${userInfo.username}` :
+      (userInfo.first_name || userInfo.last_name) ?
+      `${userInfo.first_name || ''} ${userInfo.last_name || ''}`.trim() :
+      `用户${userId}`
 
     const user = await prisma.whitelistedUser.create({
       data: {
@@ -234,25 +251,29 @@ export async function PATCH(req: NextRequest) {
     const unauth = assertAdmin(req)
     if (unauth) return unauth
 
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
     const { userId } = body
 
     if (!userId) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 })
     }
 
+    console.log('[whitelisted-users][PATCH] 开始刷新用户:', userId)
+
     const newDisplayName = await refreshUserDisplayName(userId)
 
     if (newDisplayName) {
+      console.log('[whitelisted-users][PATCH] 刷新成功:', userId, newDisplayName)
       return NextResponse.json({
         success: true,
         username: newDisplayName
       })
     } else {
+      console.log('[whitelisted-users][PATCH] 刷新失败:', userId)
       return NextResponse.json({ error: 'Failed to refresh username' }, { status: 500 })
     }
   } catch (error) {
-    console.error('[whitelisted-users][PATCH]', error)
+    console.error('[whitelisted-users][PATCH] 异常:', error)
     return NextResponse.json({ error: 'Failed to refresh username' }, { status: 500 })
   }
 }
