@@ -11,8 +11,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
         chat: { botId },
         nonWhitelistWelcomeMessage: { not: null }
       },
-      select: { nonWhitelistWelcomeMessage: true },
-      orderBy: { createdAt: 'desc' }
+      select: { nonWhitelistWelcomeMessage: true }
     })
 
     return Response.json({

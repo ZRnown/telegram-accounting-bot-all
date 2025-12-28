@@ -132,21 +132,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       if (!bot.token) return
 
       const leaveBot = async (retryCount = 0): Promise<void> => {
-        try {
-          // 先检查机器人是否在该群中
-          const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
-          const resp = await fetch(getChatUrl, {
-            method: 'GET',
+      try {
+        // 先检查机器人是否在该群中
+        const getChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/getChat?chat_id=${encodeURIComponent(id)}`
+        const resp = await fetch(getChatUrl, { 
+          method: 'GET',
             signal: AbortSignal.timeout(5000) // 🔥 增加到5秒超时
-          })
+        })
 
-          if (resp.ok) {
-            const json = await resp.json().catch(() => null)
-            if (json?.ok) {
-              // 机器人确实在该群中，让它退群
-              const leaveChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/leaveChat?chat_id=${encodeURIComponent(id)}`
+        if (resp.ok) {
+          const json = await resp.json().catch(() => null)
+          if (json?.ok) {
+            // 机器人确实在该群中，让它退群
+            const leaveChatUrl = `https://api.telegram.org/bot${encodeURIComponent(bot.token)}/leaveChat?chat_id=${encodeURIComponent(id)}`
               const leaveResp = await fetch(leaveChatUrl, {
-                method: 'POST',
+              method: 'POST',
                 signal: AbortSignal.timeout(5000) // 🔥 增加到5秒超时
               })
 
@@ -162,11 +162,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
               }
             } else {
               console.log('[删除群聊] 机器人不在该群中，跳过退群', { chatId: id, botId: bot.id })
-            }
+          }
           } else {
             throw new Error(`Get chat HTTP ${resp.status}`)
-          }
-        } catch (e) {
+        }
+      } catch (e) {
           // 🔥 添加重试机制，最多重试2次
           if (retryCount < 2 && (e.name === 'TimeoutError' || e.message?.includes('timeout'))) {
             console.log(`[删除群聊] 超时重试 ${retryCount + 1}/2`, { chatId: id, botId: bot.id })
@@ -175,7 +175,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
           }
 
           console.error('[删除群聊] 检查/退群失败', { chatId: id, botId: bot.id, error: e.message, retryCount })
-        }
+      }
       }
 
       return leaveBot()
@@ -210,7 +210,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await prisma.setting.deleteMany({ where: { chatId: id } }).catch(() => {})
 
       // 3. 最后删除chat主表
-      await prisma.chat.delete({ where: { id } })
+    await prisma.chat.delete({ where: { id } })
 
       console.log('[删除群聊] 数据清理完成', { chatId: id })
     } catch (e) {
