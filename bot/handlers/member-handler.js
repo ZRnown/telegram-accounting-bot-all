@@ -266,7 +266,7 @@ export function registerMemberHandlers(bot) {
                 await prisma.setting.upsert({
                     where: { chatId },
                     create: {
-                        chatId,
+                    chatId,
                         accountingEnabled: true,
                         addressVerificationEnabled: false
                     },
@@ -313,8 +313,8 @@ export function registerMemberHandlers(bot) {
                         `请联系管理员在后台通过审核，或由白名单用户邀请。`,
                         { parse_mode: 'Markdown' }
                     )
+                    }
                 }
-            }
 
             // === 场景 B: 机器人被踢出或离开 ===
             else if (newStatus === 'left' || newStatus === 'kicked') {

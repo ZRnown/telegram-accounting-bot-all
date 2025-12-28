@@ -338,8 +338,8 @@ async function executeBroadcast(bot, ctx, content, groupName = null) {
 
       const group = await prisma.chatGroup.findFirst({
         where: {
-          botId: botId,
-          name: groupName
+            botId: botId,
+            name: groupName
         },
         include: {
           chats: {
@@ -425,9 +425,9 @@ async function executeBroadcast(bot, ctx, content, groupName = null) {
             // 发送文本
             const textContent = typeof content === 'string' ? content : content.text
             await bot.telegram.sendMessage(chat.id, textContent, {
-              parse_mode: 'Markdown',
-              disable_web_page_preview: true
-            })
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          })
           }
           success++
         } catch (e) {
@@ -533,9 +533,9 @@ export function registerGroupManagement(bot) {
       }
 
       // 构建按钮
-      const inlineKeyboard = {
-        inline_keyboard: [
-          [
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
             { text: '➕ 创建分组', callback_data: 'group_create' },
             { text: '✏️ 编辑分组', callback_data: 'group_edit' }
           ]
@@ -551,13 +551,13 @@ export function registerGroupManagement(bot) {
       }
 
       inlineKeyboard.inline_keyboard.push([
-        { text: '❌ 关闭', callback_data: 'group_close' }
+          { text: '❌ 关闭', callback_data: 'group_close' }
       ])
 
       await ctx.reply(message, {
-        parse_mode: 'Markdown',
-        reply_markup: inlineKeyboard
-      })
+      parse_mode: 'Markdown',
+      reply_markup: inlineKeyboard
+    })
 
     } catch (e) {
       console.error('[分组管理]', e)
@@ -843,9 +843,9 @@ export function registerGroupManagementButtons(bot) {
       }
 
       // 构建按钮
-      const inlineKeyboard = {
-        inline_keyboard: [
-          [
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
             { text: '➕ 创建分组', callback_data: 'group_create' },
             { text: '✏️ 编辑分组', callback_data: 'group_refresh' }
           ]
@@ -861,15 +861,15 @@ export function registerGroupManagementButtons(bot) {
       }
 
       inlineKeyboard.inline_keyboard.push([
-        { text: '❌ 关闭', callback_data: 'group_close' }
+          { text: '❌ 关闭', callback_data: 'group_close' }
       ])
 
       // 尝试编辑消息，如果内容相同会失败，这是正常的
       try {
         await ctx.editMessageText(message, {
-          parse_mode: 'Markdown',
-          reply_markup: inlineKeyboard
-        })
+      parse_mode: 'Markdown',
+      reply_markup: inlineKeyboard
+    })
       } catch (editError) {
         // 如果是"message is not modified"错误，说明用户已经在主菜单了
         if (editError.response?.description?.includes('message is not modified')) {

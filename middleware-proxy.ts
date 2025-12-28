@@ -163,9 +163,9 @@ export function middleware(request: NextRequest) {
   // 检查API请求的Content-Type
   if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathname.startsWith('/api/')) {
     if (!contentType?.includes('application/json')) {
-      console.warn(`[SECURITY] Invalid content-type for API: ${contentType} on ${pathname}`)
-      return new NextResponse('Bad Request', { status: 400 })
-    }
+    console.warn(`[SECURITY] Invalid content-type for API: ${contentType} on ${pathname}`)
+    return new NextResponse('Bad Request', { status: 400 })
+  }
   }
 
   // 检查请求体大小限制
