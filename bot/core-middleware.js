@@ -85,7 +85,23 @@ export function registerCoreMiddleware(bot) {
         if (!dbChat?.allowed) {
             if (!text) return
             if (!shouldWarnNow(chatId)) return
-            const msg = '本群尚未被后台允许使用，请联系管理员在后台将本群设置为允许后再使用。'
+            // 获取自定义的未授权提示消息
+            let msg = '本群尚未被后台允许使用，请联系管理员在后台将本群设置为允许后再使用。'
+            try {
+                const settings = await prisma.setting.findUnique({
+                    where: { chatId },
+                    select: { authPromptMessage: true, showAuthPrompt: true }
+                })
+                if (settings?.authPromptMessage?.trim()) {
+                    msg = settings.authPromptMessage.trim()
+                }
+                // 检查是否应该显示提示
+                if (settings?.showAuthPrompt === false) {
+                    return
+                }
+            } catch (e) {
+                // 如果查询失败，使用默认消息
+            }
             try { await ctx.reply(msg) } catch { }
             return
         }

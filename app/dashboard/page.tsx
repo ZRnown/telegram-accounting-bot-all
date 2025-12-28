@@ -1964,7 +1964,23 @@ function DashboardPageInner() {
                                               const chatId = it.id
                                               setQuickSettingsCache((c) => ({
                                                 ...c,
-                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '' }), welcomeMessage: e.target.value }
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '' }), welcomeMessage: e.target.value }
+                                              }))
+                                            }}
+                                          />
+                                        </div>
+                                        <div className="mt-2">
+                                          <label className="block text-sm font-medium mb-1">未授权提示消息</label>
+                                          <textarea
+                                            className="w-full px-3 py-2 border rounded-md text-sm"
+                                            placeholder="非白名单用户拉机器人进群时显示的消息，支持 Markdown 格式。留空则使用默认消息。"
+                                            rows={2}
+                                            value={quickSettingsCache[it.id]?.authPromptMessage || ''}
+                                            onChange={(e) => {
+                                              const chatId = it.id
+                                              setQuickSettingsCache((c) => ({
+                                                ...c,
+                                                [chatId]: { ...(c[chatId] || { addressVerificationEnabled: false, deleteBillConfirm: false, calculatorEnabled: true, showAuthPrompt: true, welcomeMessage: '', authPromptMessage: '' }), authPromptMessage: e.target.value }
                                               }))
                                             }}
                                           />
@@ -1986,7 +2002,8 @@ function DashboardPageInner() {
                                                   deleteBillConfirm: settings.deleteBillConfirm,
                                                   calculatorEnabled: settings.calculatorEnabled,
                                                   showAuthPrompt: settings.showAuthPrompt,
-                                                  welcomeMessage: settings.welcomeMessage || null
+                                                  welcomeMessage: settings.welcomeMessage || null,
+                                                  authPromptMessage: settings.authPromptMessage || null
                                                 })
                                               })
                                               if (!res.ok) {

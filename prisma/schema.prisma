@@ -99,6 +99,7 @@ model Setting {
   calculatorEnabled          Boolean        @default(true) // 🔥 计算器功能开关，默认开启
   showAuthPrompt             Boolean        @default(true) // 🔥 是否在被拉进非授权群时显示授权提示，默认开启
   welcomeMessage             String?        // 🔥 新增：拉群成功后的欢迎消息
+  authPromptMessage          String?        // 🔥 新增：非授权群组的自定义提示消息
   chat                       Chat           @relation(fields: [chatId], references: [id])
 }
 

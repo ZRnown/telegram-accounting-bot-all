@@ -197,6 +197,13 @@ export async function isAdmin(ctx) {
 }
 
 /**
+ * 检查管理员权限（简化版本的 isAdmin）
+ */
+export async function hasAdminPermission(ctx) {
+  return await isAdmin(ctx)
+}
+
+/**
  * 检查是否有操作权限
  */
 export async function hasOperatorPermission(ctx, chat) {
