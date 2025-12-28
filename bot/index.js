@@ -581,10 +581,41 @@ async function updateAllRealtimeRates() {
     const okxRate = sellers[0].price
 
     // 更新数据库中所有使用实时汇率的群组
-    await prisma.setting.updateMany({
-      where: { fixedRate: null },
-        data: { realtimeRate: okxRate } 
+    try {
+      await prisma.setting.updateMany({
+        where: { fixedRate: null },
+        data: { realtimeRate: okxRate }
       })
+    } catch (error) {
+      console.error('[定时任务] 汇率更新数据库写入失败:', error.message)
+
+      // 如果是只读数据库错误，尝试逐个更新
+      if (error.message.includes('readonly database') || error.message.includes('read-only')) {
+        console.log('[定时任务] 检测到只读数据库，尝试修复权限...')
+
+        // 获取需要更新的设置
+        const settings = await prisma.setting.findMany({
+          where: { fixedRate: null },
+          select: { chatId: true }
+        })
+
+        // 逐个更新，避免updateMany的问题
+        for (const setting of settings) {
+          try {
+            await prisma.setting.update({
+              where: { chatId: setting.chatId },
+              data: { realtimeRate: okxRate }
+            })
+          } catch (updateError) {
+            console.error(`[定时任务] 更新群组 ${setting.chatId} 汇率失败:`, updateError.message)
+          }
+        }
+
+        console.log(`[定时任务] 逐个更新完成，共处理 ${settings.length} 个群组`)
+      } else {
+        throw error // 重新抛出非只读错误
+      }
+    }
 
     if (process.env.DEBUG_BOT === 'true') {
         logger.debug(`[定时任务] 汇率更新: ${okxRate}`)

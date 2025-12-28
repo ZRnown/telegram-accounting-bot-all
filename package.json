@@ -11,7 +11,8 @@
     "bot:multi": "node bot/manager.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "fix-db": "node scripts/fix-db-permissions.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
