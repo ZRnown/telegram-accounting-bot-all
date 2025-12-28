@@ -40,22 +40,22 @@ INSERT OR IGNORE INTO Setting (
     id, chatId, feePercent, fixedRate, realtimeRate, displayMode,
     headerText, everyoneAllowed, accountingMode, featureWarningMode,
     addressVerificationEnabled, dailyCutoffHour, hideHelpButton,
-    hideOrderButton, overDepositLimit, deleteBillConfirm,
-    accountingEnabled, calculatorEnabled
+    hideOrderButton, overDepositLimit, lastOverDepositWarning, deleteBillConfirm,
+    accountingEnabled, calculatorEnabled, showAuthPrompt, welcomeMessage
 )
 VALUES
-('cmhr74stv00f51sba2la7hj3d','7862093562',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmi1akjvl0alw1swnk8qxkewe','7976547423',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmi2os6wd000n1sgj3xplgvhg','7976867022',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmibcqlbv00014h7yldigiklx','7141784616',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmiyy2dos002d4h8ypvkiuf1s','5105102824',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmj8byca50o0i4h8xphrw5q26','7189041207',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmja7fz060sac4h8xscf81b9f','5455854362',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmjf5ky8v00014hry7v8lgdfw','8221140785',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmjgxw4w701l64hrzegrtisw3','7721494680',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmjm9omri0cig4hry1ghldoj2','-5078116365',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmjm9osz706834hrzptpofs1z','-5030978535',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1),
-('cmjmfzbu10cim4hry32frhrmw','-5181543741',0.0,40.0,NULL,1,NULL,0,'DAILY_RESET','always',1,0,0,0,0.0,NULL,0,1,1);
+('cmhr74stv00f51sba2la7hj3d','7862093562',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmi1akjvl0alw1swnk8qxkewe','7976547423',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmi2os6wd000n1sgj3xplgvhg','7976867022',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmibcqlbv00014h7yldigiklx','7141784616',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmiyy2dos002d4h8ypvkiuf1s','5105102824',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmj8byca50o0i4h8xphrw5q26','7189041207',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmja7fz060sac4h8xscf81b9f','5455854362',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmjf5ky8v00014hry7v8lgdfw','8221140785',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmjgxw4w701l64hrzegrtisw3','7721494680',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmjm9omri0cig4hry1ghldoj2','-5078116365',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmjm9osz706834hrzptpofs1z','-5030978535',0.0,NULL,6.9100000000000001421,1,NULL,0,'DAILY_RESET','always',0,0,0,0,0.0,NULL,0,1,1,1,NULL),
+('cmjmfzbu10cim4hry32frhrmw','-5181543741',0.0,40.0,NULL,1,NULL,0,'DAILY_RESET','always',1,0,0,0,0.0,NULL,0,1,1,1,NULL);
 
 -- 导入 Bill 表数据
 INSERT OR IGNORE INTO Bill (id, chatId, status, openedAt, savedAt, closedAt)
