@@ -1,7 +1,7 @@
 // 管理员相关命令处理器
 import { prisma } from '../../lib/db.js'
 import { ensureDbChat } from '../database.js'
-import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, getEffectiveRate, getDisplayCurrencySymbol } from '../helpers.js'
+import { buildInlineKb, isAdmin, hasPermissionWithWhitelist, hasOperatorPermission, getEffectiveRate, getDisplayCurrencySymbol } from '../helpers.js'
 import { setGlobalDailyCutoffHour } from '../utils.js'
 import { getChat } from '../state.js'
 

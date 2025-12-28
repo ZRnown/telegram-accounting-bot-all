@@ -2076,7 +2076,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const chat = getChat(botId, chatId)
+      const chat = ensureChat(ctx)
       const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx, chat)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
@@ -2123,7 +2123,7 @@ export function registerFeatureToggles(bot, ensureChat) {
       }
 
       // 检查权限
-      const chat = getChat(botId, chatId)
+      const chat = ensureChat(ctx)
       const hasPermission = await isAdmin(ctx) || await hasOperatorPermission(ctx, chat)
       if (!hasPermission) {
         await ctx.reply('⚠️ 只有管理员或操作员可以使用此功能')
