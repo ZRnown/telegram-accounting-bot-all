@@ -251,12 +251,13 @@ export function registerBroadcast(bot) {
   // 第一步：全员广播命令
   bot.hears(/^全员广播$/, async (ctx) => {
     const userId = String(ctx.from?.id || '')
+    const botId = await ensureCurrentBotId(ctx.bot)
 
-    // 🔥 只允许管理员和白名单用户使用群发功能
+    // 🔥 安全加固：只允许白名单用户使用广播功能（管理员也必须在白名单中）
     const chat = getChat(botId, String(ctx.chat?.id || ''))
-    const hasPermission = await isAdmin(ctx) || (chat ? await hasPermissionWithWhitelist(ctx, chat) : false)
+    const hasPermission = chat ? await hasPermissionWithWhitelist(ctx, chat) : false
     if (!hasPermission) {
-      return ctx.reply('⚠️ 权限不足。只有管理员或白名单用户可以使用群发功能。')
+      return ctx.reply('🚫 权限不足。只有白名单用户可以使用广播功能。\n\n请联系管理员将您添加到白名单中。')
     }
 
     // 设置广播状态
@@ -1503,13 +1504,14 @@ export function registerGroupBroadcast(bot) {
   // 第一步：分组广播命令
   bot.hears(/^分组广播$/, async (ctx) => {
     const userId = String(ctx.from?.id || '')
-
-    // 🔥 严格校验是否为超级管理员
-    if (!(await isAdmin(ctx))) {
-      return
-    }
-
     const botId = await ensureCurrentBotId(ctx.bot)
+
+    // 🔥 安全加固：只允许白名单用户使用广播功能（管理员也必须在白名单中）
+    const chat = getChat(botId, String(ctx.chat?.id || ''))
+    const hasPermission = chat ? await hasPermissionWithWhitelist(ctx, chat) : false
+    if (!hasPermission) {
+      return ctx.reply('🚫 权限不足。只有白名单用户可以使用广播功能。\n\n请联系管理员将您添加到白名单中。')
+    }
 
     // 获取所有分组
     const groups = await prisma.chatGroup.findMany({
