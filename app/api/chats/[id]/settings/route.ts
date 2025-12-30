@@ -1,8 +1,13 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
-export async function GET(_: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    // 🔥 安全检查：只有管理员才能查看特定群组的设置
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id: chatId } = await context.params
     const chat = await prisma.chat.findUnique({ where: { id: chatId }, select: { id: true, title: true } })
     if (!chat) return new Response('Not Found', { status: 404 })
@@ -37,6 +42,10 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
 
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    // 🔥 安全检查：只有管理员才能修改特定群组的设置
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id: chatId } = await context.params
     const body = (await req.json().catch(() => ({}))) as {
       title?: string

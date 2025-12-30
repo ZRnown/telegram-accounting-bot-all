@@ -75,7 +75,7 @@ export function isAccountingCommand(text) {
 
 // 🔥 记账开关缓存（减少数据库查询，🔥 内存优化：减少缓存大小）
 const accountingEnabledCache = new LRUCache(100)
-const ACCOUNTING_CACHE_TTL_MS = 5 * 60 * 1000 // 5分钟
+const ACCOUNTING_CACHE_TTL_MS = 1 * 60 * 1000 // 🔥 降低缓存时间：从5分钟减少到1分钟，删除操作员后权限更快生效
 
 /**
  * 检查记账是否启用（带缓存优化）

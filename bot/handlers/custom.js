@@ -71,8 +71,7 @@ async function delCmd(chatId, trigger) {
 }
 
 export function registerCustomCommands(bot, ensureChat) {
-  // 群组内自定义指令功能已禁用，只保留后台管理指令
-  // 如需恢复，请取消注释以下代码
+  // 🔥 恢复群组内自定义指令功能
 
   bot.on('text', async (ctx, next) => {
   // 添加/编辑 文本指令：添加自定义指令 <触发词> <内容>

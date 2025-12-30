@@ -52,9 +52,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       select: { id: true }
     })
 
-    // 为每个群组更新设置
-    for (const chat of chats) {
-      await prisma.setting.upsert({
+    // 🔥 并发优化：使用Promise.all并行更新所有群组，避免顺序执行导致的超时
+    const updatePromises = chats.map(chat =>
+      prisma.setting.upsert({
         where: { chatId: chat.id },
         create: {
           chatId: chat.id,
@@ -63,8 +63,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         update: {
           nonWhitelistWelcomeMessage: message || null
         }
+      }).catch(error => {
+        console.error(`[non-whitelist-message] 更新群组 ${chat.id} 失败:`, error.message)
+        // 继续处理其他群组，不因单个失败而中断
+        return null
       })
-    }
+    )
+
+    // 等待所有更新完成
+    await Promise.all(updatePromises)
 
     return Response.json({
       success: true,

@@ -1,6 +1,6 @@
 // 扩展功能处理器：USDT查询、管理员群发、功能开关
 import { prisma } from '../../lib/db.js'
-import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission } from '../helpers.js'
+import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission, hasWhitelistOnlyPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
 import { safeCalculate, getChat } from '../state.js'
@@ -251,11 +251,9 @@ export function registerBroadcast(bot) {
   // 第一步：全员广播命令
   bot.hears(/^全员广播$/, async (ctx) => {
     const userId = String(ctx.from?.id || '')
-    const botId = await ensureCurrentBotId(ctx.bot)
 
-    // 🔥 安全加固：只允许白名单用户使用广播功能（管理员也必须在白名单中）
-    const chat = getChat(botId, String(ctx.chat?.id || ''))
-    const hasPermission = chat ? await hasPermissionWithWhitelist(ctx, chat) : false
+    // 🔥 安全加固：只允许白名单用户使用广播功能（操作员不能使用广播！）
+    const hasPermission = await hasWhitelistOnlyPermission(ctx)
     if (!hasPermission) {
       return ctx.reply('🚫 权限不足。只有白名单用户可以使用广播功能。\n\n请联系管理员将您添加到白名单中。')
     }
@@ -1504,14 +1502,14 @@ export function registerGroupBroadcast(bot) {
   // 第一步：分组广播命令
   bot.hears(/^分组广播$/, async (ctx) => {
     const userId = String(ctx.from?.id || '')
-    const botId = await ensureCurrentBotId(ctx.bot)
 
-    // 🔥 安全加固：只允许白名单用户使用广播功能（管理员也必须在白名单中）
-    const chat = getChat(botId, String(ctx.chat?.id || ''))
-    const hasPermission = chat ? await hasPermissionWithWhitelist(ctx, chat) : false
+    // 🔥 安全加固：只允许白名单用户使用广播功能（操作员不能使用广播！）
+    const hasPermission = await hasWhitelistOnlyPermission(ctx)
     if (!hasPermission) {
       return ctx.reply('🚫 权限不足。只有白名单用户可以使用广播功能。\n\n请联系管理员将您添加到白名单中。')
     }
+
+    const botId = await ensureCurrentBotId(ctx.bot)
 
     // 获取所有分组
     const groups = await prisma.chatGroup.findMany({

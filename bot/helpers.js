@@ -252,6 +252,38 @@ export async function hasPermissionWithWhitelist(ctx, chat) {
 }
 
 /**
+ * 🔥 安全强化：只检查白名单用户权限（用于广播等敏感功能）
+ * 操作员不能使用广播功能，只有白名单用户才能使用
+ * @param {object} ctx - Telegraf 上下文
+ * @returns {Promise<boolean>} 是否有白名单权限
+ */
+export async function hasWhitelistOnlyPermission(ctx) {
+  // 只检查白名单，不检查操作员权限
+  const userId = String(ctx.from?.id || '')
+  if (userId) {
+    try {
+      const whitelistedUser = await prisma.whitelistedUser.findUnique({
+        where: { userId }
+      })
+
+      const hasPermission = !!whitelistedUser
+      console.log('[hasWhitelistOnlyPermission]', {
+        userId,
+        username: ctx.from?.username,
+        hasPermission,
+        whitelistedUser: whitelistedUser ? 'found' : 'not found'
+      })
+
+      return hasPermission
+    } catch (error) {
+      console.error('[hasWhitelistOnlyPermission] 数据库查询失败:', error.message)
+      return false
+    }
+  }
+  return false
+}
+
+/**
  * 获取用户名（简化版本）
  */
 export function getUsername(ctx) {
