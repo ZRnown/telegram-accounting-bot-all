@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
         name: true,
         description: true,
         enabled: true,
-        token: false, // ❌ 移除token字段，避免泄露
+        // 🔥 安全修复：明确列出需要的字段，绝对不要包含 token
+        // 使用白名单模式，只选择明确需要的字段
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -24,10 +25,16 @@ export async function GET(req: NextRequest) {
         },
       },
     })
+
+    // 🔥 二次清洗：即使数据库返回了 token (万一 prisma 写错了)，这里也要手动删除
+    const safeBots = bots.map((b: any) => {
+      const { token, ...safeBot } = b // 解构出 token 并丢弃
+      return safeBot
+    })
     
     // 🔥 尝试从Telegram API获取机器人真实名字（需要token，临时查询）
     const botsWithRealName = await Promise.all(
-      bots.map(async (bot: any) => {
+      safeBots.map(async (bot: any) => {
         try {
           // 临时查询token用于API调用
           const botWithToken = await prisma.bot.findUnique({

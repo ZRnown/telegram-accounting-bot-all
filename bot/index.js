@@ -39,6 +39,13 @@ if (process.env.NODE_ENV === 'production') {
   console.info = () => {} // 只保留error和warn
 }
 
+// 🛡️ 安全增强：token打码函数
+function maskToken(token) {
+  if (!token || typeof token !== 'string') return '***'
+  if (token.length <= 10) return '***'
+  return token.substring(0, 6) + '...' + token.substring(token.length - 4)
+}
+
 // 🔥 加载环境变量（如果未设置）
 if (!process.env.BOT_TOKEN) {
   // fallback: try load config/env next to repo root
@@ -510,8 +517,8 @@ bot.use(async (ctx, next) => {
         botId,
         dbBotId: dbChat?.botId || null,
         allowed: !!dbChat?.allowed,
-        currentToken4: mask(currentToken),
-        boundToken4: mask(boundToken),
+        currentToken4: maskToken(currentToken),
+        boundToken4: maskToken(boundToken),
       })
     } catch {}
   }

@@ -41,10 +41,13 @@ function checkRateLimit(clientId: string): boolean {
 }
 
 function getClientId(request: NextRequest): string {
-  // 🛡️ 优先使用真实IP，增强安全性
+  // 🛡️ 修复：Cloudflare环境下优先使用cf-connecting-ip获取真实IP
+  // 如果不这样，所有流量看起来都来自Cloudflare，限流会失效
+  const cfConnectingIp = request.headers.get('cf-connecting-ip')
   const forwarded = request.headers.get('x-forwarded-for')
   const realIp = request.headers.get('x-real-ip')
-  const cfConnectingIp = request.headers.get('cf-connecting-ip') // Cloudflare
+
+  // 优先级：cf-connecting-ip > x-real-ip > x-forwarded-for
   const ip = cfConnectingIp || realIp || forwarded?.split(',')[0].trim() || 'unknown'
 
   // 🛡️ 检查是否为已知恶意IP
