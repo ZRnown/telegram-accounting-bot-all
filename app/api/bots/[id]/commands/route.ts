@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server'
+import { assertAdmin } from '@/app/api/_auth'
 
 function ok(data: any) { return Response.json(data) }
 function bad(msg = 'Bad Request', code = 400) { return new Response(msg, { status: code }) }
-function isAdmin(req: NextRequest) { return (req.headers.get('x-auth-token') || '') === 'authenticated' }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    if (!isAdmin(req)) return bad('Unauthorized', 401)
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
     const p = await params
     const botId = p?.id
     if (!botId) return bad('Missing bot id', 400)

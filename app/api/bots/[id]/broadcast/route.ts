@@ -1,9 +1,13 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ProxyAgent } from 'undici'
+import { assertAdmin } from '@/app/api/_auth'
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id } = await context.params
     const body = await req.json().catch(() => ({})) as { 
       message?: string

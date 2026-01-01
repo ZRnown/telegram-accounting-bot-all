@@ -69,6 +69,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const body = await req.json().catch(() => ({})) as {
       name?: string
       description?: string
@@ -87,8 +90,8 @@ export async function POST(req: NextRequest) {
       data: {
         name: body.name,
         description: body.description,
-        token: body.token, // ⚠️  保留明文用于向后兼容，后续可移除
-        tokenHash, // 🔥 存储哈希token
+        token: body.token, // 🔥 存储加密token（生产环境应加密）
+        tokenHash, // 🔥 存储哈希token用于验证
         enabled: body.enabled ?? true,
       },
       select: {

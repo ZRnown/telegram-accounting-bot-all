@@ -1,8 +1,12 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
-export async function GET(_: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id } = await context.params
     const bot = await prisma.bot.findUnique({
       where: { id },
@@ -35,6 +39,9 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
 
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id } = await context.params
     const body = await req.json().catch(() => ({})) as {
       name?: string
@@ -47,7 +54,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (typeof body.name === 'string') data.name = body.name
     if (body.description !== undefined) data.description = body.description
     if (typeof body.enabled === 'boolean') data.enabled = body.enabled
-    if (body.token !== undefined && body.token !== null) data.token = body.token
+    if (body.token !== undefined && body.token !== null) {
+      data.token = body.token
+      // 重新生成token哈希
+      const { hashToken } = await import('@/lib/token-security')
+      data.tokenHash = await hashToken(body.token)
+    }
 
     if (Object.keys(data).length === 0) return new Response('Bad Request', { status: 400 })
 
@@ -69,8 +81,11 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   }
 }
 
-export async function DELETE(_: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id } = await context.params
     await prisma.bot.delete({ where: { id } })
     return new Response(null, { status: 204 })

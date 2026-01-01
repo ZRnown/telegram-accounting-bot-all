@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { assertAdmin } from '@/app/api/_auth'
 
 export async function GET(_: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -27,6 +28,9 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const unauth = assertAdmin(req)
+    if (unauth) return unauth
+
     const { id: botId } = await context.params
     const body = await req.json().catch(() => ({}))
 
