@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// 🛡️ 最高安全级别：敏感路径保护
+// 🛡️ 安全级别：敏感路径保护（临时放宽登录相关路径）
 const SENSITIVE_PATHS = [
   '/api/auth',
   '/api/bots',
@@ -11,6 +11,12 @@ const SENSITIVE_PATHS = [
   '/api/logs',
   '/dashboard',
   '/admin'
+]
+
+// 🛡️ 白名单路径：这些路径跳过所有安全检查
+const WHITELIST_PATHS = [
+  '/api/auth/login',
+  '/api/auth/me'
 ]
 
 // 🛡️ 最高安全级别：API速率限制存储（内存中，生产环境建议使用Redis）
@@ -66,6 +72,11 @@ export function middleware(request: NextRequest) {
   const userAgent = request.headers.get('user-agent') || ''
   const host = request.headers.get('host') || ''
 
+  // 🛡️ 白名单路径直接放行，跳过所有安全检查
+  if (WHITELIST_PATHS.some(path => pathname.startsWith(path))) {
+    return NextResponse.next()
+  }
+
   // 🛡️ 获取客户端标识
   let clientId: string
   try {
@@ -91,7 +102,10 @@ export function middleware(request: NextRequest) {
   }
 
   // 🔥 安全增强：检查敏感路径的速率限制
-  const isSensitivePath = SENSITIVE_PATHS.some(path => pathname.startsWith(path))
+  // 排除掉 /api/auth/me 和 /api/auth/login 这种高频调用的轻量接口，防止误伤
+  const isSensitivePath = SENSITIVE_PATHS.some(path => pathname.startsWith(path)) &&
+                         !pathname.startsWith('/api/auth/me') &&
+                         !pathname.startsWith('/api/auth/login')
   if (isSensitivePath) {
     const clientId = getClientId(request)
 
@@ -121,7 +135,7 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // 🛡️ 最高安全级别：阻止常见的攻击载荷
+  // 🛡️ 安全级别：阻止常见的攻击载荷（放宽API路径检查）
   const suspiciousPatterns = [
     /(\.\.|\\|%2e%2e|%2e)/i, // 路径遍历
     /(<script|javascript:|data:|vbscript:|onload=|onerror=)/i, // XSS
@@ -130,13 +144,21 @@ export function middleware(request: NextRequest) {
     /(eval\(|exec\(|system\(|shell_exec\()/i, // 代码执行
     /(<iframe|<object|<embed|<form|<input)/i, // HTML注入
     /(base64|data:text|javascript:void)/i, // 数据URL攻击
-    /([a-zA-Z0-9]{100,})/, // 超长字符串（可能为缓冲区溢出）
+    // 移除超长字符串检查，避免误判正常请求
   ]
 
   const url = request.url
   const body = request.body ? 'has-body' : 'no-body'
 
-  for (const pattern of suspiciousPatterns) {
+  // 对API路径放宽安全检查，避免误判正常请求
+  const isApiRequest = pathname.startsWith('/api/')
+  const patternsToCheck = isApiRequest ?
+    // API请求只检查最危险的模式
+    suspiciousPatterns.filter(p => !p.toString().includes('[a-zA-Z0-9]{100,}')) :
+    // 非API请求检查所有模式
+    suspiciousPatterns
+
+  for (const pattern of patternsToCheck) {
     if (pattern.test(url) || pattern.test(userAgent) || pattern.test(pathname)) {
       console.warn(`[SECURITY] Suspicious request blocked: ${method} ${url} UA: ${userAgent.slice(0, 100)}`)
       const clientIP = clientId.split(':')[0]
