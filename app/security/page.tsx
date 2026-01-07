@@ -14,10 +14,11 @@ export default function SecurityPage() {
   const [ok, setOk] = useState("")
   const [loading, setLoading] = useState(false)
   const [passwordChanged, setPasswordChanged] = useState(false) // 防止重复认证检查
+  const [redirecting, setRedirecting] = useState(false) // 防止重复跳转
 
   useEffect(() => {
-    // 如果密码已经修改，跳过认证检查
-    if (passwordChanged) return
+    // 如果密码已经修改或正在跳转，跳过认证检查
+    if (passwordChanged || redirecting) return
 
     setMounted(true)
     // 检查管理员会话（使用cookie-based认证）
@@ -50,7 +51,7 @@ export default function SecurityPage() {
         console.error('[Security Page] Auth check error:', err)
         router.push("/")
       })
-  }, [passwordChanged]) // 添加 passwordChanged 依赖
+  }, [passwordChanged, redirecting]) // 添加依赖
 
   if (!mounted) return null
 
@@ -126,11 +127,24 @@ export default function SecurityPage() {
 
                     if (res.status === 204) {
                       console.log('[Change Password] Success, redirecting...')
+
+                      // 立即设置所有状态，防止任何后续认证检查
+                      setPasswordChanged(true)
+                      setRedirecting(true)
                       setOk("修改成功，正在跳转到登录页面...")
+                      setLoading(false) // 确保loading状态也被重置
+
                       // 清除本地存储的用户信息（会话已通过后端失效）
                       localStorage.removeItem('auth_user')
-                      // 使用硬跳转，完全重新加载页面，避免会话检查
-                      window.location.href = '/'
+
+                      // 立即跳转，不要等待任何React状态更新
+                      console.log('[Change Password] Executing immediate redirect...')
+
+                      // 防止任何后续的异步操作
+                      setTimeout(() => {
+                        window.location.replace('/') // 使用replace而不是href，避免历史记录问题
+                      }, 0)
+
                       return
                     } else {
                       console.error('[Change Password] Failed:', res.status, responseText)

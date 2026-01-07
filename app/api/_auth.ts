@@ -39,31 +39,51 @@ export function verifySession(raw: string | null) {
 export function setSessionCookie(res: NextResponse, username: string, ver: number = 0) {
   const v = createSession(username, ver)
 
-  // 🔥 安全增强：强制HTTPS环境下的Cookie安全设置
-  // 生产环境必须使用HTTPS，否则Cookie不安全
+  // 🔥 安全增强：检测当前请求是否为HTTPS
+  // 检查请求头或环境变量
   const isHttps = process.env.NODE_ENV === 'production' ||
                   process.env.FORCE_HTTPS === 'true' ||
+                  res.headers.get('x-forwarded-proto') === 'https' ||
+                  res.headers.get('x-scheme') === 'https' ||
                   (typeof window !== 'undefined' && window.location?.protocol === 'https:')
 
-  // 🔥 安全增强：Cloudflare环境下使用Lax，生产环境使用Strict
-  // Cloudflare代理可能导致Strict模式下的Cookie问题
-  const sameSite = process.env.NODE_ENV === 'production' ? 'lax' : 'strict'
+  // 🔥 安全增强：根据环境和请求特征调整SameSite策略
+  // 开发环境、本地环境使用lax，生产环境使用strict（但可通过环境变量调整）
+  let sameSite: 'strict' | 'lax' | 'none' = 'strict'
 
-  console.log('[Auth] Setting cookie - HTTPS:', isHttps, 'SameSite:', sameSite)
+  // 如果是开发环境或者本地请求，放宽限制
+  if (process.env.NODE_ENV !== 'production' ||
+      process.env.COOKIE_SAME_SITE === 'lax' ||
+      process.env.FORCE_COOKIE_LAX === 'true') {
+    sameSite = 'lax'
+  }
+
+  // 本地开发环境检测（通过主机名判断）
+  const hostname = res.headers.get('host') || ''
+  if (hostname.includes('localhost') || hostname.includes('127.0.0.1') || hostname.includes('0.0.0.0')) {
+    sameSite = 'lax'
+    console.log('[Auth] Local development detected, using lax SameSite')
+  }
+
+  console.log('[Auth] Setting cookie - HTTPS:', isHttps, 'SameSite:', sameSite, 'Env:', process.env.NODE_ENV)
 
   res.cookies.set({
     name: COOKIE_NAME,
     value: v,
     httpOnly: true, // 防止JS读取
-    sameSite: sameSite, // 🔥 Cloudflare环境下使用Lax
-    secure: isHttps, // 🔥 只有HTTPS时才设置Secure
+    sameSite: sameSite,
+    secure: isHttps, // 🔥 只有在HTTPS环境下才设置Secure
     path: '/',
     maxAge: MAX_AGE,
   })
 
-  // 🔥 安全增强：如果在HTTP环境下，记录警告
-  if (!isHttps && process.env.NODE_ENV === 'production') {
-    console.warn('⚠️ 安全警告：生产环境使用HTTP，Cookie可能被中间人攻击劫持！请配置HTTPS。')
+  // 🔥 安全警告
+  if (!isHttps) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('⚠️ 安全警告：生产环境使用HTTP，Cookie可能被中间人攻击劫持！请配置HTTPS。')
+    } else {
+      console.log('ℹ️ 开发环境使用HTTP，Cookie设置为非Secure模式')
+    }
   }
 }
 
