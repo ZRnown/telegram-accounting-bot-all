@@ -13,19 +13,25 @@ export default function SecurityPage() {
   const [error, setError] = useState("")
   const [ok, setOk] = useState("")
   const [loading, setLoading] = useState(false)
+  const [passwordChanged, setPasswordChanged] = useState(false) // 防止重复认证检查
 
   useEffect(() => {
+    // 如果密码已经修改，跳过认证检查
+    if (passwordChanged) return
+
     setMounted(true)
     // 检查管理员会话（使用cookie-based认证）
     fetch('/api/auth/me', { cache: 'no-store' })
       .then(res => {
         if (!res.ok) {
+          console.error('[Security Page] Auth check failed:', res.status)
           router.push("/")
           return
         }
         return res.json()
       })
       .then(data => {
+        console.log('[Security Page] Auth check success:', data)
         if (data?.username) {
           setUsername(data.username)
         } else {
@@ -33,10 +39,11 @@ export default function SecurityPage() {
           setUsername(u)
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[Security Page] Auth check error:', err)
         router.push("/")
       })
-  }, [router])
+  }, [passwordChanged]) // 添加 passwordChanged 依赖
 
   if (!mounted) return null
 
@@ -99,19 +106,24 @@ export default function SecurityPage() {
                   if (newPassword !== confirm) { setError("两次输入的新密码不一致"); return }
                   setLoading(true)
                   try {
+                    console.log('[Change Password] Sending request...')
                     const res = await fetch('/api/auth/change-password', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ username, oldPassword, newPassword })
                     })
+                    console.log('[Change Password] Response status:', res.status)
                     if (res.status === 204) {
-                      setOk("修改成功，请使用新密码重新登录")
+                      console.log('[Change Password] Success, redirecting...')
+                      setPasswordChanged(true) // 设置状态，防止重新认证检查
+                      setOk("修改成功，正在跳转到登录页面...")
                       // 清除本地存储的用户信息（会话已通过后端失效）
                       localStorage.removeItem('auth_user')
-                      // 延迟跳转到登录页面
-                      setTimeout(() => router.push('/'), 1200)
+                      // 立即跳转到登录页面，避免重新认证检查
+                      router.push('/')
                     } else {
                       const text = await res.text().catch(() => '')
+                      console.error('[Change Password] Failed:', res.status, text)
                       setError(text || '修改失败')
                     }
                   } catch {
