@@ -297,7 +297,7 @@ bot.on('message', async (ctx, next) => {
 
         // 检查是否已经发送过欢迎消息（避免重复发送）
         const existingChat = await prisma.chat.findUnique({
-          where: { id: chatId },
+        where: { id: chatId },
           select: { status: true, invitedBy: true }
         })
 
@@ -329,7 +329,7 @@ bot.on('message', async (ctx, next) => {
             logger.info('[message] 白名单欢迎消息发送成功', { chatId, userId })
           } catch (e) {
             logger.error('[message] 发送白名单欢迎消息失败', { chatId, userId, error: e.message })
-          }
+        }
         }
       }
     }
@@ -669,13 +669,13 @@ async function updateAllRealtimeRates() {
       // 容错：逐个更新逻辑
       const allSettings = await prisma.setting.findMany({
         where: { fixedRate: null },
-        select: { chatId: true }
-      })
+          select: { chatId: true }
+        })
 
       for (const s of allSettings) {
-        await prisma.setting.update({
+            await prisma.setting.update({
           where: { chatId: s.chatId },
-          data: { realtimeRate: okxRate }
+              data: { realtimeRate: okxRate }
         }).catch(() => {}) // 忽略单个失败
       }
     }

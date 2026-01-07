@@ -44,25 +44,50 @@ export async function POST(req: NextRequest) {
         if (!p.startsWith('/')) p = path.resolve(process.cwd(), p)
         const dir = path.dirname(p)
         console.log('[Change Password API] Database path:', p, 'Directory:', dir)
+
+        // 确保目录存在
         if (!fs.existsSync(dir)) {
           console.log('[Change Password API] Creating directory...')
           fs.mkdirSync(dir, { recursive: true })
         }
+
+        // 确保文件存在
         if (!fs.existsSync(p)) {
           console.log('[Change Password API] Creating database file...')
-          fs.closeSync(fs.openSync(p, 'a'))
+          fs.closeSync(fs.openSync(p, 'w'))
         }
-        // 修复权限
-        try {
-          fs.chmodSync(p, 0o644)
-          fs.chmodSync(dir, 0o755)
-          console.log('[Change Password API] Database permissions fixed')
-        } catch (permErr) {
-          console.warn('[Change Password API] Could not fix permissions:', permErr.message)
+
+        // 多次尝试修复权限
+        let permissionsFixed = false
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            fs.chmodSync(p, 0o644)
+            fs.chmodSync(dir, 0o755)
+            console.log(`[Change Password API] Database permissions fixed (attempt ${attempt})`)
+
+            // 测试写入权限
+            const testData = 'test_write_' + Date.now()
+            fs.appendFileSync(p, testData)
+            const stats = fs.statSync(p)
+            fs.truncateSync(p, stats.size - testData.length)
+            console.log('[Change Password API] Database write test successful')
+            permissionsFixed = true
+            break
+          } catch (permErr) {
+            console.warn(`[Change Password API] Permission fix attempt ${attempt} failed:`, permErr.message)
+            if (attempt === 3) {
+              console.error('[Change Password API] All permission fix attempts failed')
+            }
+          }
+        }
+
+        if (!permissionsFixed) {
+          console.warn('[Change Password API] Continuing without permission fix - may cause database errors')
         }
       }
     } catch (dbErr) {
       console.error('[Change Password API] Database setup error:', dbErr.message)
+      // 继续执行，不要因为数据库设置失败而中断密码修改
     }
 
     const body = await req.json().catch(() => ({})) as { username?: string; oldPassword?: string; newPassword?: string }

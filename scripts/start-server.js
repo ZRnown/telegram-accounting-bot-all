@@ -11,32 +11,69 @@ const __dirname = dirname(__filename);
 // 修复数据库权限
 function fixDatabasePermissions() {
   const dbPath = process.env.DATABASE_URL || 'file:./data/app.db';
+  console.log('🔧 检查数据库路径:', dbPath);
+
   if (dbPath.startsWith('file:')) {
     let dbFile = dbPath.slice(5);
     if (!dbFile.startsWith('/')) {
       dbFile = join(process.cwd(), dbFile);
     }
 
+    console.log('📁 数据库文件路径:', dbFile);
+
     try {
       // 确保数据库目录存在
       const dbDir = dirname(dbFile);
+      console.log('📂 数据库目录:', dbDir);
+
       if (!fs.existsSync(dbDir)) {
+        console.log('📂 创建数据库目录...');
         fs.mkdirSync(dbDir, { recursive: true });
+        console.log('📂 数据库目录创建成功');
       }
 
-      // 确保数据库文件存在并有写入权限
+      // 检查目录权限
+      try {
+        fs.chmodSync(dbDir, 0o755);
+        console.log('📂 数据库目录权限已设置: 755');
+      } catch (dirPermErr) {
+        console.warn('⚠️ 无法设置目录权限:', dirPermErr.message);
+      }
+
+      // 确保数据库文件存在
       if (!fs.existsSync(dbFile)) {
-        // 创建空文件
+        console.log('📄 创建数据库文件...');
         fs.closeSync(fs.openSync(dbFile, 'w'));
+        console.log('📄 数据库文件创建成功');
       }
 
-      // 设置正确的权限 (644 for file, 755 for directory)
-      fs.chmodSync(dbFile, 0o644);
-      fs.chmodSync(dbDir, 0o755);
+      // 设置文件权限
+      try {
+        fs.chmodSync(dbFile, 0o644);
+        console.log('📄 数据库文件权限已设置: 644');
+      } catch (filePermErr) {
+        console.warn('⚠️ 无法设置文件权限:', filePermErr.message);
+      }
 
-      console.log('✅ 数据库权限已修复');
+      // 测试写入权限
+      try {
+        const testData = 'test';
+        fs.appendFileSync(dbFile, testData);
+        // 移除测试数据
+        const stats = fs.statSync(dbFile);
+        fs.truncateSync(dbFile, stats.size - testData.length);
+        console.log('✅ 数据库写入权限测试成功');
+      } catch (writeErr) {
+        console.error('❌ 数据库写入权限测试失败:', writeErr.message);
+        console.error('🔧 请手动修复数据库权限:');
+        console.error('   chmod 644', dbFile);
+        console.error('   chmod 755', dbDir);
+      }
+
+      console.log('✅ 数据库权限检查完成');
     } catch (error) {
-      console.error('❌ 修复数据库权限失败:', error.message);
+      console.error('❌ 数据库权限修复失败:', error.message);
+      console.error('🔧 请手动检查数据库路径和权限');
     }
   }
 }
