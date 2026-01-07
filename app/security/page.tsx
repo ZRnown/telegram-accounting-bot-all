@@ -16,13 +16,26 @@ export default function SecurityPage() {
 
   useEffect(() => {
     setMounted(true)
-    const token = localStorage.getItem("auth_token")
-    if (!token) {
-      router.push("/")
-      return
-    }
-    const u = localStorage.getItem("auth_user") || "admin"
-    setUsername(u)
+    // 检查管理员会话（使用cookie-based认证）
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then(res => {
+        if (!res.ok) {
+          router.push("/")
+          return
+        }
+        return res.json()
+      })
+      .then(data => {
+        if (data?.username) {
+          setUsername(data.username)
+        } else {
+          const u = localStorage.getItem("auth_user") || "admin"
+          setUsername(u)
+        }
+      })
+      .catch(() => {
+        router.push("/")
+      })
   }, [router])
 
   if (!mounted) return null
@@ -93,9 +106,9 @@ export default function SecurityPage() {
                     })
                     if (res.status === 204) {
                       setOk("修改成功，请使用新密码重新登录")
-                      // 退出重新登录
-                      localStorage.removeItem('auth_token')
-                      localStorage.setItem('auth_user', username)
+                      // 清除本地存储的用户信息（会话已通过后端失效）
+                      localStorage.removeItem('auth_user')
+                      // 延迟跳转到登录页面
                       setTimeout(() => router.push('/'), 1200)
                     } else {
                       const text = await res.text().catch(() => '')
