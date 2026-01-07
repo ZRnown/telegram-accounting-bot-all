@@ -1,40 +1,6 @@
 #!/usr/bin/env node
 
 // 认证流程调试脚本
-
-// 🔥 强制加载环境变量（与启动脚本保持一致）
-function loadEnvironmentVariables() {
-  const fs = require('fs');
-  const path = require('path');
-
-  const envPath = path.join(process.cwd(), '.env');
-  if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    const lines = envContent.split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#')) {
-        const [key, ...valueParts] = trimmed.split('=');
-        if (key && valueParts.length > 0) {
-          const value = valueParts.join('=').replace(/^["']|["']$/g, '');
-          process.env[key.trim()] = value.trim();
-        }
-      }
-    }
-  }
-
-  // 确保关键环境变量存在
-  process.env.NODE_ENV = process.env.NODE_ENV || 'production';
-  process.env.TZ = process.env.TZ || 'Asia/Shanghai';
-  process.env.ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || 'dev-admin-session-secret-key-for-development-only-change-in-production';
-  process.env.ADMIN_PWD_SALT = process.env.ADMIN_PWD_SALT || 'dev-admin-salt';
-  process.env.DATABASE_URL = process.env.DATABASE_URL || 'file:./data/app.db';
-  process.env.COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || 'lax';
-}
-
-loadEnvironmentVariables();
-
 console.log('🔍 认证流程调试');
 console.log('================');
 

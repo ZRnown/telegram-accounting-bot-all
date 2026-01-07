@@ -48,33 +48,21 @@ export function setSessionCookie(res: NextResponse, username: string, ver: numbe
                   (typeof window !== 'undefined' && window.location?.protocol === 'https:')
 
   // 🔥 安全增强：根据环境和请求特征调整SameSite策略
+  // 开发环境、本地环境使用lax，生产环境使用strict（但可通过环境变量调整）
   let sameSite: 'strict' | 'lax' | 'none' = 'strict'
-  let forceNoSecure = false
+
+  // 如果是开发环境或者本地请求，放宽限制
+  if (process.env.NODE_ENV !== 'production' ||
+      process.env.COOKIE_SAME_SITE === 'lax' ||
+      process.env.FORCE_COOKIE_LAX === 'true') {
+    sameSite = 'lax'
+  }
 
   // 本地开发环境检测（通过主机名判断）
   const hostname = res.headers.get('host') || ''
   if (hostname.includes('localhost') || hostname.includes('127.0.0.1') || hostname.includes('0.0.0.0')) {
     sameSite = 'lax'
-    forceNoSecure = true
-    console.log('[Auth] Local development detected, using lax SameSite and no Secure flag')
-  }
-
-  // 如果环境变量指定使用lax模式
-  if (process.env.COOKIE_SAME_SITE === 'lax') {
-    sameSite = 'lax'
-    console.log('[Auth] COOKIE_SAME_SITE=lax detected, using lax SameSite')
-  }
-
-  // 如果是开发环境或者强制lax模式
-  if (process.env.NODE_ENV !== 'production' ||
-      process.env.FORCE_COOKIE_LAX === 'true') {
-    sameSite = 'lax'
-    console.log('[Auth] Development environment or FORCE_COOKIE_LAX, using lax SameSite')
-  }
-
-  // 如果强制不使用Secure标志（本地开发）
-  if (forceNoSecure) {
-    isHttps = false
+    console.log('[Auth] Local development detected, using lax SameSite')
   }
 
   console.log('[Auth] Setting cookie - HTTPS:', isHttps, 'SameSite:', sameSite, 'Env:', process.env.NODE_ENV)
