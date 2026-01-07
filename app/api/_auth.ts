@@ -45,13 +45,17 @@ export function setSessionCookie(res: NextResponse, username: string, ver: numbe
                   process.env.FORCE_HTTPS === 'true' ||
                   (typeof window !== 'undefined' && window.location?.protocol === 'https:')
 
-  // 🔥 安全增强：强制SameSite=Strict，防止CSRF攻击
-  // 只有在HTTPS环境下才设置Secure标志
+  // 🔥 安全增强：Cloudflare环境下使用Lax，生产环境使用Strict
+  // Cloudflare代理可能导致Strict模式下的Cookie问题
+  const sameSite = process.env.NODE_ENV === 'production' ? 'lax' : 'strict'
+
+  console.log('[Auth] Setting cookie - HTTPS:', isHttps, 'SameSite:', sameSite)
+
   res.cookies.set({
     name: COOKIE_NAME,
     value: v,
     httpOnly: true, // 防止JS读取
-    sameSite: 'strict', // 🔥 改为Strict，防止CSRF
+    sameSite: sameSite, // 🔥 Cloudflare环境下使用Lax
     secure: isHttps, // 🔥 只有HTTPS时才设置Secure
     path: '/',
     maxAge: MAX_AGE,
