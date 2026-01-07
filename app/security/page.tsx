@@ -25,12 +25,19 @@ export default function SecurityPage() {
       .then(res => {
         if (!res.ok) {
           console.error('[Security Page] Auth check failed:', res.status)
-          router.push("/")
-          return
+          return res.json().catch(() => ({})).then(data => {
+            if (data?.sessionExpired) {
+              console.log('[Security Page] Session expired, redirecting to login')
+              // 会话过期，显示提示后跳转
+              alert('您的会话已过期，请重新登录')
+            }
+            router.push("/")
+          })
         }
         return res.json()
       })
       .then(data => {
+        if (!data) return // 已经处理了错误情况
         console.log('[Security Page] Auth check success:', data)
         if (data?.username) {
           setUsername(data.username)
@@ -119,12 +126,12 @@ export default function SecurityPage() {
 
                     if (res.status === 204) {
                       console.log('[Change Password] Success, redirecting...')
-                      setPasswordChanged(true) // 设置状态，防止重新认证检查
                       setOk("修改成功，正在跳转到登录页面...")
                       // 清除本地存储的用户信息（会话已通过后端失效）
                       localStorage.removeItem('auth_user')
-                      // 立即跳转到登录页面，避免重新认证检查
-                      router.push('/')
+                      // 使用硬跳转，完全重新加载页面，避免会话检查
+                      window.location.href = '/'
+                      return
                     } else {
                       console.error('[Change Password] Failed:', res.status, responseText)
                       setError(responseText || '修改失败')
