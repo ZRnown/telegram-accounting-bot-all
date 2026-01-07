@@ -107,12 +107,16 @@ export default function SecurityPage() {
                   setLoading(true)
                   try {
                     console.log('[Change Password] Sending request...')
+                    console.log('[Change Password] Username:', username)
                     const res = await fetch('/api/auth/change-password', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ username, oldPassword, newPassword })
                     })
                     console.log('[Change Password] Response status:', res.status)
+                    const responseText = await res.text()
+                    console.log('[Change Password] Response body:', responseText)
+
                     if (res.status === 204) {
                       console.log('[Change Password] Success, redirecting...')
                       setPasswordChanged(true) // 设置状态，防止重新认证检查
@@ -122,9 +126,8 @@ export default function SecurityPage() {
                       // 立即跳转到登录页面，避免重新认证检查
                       router.push('/')
                     } else {
-                      const text = await res.text().catch(() => '')
-                      console.error('[Change Password] Failed:', res.status, text)
-                      setError(text || '修改失败')
+                      console.error('[Change Password] Failed:', res.status, responseText)
+                      setError(responseText || '修改失败')
                     }
                   } catch {
                     setError('网络错误，请稍后重试')
