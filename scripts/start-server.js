@@ -5,8 +5,58 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
 
+// 🔥 强制加载环境变量
+function loadEnvironmentVariables() {
+  console.log('🔧 强制加载环境变量...');
+
+  const envPath = join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    console.log('📄 发现 .env 文件:', envPath);
+
+    try {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      const lines = envContent.split('\n');
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const [key, ...valueParts] = trimmed.split('=');
+          if (key && valueParts.length > 0) {
+            const value = valueParts.join('=').replace(/^["']|["']$/g, ''); // 移除引号
+            process.env[key.trim()] = value.trim();
+            console.log(`✅ 设置环境变量: ${key.trim()}=${value.substring(0, 20)}${value.length > 20 ? '...' : ''}`);
+          }
+        }
+      }
+
+      console.log('✅ 环境变量加载完成');
+    } catch (error) {
+      console.error('❌ 读取 .env 文件失败:', error.message);
+    }
+  } else {
+    console.warn('⚠️ 未找到 .env 文件，使用默认配置');
+  }
+
+  // 🔥 确保关键环境变量存在
+  process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+  process.env.TZ = process.env.TZ || 'Asia/Shanghai';
+  process.env.ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || 'dev-admin-session-secret-key-for-development-only-change-in-production';
+  process.env.ADMIN_PWD_SALT = process.env.ADMIN_PWD_SALT || 'dev-admin-salt';
+  process.env.DATABASE_URL = process.env.DATABASE_URL || 'file:./data/app.db';
+  process.env.COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || 'lax';
+
+  console.log('🔧 确保关键环境变量存在');
+  console.log('   NODE_ENV:', process.env.NODE_ENV);
+  console.log('   TZ:', process.env.TZ);
+  console.log('   ADMIN_SESSION_SECRET length:', process.env.ADMIN_SESSION_SECRET.length);
+  console.log('   DATABASE_URL:', process.env.DATABASE_URL);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// 强制加载环境变量
+loadEnvironmentVariables();
 
 // 修复数据库权限
 function fixDatabasePermissions() {

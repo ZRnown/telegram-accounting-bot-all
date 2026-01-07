@@ -6,10 +6,13 @@ console.log('================');
 
 // 检查环境变量
 console.log('\n📋 环境变量检查:');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('COOKIE_SAME_SITE:', process.env.COOKIE_SAME_SITE);
-console.log('FORCE_HTTPS:', process.env.FORCE_HTTPS);
+console.log('NODE_ENV:', process.env.NODE_ENV || 'undefined');
+console.log('COOKIE_SAME_SITE:', process.env.COOKIE_SAME_SITE || 'undefined');
+console.log('FORCE_HTTPS:', process.env.FORCE_HTTPS || 'undefined');
+console.log('TZ:', process.env.TZ || 'undefined');
+console.log('DATABASE_URL:', process.env.DATABASE_URL || 'undefined');
 console.log('ADMIN_SESSION_SECRET length:', process.env.ADMIN_SESSION_SECRET?.length || 0);
+console.log('ADMIN_PWD_SALT length:', process.env.ADMIN_PWD_SALT?.length || 0);
 
 // 检查数据库
 console.log('\n💾 数据库状态:');
