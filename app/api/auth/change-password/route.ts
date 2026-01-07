@@ -21,50 +21,114 @@ function hashPassword(pwd: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    console.log('[Change Password API] Starting request...')
     const unauth = assertAdmin(req)
-    if (unauth) return unauth
+    if (unauth) {
+      console.error('[Change Password API] Auth failed:', unauth.status)
+      return unauth
+    }
+    console.log('[Change Password API] Auth passed')
+
     const rl = rateLimit(req, 'change_pwd', 5, 5 * 60 * 1000)
-    if (!rl.ok) return NextResponse.json({ error: `Too many attempts. Retry after ${rl.retryAfter}s` }, { status: 429 })
+    if (!rl.ok) {
+      console.log('[Change Password API] Rate limited:', rl.retryAfter)
+      return NextResponse.json({ error: `Too many attempts. Retry after ${rl.retryAfter}s` }, { status: 429 })
+    }
+
     try {
       const dbUrl = process.env.DATABASE_URL || ''
+      console.log('[Change Password API] Database URL:', dbUrl)
       if (dbUrl.startsWith('file:')) {
         let p = dbUrl.slice(5)
         if (!p) throw new Error('Empty sqlite path')
         if (!p.startsWith('/')) p = path.resolve(process.cwd(), p)
         const dir = path.dirname(p)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, 'a'))
+        console.log('[Change Password API] Database path:', p, 'Directory:', dir)
+        if (!fs.existsSync(dir)) {
+          console.log('[Change Password API] Creating directory...')
+          fs.mkdirSync(dir, { recursive: true })
+        }
+        if (!fs.existsSync(p)) {
+          console.log('[Change Password API] Creating database file...')
+          fs.closeSync(fs.openSync(p, 'a'))
+        }
+        // 修复权限
+        try {
+          fs.chmodSync(p, 0o644)
+          fs.chmodSync(dir, 0o755)
+          console.log('[Change Password API] Database permissions fixed')
+        } catch (permErr) {
+          console.warn('[Change Password API] Could not fix permissions:', permErr.message)
+        }
       }
-    } catch {}
+    } catch (dbErr) {
+      console.error('[Change Password API] Database setup error:', dbErr.message)
+    }
+
     const body = await req.json().catch(() => ({})) as { username?: string; oldPassword?: string; newPassword?: string }
     const username = (body.username || '').trim()
     const oldPassword = (body.oldPassword || '').trim()
     const newPassword = (body.newPassword || '').trim()
+    console.log('[Change Password API] Request body - username:', username, 'oldPassword length:', oldPassword.length, 'newPassword length:', newPassword.length)
 
-    if (!username || !oldPassword || !newPassword) return NextResponse.json({ error: 'Bad Request' }, { status: 400 })
-    if (newPassword.length < 6) return NextResponse.json({ error: '密码至少 6 位' }, { status: 400 })
+    if (!username || !oldPassword || !newPassword) {
+      console.error('[Change Password API] Bad request: missing fields')
+      return NextResponse.json({ error: 'Bad Request' }, { status: 400 })
+    }
+    if (newPassword.length < 6) {
+      console.error('[Change Password API] Password too short')
+      return NextResponse.json({ error: '密码至少 6 位' }, { status: 400 })
+    }
 
+    console.log('[Change Password API] Creating Admin table...')
     // ensure table exists (use Unsafe for static DDL string)
     await prisma.$executeRawUnsafe(TABLE_SQL)
 
+    console.log('[Change Password API] Checking for default admin...')
+    // bootstrap default admin if none (same logic as login API)
+    const checkRows = await prisma.$queryRaw`SELECT id, username, passwordHash FROM Admin LIMIT 1`
+    if (!checkRows || checkRows.length === 0) {
+      console.log('[Change Password API] Creating default admin...')
+      const defaultHash = hashPassword('admin123')
+      await prisma.$executeRaw`INSERT INTO Admin (id, username, passwordHash) VALUES (lower(hex(randomblob(16))), ${'admin'}, ${defaultHash})`
+      console.log('[Change Password API] Default admin created')
+    }
+
+    console.log('[Change Password API] Looking up user:', username)
     const rows = await prisma.$queryRaw`SELECT id, username, passwordHash FROM Admin WHERE username = ${username} LIMIT 1` as any
     const user = Array.isArray(rows) ? rows[0] : null
-    if (!user) return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+    console.log('[Change Password API] User found:', !!user)
+    if (!user) {
+      console.error('[Change Password API] User not found')
+      return NextResponse.json({ error: '用户不存在' }, { status: 404 })
+    }
 
-    const ok = user.passwordHash === hashPassword(oldPassword)
+    console.log('[Change Password API] Verifying old password...')
+    const oldHash = hashPassword(oldPassword)
+    const storedHash = user.passwordHash
+    console.log('[Change Password API] Hash comparison - old input:', oldHash.substring(0, 10) + '...', 'stored:', storedHash.substring(0, 10) + '...')
+    const ok = storedHash === oldHash
     if (!ok) {
+      console.log('[Change Password API] Password verification failed')
       try { await auditAdmin(username, 'change_password_failed', getClientIp(req), undefined) } catch {}
       return NextResponse.json({ error: '原密码不正确' }, { status: 401 })
     }
 
+    console.log('[Change Password API] Updating password...')
     await prisma.$executeRaw`UPDATE Admin SET passwordHash = ${hashPassword(newPassword)}, updatedAt = CURRENT_TIMESTAMP WHERE id = ${user.id}`
+
+    console.log('[Change Password API] Bumping session version...')
     try {
       await bumpUserSessionVersion(username)
       await auditAdmin(username, 'change_password_success', getClientIp(req), undefined)
-    } catch {}
+    } catch (auditErr) {
+      console.warn('[Change Password API] Audit error:', auditErr.message)
+    }
+
+    console.log('[Change Password API] Success!')
     return new NextResponse(null, { status: 204 })
   } catch (e) {
-    console.error(e)
+    console.error('[Change Password API] Error:', e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
