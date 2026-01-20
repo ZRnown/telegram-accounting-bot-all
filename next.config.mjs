@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+const forceHttp = process.env.FORCE_HTTP === 'true'
 const nextConfig = {
   typescript: { ignoreBuildErrors: true },
   images: { unoptimized: true },
@@ -28,8 +29,8 @@ const nextConfig = {
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           // 🛡️ 引用者策略 - 最高安全级别
           { key: 'Referrer-Policy', value: 'no-referrer' },
-          // 🛡️ HSTS - 强制HTTPS，最大期限
-          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' },
+          // 🛡️ HSTS - 强制HTTPS，最大期限（允许通过 FORCE_HTTP 关闭）
+          ...(forceHttp ? [] : [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' }]),
           // 🛡️ 权限策略 - 禁用不必要的浏览器功能
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
           // 🛡️ 内容安全策略 - 根据环境调整
@@ -48,7 +49,7 @@ const nextConfig = {
               "base-uri 'self'",
               "form-action 'self'",
               "frame-ancestors 'none'",
-              "upgrade-insecure-requests"
+              ...(forceHttp ? [] : ["upgrade-insecure-requests"])
             ].join('; ') : [
               // 开发环境：允许开发工具和Cloudflare统计
               "default-src 'self'",
