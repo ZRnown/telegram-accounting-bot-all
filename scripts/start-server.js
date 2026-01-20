@@ -4,6 +4,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 // 🔥 强制加载环境变量
 function loadEnvironmentVariables() {
@@ -24,7 +25,7 @@ function loadEnvironmentVariables() {
           if (key && valueParts.length > 0) {
             const value = valueParts.join('=').replace(/^["']|["']$/g, ''); // 移除引号
             process.env[key.trim()] = value.trim();
-            console.log(`✅ 设置环境变量: ${key.trim()}=${value.substring(0, 20)}${value.length > 20 ? '...' : ''}`);
+            console.log(`✅ 设置环境变量: ${key.trim()}`);
           }
         }
       }
@@ -37,11 +38,17 @@ function loadEnvironmentVariables() {
     console.warn('⚠️ 未找到 .env 文件，使用默认配置');
   }
 
+  const deriveSecret = (label) => {
+    const token = (process.env.BOT_TOKEN || '').trim();
+    if (!token) return null;
+    return crypto.createHash('sha256').update(`${label}:${token}`).digest('hex');
+  };
+
   // 🔥 确保关键环境变量存在
   process.env.NODE_ENV = process.env.NODE_ENV || 'production';
   process.env.TZ = process.env.TZ || 'Asia/Shanghai';
-  process.env.ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || 'dev-admin-session-secret-key-for-development-only-change-in-production';
-  process.env.ADMIN_PWD_SALT = process.env.ADMIN_PWD_SALT || 'dev-admin-salt';
+  process.env.ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || deriveSecret('admin_session_secret') || 'dev-admin-session-secret-key-for-development-only-change-in-production';
+  process.env.ADMIN_PWD_SALT = process.env.ADMIN_PWD_SALT || deriveSecret('admin_pwd_salt') || 'dev-admin-salt';
   process.env.DATABASE_URL = process.env.DATABASE_URL || 'file:./data/app.db';
   process.env.COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || 'lax';
 

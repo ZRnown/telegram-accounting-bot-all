@@ -7,6 +7,7 @@ if (!process.env.TZ) {
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import dns from 'node:dns'
 import dotenv from 'dotenv'
 
 
@@ -39,12 +40,16 @@ if (process.env.NODE_ENV === 'production') {
   console.info = () => {} // 只保留error和warn
 }
 
-// 🛡️ 安全增强：token打码函数
+// 🛡️ 安全增强：避免日志泄露 token
 function maskToken(token) {
   if (!token || typeof token !== 'string') return '***'
-  if (token.length <= 10) return '***'
-  return token.substring(0, 6) + '...' + token.substring(token.length - 4)
+  return `[len:${token.length}]`
 }
+
+// 🔧 优先使用 IPv4，避免部分环境 IPv6 解析导致 fetch 失败
+try {
+  dns.setDefaultResultOrder('ipv4first')
+} catch {}
 
 // 🔥 加载环境变量（如果未设置）
 if (!process.env.BOT_TOKEN) {
@@ -74,8 +79,6 @@ const tokenPattern = /^\d+:[A-Za-z0-9_-]+$/
 if (!tokenPattern.test(BOT_TOKEN)) {
   console.error('❌ BOT_TOKEN 格式无效！')
   console.error('   正确格式：数字:字母数字组合（例如：123456789:ABCdefGHIjklMNOpqrsTUVwxyz）')
-  console.error('   当前 token 长度：', BOT_TOKEN.length)
-  console.error('   当前 token 前缀：', BOT_TOKEN.substring(0, 20) + '...')
   process.exit(1)
 }
 
@@ -399,7 +402,6 @@ async function ensureCurrentBotId() {
           console.error('   - 数据库中的 token 是否正确')
           console.error('   - 环境变量 BOT_TOKEN 是否正确设置')
           console.error('   - 是否在 @BotFather 处重新生成了 token')
-          console.error('   当前 token 前缀：', BOT_TOKEN.substring(0, 20) + '...')
           throw new Error('Bot token 无效，无法启动机器人')
         }
         // 🔥 如果超时，记录错误但不阻止启动
@@ -745,4 +747,3 @@ bot.launch({
 const cleanup = () => bot.stop('SIGTERM')
 process.once('SIGTERM', cleanup)
 process.once('SIGINT', cleanup)
-

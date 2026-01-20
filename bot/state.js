@@ -40,6 +40,7 @@ function createInitialChatState() {
     muteMode: false,
     workStartedAt: null, // Date | null
     workTotalMs: 0, // number
+    lastPhoneRegion: null, // { province: string, city: string } | null
     lastActivityAt: Date.now(), // 最后活动时间（用于清理不活跃的聊天）
     // current working bill (not yet saved)
     current: {

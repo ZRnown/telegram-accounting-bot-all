@@ -1,5 +1,7 @@
 // 扩展功能处理器：USDT查询、管理员群发、功能开关
 import { prisma } from '../../lib/db.js'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { hasPermissionWithWhitelist, buildInlineKb, isAdmin, hasOperatorPermission, hasWhitelistOnlyPermission } from '../helpers.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
 import { ensureDefaultFeatures } from '../constants.js'
@@ -12,26 +14,352 @@ const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
 const TRONSCAN_RATE_API = 'https://apilist.tronscanapi.com/api/exchange/rate'
 // 使用更稳定的交易查询API
 const TRONSCAN_TRANSACTIONS_API = 'https://apilist.tronscanapi.com/api/transaction'
+const HAOSHUDI_BASE_URL = 'https://www.haoshudi.com'
+const HAOSHUDI_BANK_QUERY_API = `${HAOSHUDI_BASE_URL}/api/bank/query/`
+const HAOSHUDI_BANK_AREA_API = `${HAOSHUDI_BASE_URL}/api/bank/area/`
+const HAOSHUDI_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+const HAOSHUDI_SESSION = '4rln962hbtt7di2e7cql99qhle'
+const HAOSHUDI_TOKEN = '54e5a2621f7ad51d8b5463acd46790ee9b5fe6d7'
+const HAOSHUDI_TIME = '1768266019'
+
+const execFileAsync = promisify(execFile)
+
+const BANK_CODE_NAME_MAP = {
+  ABC: '中国农业银行',
+  ICBC: '中国工商银行',
+  CCB: '中国建设银行',
+  BOC: '中国银行',
+  BCM: '交通银行',
+  CMB: '招商银行',
+  CITIC: '中信银行',
+  CIB: '兴业银行',
+  CMBC: '中国民生银行',
+  SPDB: '浦发银行',
+  GDB: '广发银行',
+  PSBC: '中国邮政储蓄银行',
+  HXB: '华夏银行',
+  CEB: '中国光大银行',
+  BOB: '北京银行',
+  BOCOM: '交通银行',
+  PAB: '平安银行'
+}
+
+const BANK_NAME_CODE_MAP = {
+  农业银行: 'ABC',
+  中国农业银行: 'ABC',
+  工商银行: 'ICBC',
+  中国工商银行: 'ICBC',
+  建设银行: 'CCB',
+  中国建设银行: 'CCB',
+  中国银行: 'BOC',
+  交通银行: 'BCM',
+  招商银行: 'CMB',
+  中信银行: 'CITIC',
+  兴业银行: 'CIB',
+  民生银行: 'CMBC',
+  浦发银行: 'SPDB',
+  广发银行: 'GDB',
+  邮政储蓄银行: 'PSBC',
+  中国邮政储蓄银行: 'PSBC',
+  华夏银行: 'HXB',
+  光大银行: 'CEB',
+  北京银行: 'BOB',
+  平安银行: 'PAB'
+}
+
+function normalizeDigitsInput(value) {
+  return String(value || '').replace(/\s+/g, '')
+}
+
+function formatRegion(province, city) {
+  if (!province && !city) return '-'
+  return `${province || '-'} - ${city || '-'}`
+}
+
+function normalizeBankName(rawName) {
+  if (!rawName) return '-'
+  const cleaned = String(rawName).replace(/\s+/g, '').trim()
+  if (!cleaned) return '-'
+  if (cleaned.startsWith('中国')) return cleaned
+  const code = BANK_NAME_CODE_MAP[cleaned] || BANK_NAME_CODE_MAP[`中国${cleaned}`]
+  return code && BANK_CODE_NAME_MAP[code] ? BANK_CODE_NAME_MAP[code] : cleaned
+}
+
+function getBankCodeFromName(bankName) {
+  if (!bankName || bankName === '-') return '-'
+  const direct = BANK_NAME_CODE_MAP[bankName]
+  if (direct) return direct
+  const normalized = bankName.replace(/^中国/, '')
+  return BANK_NAME_CODE_MAP[normalized] || '-'
+}
+
+function buildCardName(bankName, cardTypeName) {
+  if (!bankName || bankName === '-') return '-'
+  const typeName = (cardTypeName || '').trim()
+  if (typeName && typeName !== '未知') {
+    const normalizedType = typeName.endsWith('卡') ? typeName : `${typeName}卡`
+    return `${bankName}${normalizedType}(银联卡)`
+  }
+  return `${bankName}银行卡(银联卡)`
+}
+
+function stripHtmlTags(input) {
+  return String(input || '').replace(/<[^>]*>/g, '').replace(/\s+/g, '').trim()
+}
+
+function parseProvinceCity(locationText) {
+  const text = stripHtmlTags(locationText)
+  if (!text) return { province: '', city: '' }
+
+  const match = text.match(/^(.*?(?:省|自治区|市|特别行政区))(.*)$/)
+  if (match) {
+    const province = match[1] || ''
+    let city = match[2] || ''
+    if (!city && province.endsWith('市')) {
+      city = province.replace(/市$/, '')
+    }
+    return { province, city }
+  }
+  return { province: text, city: '' }
+}
+
+function buildHaoshudiAuthHeaders() {
+  return {
+    Accept: 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Language': 'en-US,en;q=0.9,zh-HK;q=0.8,zh-CN;q=0.7,zh;q=0.6',
+    Connection: 'keep-alive',
+    'X-Requested-With': 'XMLHttpRequest',
+    'User-Agent': HAOSHUDI_USER_AGENT,
+    Referer: `${HAOSHUDI_BASE_URL}/yinhangka/`,
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    Cookie: `PHPSESSID=${HAOSHUDI_SESSION}`,
+    'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    time: HAOSHUDI_TIME,
+    token: HAOSHUDI_TOKEN
+  }
+}
+
+async function fetchHaoshudiJsonByCurl(url, headers) {
+  const curlHeaders = { ...headers }
+  delete curlHeaders.Cookie
+  const headerArgs = Object.entries(curlHeaders).flatMap(([key, value]) => ['-H', `${key}: ${value}`])
+  try {
+    const args = [
+      '-sS',
+      '-4',
+      '--http1.1',
+      '--compressed',
+      '--retry',
+      '2',
+      '--retry-all-errors',
+      '--connect-timeout',
+      '8',
+      '--max-time',
+      '12',
+      '-b',
+      `PHPSESSID=${HAOSHUDI_SESSION}`,
+      url,
+      ...headerArgs
+    ]
+    const { stdout } = await execFileAsync('curl', args, { timeout: 15000 })
+    const trimmed = stdout.trim()
+    return trimmed ? JSON.parse(trimmed) : null
+  } catch (e) {
+    if (process.env.DEBUG_BOT === 'true') {
+      console.warn('[haoshudi][curl] error', e?.message || e)
+    }
+    return null
+  }
+}
+
+async function fetchHaoshudiPhoneInfo(number) {
+  try {
+    const url = `${HAOSHUDI_BASE_URL}/${number}.htm`
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': HAOSHUDI_USER_AGENT },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!resp.ok) return null
+    const html = await resp.text()
+    const locationMatch = html.match(/<td[^>]*>\s*<span>\s*手机归属地\s*<\/span>\s*<\/td>\s*<td[^>]*>\s*<span>([\s\S]*?)<\/span>/i)
+    const carrierMatch = html.match(/<td[^>]*>\s*<span>\s*运营商\s*<\/span>\s*<\/td>\s*<td[^>]*>\s*<span>([\s\S]*?)<\/span>/i)
+    const { province, city } = parseProvinceCity(locationMatch?.[1] || '')
+    const carrier = stripHtmlTags(carrierMatch?.[1] || '')
+    return { province, city, carrier }
+  } catch {
+    return null
+  }
+}
+
+async function fetchHaoshudiBankInfo(cardNo) {
+  const headers = buildHaoshudiAuthHeaders()
+
+  try {
+    const curlData = await fetchHaoshudiJsonByCurl(`${HAOSHUDI_BANK_QUERY_API}?num=${cardNo}`, headers)
+    if (curlData?.status && curlData?.data) {
+      const payload = curlData.data || {}
+      return {
+        bankNameRaw: payload.bankname || '',
+        cardName: payload.cardname || '',
+        cardType: payload.type || payload.cardtype || '',
+        luhn: payload.luhn === true
+      }
+    }
+
+    const queryUrl = `${HAOSHUDI_BANK_QUERY_API}?num=${cardNo}`
+    const resp = await fetch(queryUrl, { headers, method: 'GET', signal: AbortSignal.timeout(10000) })
+    const body = await resp.text().catch(() => '')
+    if (!resp.ok) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-query] http', resp.status, body.slice(0, 200))
+      }
+      return null
+    }
+    let data = null
+    try {
+      data = JSON.parse(body)
+    } catch (e) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-query] json-parse-failed', body.slice(0, 200))
+      }
+      return null
+    }
+    if (!data?.status || !data?.data) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-query] invalid-payload', JSON.stringify(data).slice(0, 200))
+      }
+      return null
+    }
+    const payload = data.data || {}
+    return {
+      bankNameRaw: payload.bankname || '',
+      cardName: payload.cardname || '',
+      cardType: payload.type || payload.cardtype || '',
+      luhn: payload.luhn === true
+    }
+  } catch (e) {
+    if (process.env.DEBUG_BOT === 'true') {
+      console.warn('[haoshudi][bank-query] fetch-error', e?.message || e, e?.cause?.code || e?.cause?.message || '')
+    }
+    return null
+  }
+}
+
+async function fetchHaoshudiBankArea(cardNo) {
+  const headers = buildHaoshudiAuthHeaders()
+
+  try {
+    const curlData = await fetchHaoshudiJsonByCurl(`${HAOSHUDI_BANK_AREA_API}?card=${cardNo}`, headers)
+    if (curlData?.status && curlData?.data) {
+      return { address: curlData.data.address || '' }
+    }
+
+    const areaUrl = `${HAOSHUDI_BANK_AREA_API}?card=${cardNo}`
+    const resp = await fetch(areaUrl, { headers, method: 'GET', signal: AbortSignal.timeout(10000) })
+    const body = await resp.text().catch(() => '')
+    if (!resp.ok) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-area] http', resp.status, body.slice(0, 200))
+      }
+      return null
+    }
+    let data = null
+    try {
+      data = JSON.parse(body)
+    } catch (e) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-area] json-parse-failed', body.slice(0, 200))
+      }
+      return null
+    }
+    if (!data?.status || !data?.data) {
+      if (process.env.DEBUG_BOT === 'true') {
+        console.warn('[haoshudi][bank-area] invalid-payload', JSON.stringify(data).slice(0, 200))
+      }
+      return null
+    }
+    return { address: data.data.address || '' }
+  } catch (e) {
+    if (process.env.DEBUG_BOT === 'true') {
+      console.warn('[haoshudi][bank-area] fetch-error', e?.message || e, e?.cause?.code || e?.cause?.message || '')
+    }
+    return null
+  }
+}
 
 // 广播状态管理
 const broadcastStates = new Map()
 
 /**
- * 查Tron地址余额和最近交易
- * 指令：查 Tron地址
- * 支持 TRC20 USDT 地址查询和最近交易记录
+ * 查询TRON地址余额/手机号归属地/银行卡信息
+ * 指令：查 <内容>
+ * 支持 TRC20 USDT 地址查询、手机号归属地、银行卡信息与开户地址查询
  */
 export function registerCheckUSDT(bot, ensureChat) {
-  bot.hears(/^查\s+([a-zA-Z0-9]+)$/i, async (ctx) => {
+  bot.hears(/^查\s*(.+)$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
     // 🔥 权限控制：仅管理员或白名单可用，防止被滥用
     if (!(await hasPermissionWithWhitelist(ctx, chat))) {
-      return ctx.reply('⚠️ 权限不足。只有管理员或白名单用户可以查询地址信息。')
+      return ctx.reply('⚠️ 权限不足。只有管理员或白名单用户可以查询信息。')
     }
 
-    const address = ctx.match[1].trim()
+    const rawInput = ctx.match[1]?.trim() || ''
+    if (!rawInput) {
+      return ctx.reply('❌ 请输入查询内容，例如：查 T开头地址 / 查 15210340568 / 查 6228...')
+    }
+
+    const compactInput = normalizeDigitsInput(rawInput)
+
+    if (/^\d{11}$/.test(compactInput)) {
+      const phoneInfo = await fetchHaoshudiPhoneInfo(compactInput)
+      if (!phoneInfo) {
+        return ctx.reply('❌ 手机号信息查询失败，请稍后重试')
+      }
+
+      chat.lastPhoneRegion = {
+        province: phoneInfo.province || '',
+        city: phoneInfo.city || ''
+      }
+
+      const region = formatRegion(phoneInfo.province, phoneInfo.city)
+      const carrier = phoneInfo.carrier || ''
+      return ctx.reply(`手机号：${compactInput}\n地区：${region}\n运营商：${carrier}`)
+    }
+
+    if (/^\d{12,19}$/.test(compactInput)) {
+      const bankInfo = await fetchHaoshudiBankInfo(compactInput)
+      if (!bankInfo) {
+        return ctx.reply('❌ 银行卡信息查询失败，请稍后重试')
+      }
+
+      const areaInfo = await fetchHaoshudiBankArea(compactInput)
+
+      const bankName = normalizeBankName(bankInfo.bankNameRaw)
+      const bankCode = getBankCodeFromName(bankName)
+      const cardTypeName = bankInfo.cardType || '未知'
+      const cardName = bankInfo.cardName || buildCardName(bankName, cardTypeName)
+      const regionText = areaInfo?.address?.trim() || '-'
+
+      const lines = [
+        `银行名称：${bankName}`,
+        `银行卡号：${compactInput}`,
+        `开户地区：${regionText}`,
+        `银行卡名：${cardName}`,
+        `卡号类型：${cardTypeName}`,
+        `银行简码：${bankCode}`
+      ]
+      lines.push(`银联效验：${bankInfo.luhn ? '是' : '否'}`)
+      return ctx.reply(lines.join('\n'))
+    }
+
+    const address = compactInput
     if (address.length !== 34 || !address.startsWith('T')) {
       return ctx.reply('❌ 地址格式错误，请提供正确的 TRC20 地址（以T开头，34位字符）')
     }
@@ -1739,7 +2067,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     if (!chat) return
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1759,7 +2087,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     if (!chat) return
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1782,7 +2110,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     if (!chat) return
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1804,7 +2132,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     if (!chat) return
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1830,7 +2158,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1863,7 +2191,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以操作功能开关。')
     }
 
@@ -1886,7 +2214,7 @@ export function registerFeatureToggles(bot, ensureChat) {
   })
 
   // 添加操作员
-  bot.hears(/^添加操作员\s+(.+)$/i, async (ctx) => {
+  bot.hears(/^添加操作员(?:\s+(.+))?$/i, async (ctx) => {
     // 首先检查是否是群组消息
     if (!ctx.chat || ctx.chat.type === 'private') {
       return ctx.reply('❌ 此命令只能在群组中使用')
@@ -1895,19 +2223,24 @@ export function registerFeatureToggles(bot, ensureChat) {
     const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以添加操作员。')
     }
 
-    const usernamesText = ctx.match[1]?.trim()
-    if (!usernamesText) {
-      return ctx.reply('❌ 请提供要添加的操作员用户名，例如：添加操作员 @user1 @user2')
+    const usernamesText = ctx.match[1]?.trim() || ''
+    let usernames = []
+    if (usernamesText) {
+      usernames = usernamesText.split(/\s+/).map(u => u.replace('@', '')).filter(u => u.length > 0)
+    } else if (ctx.message?.reply_to_message?.from) {
+      const repliedUsername = ctx.message.reply_to_message.from.username
+      if (!repliedUsername) {
+        return ctx.reply('❌ 该用户未设置用户名，无法添加为操作员，请先让TA设置用户名或加入白名单')
+      }
+      usernames = [repliedUsername]
     }
 
-    const usernames = usernamesText.split(/\s+/).map(u => u.replace('@', '')).filter(u => u.length > 0)
-
     if (usernames.length === 0) {
-      return ctx.reply('❌ 未找到有效的用户名')
+      return ctx.reply('❌ 未找到有效的用户名，请使用“添加操作员 @用户名”或回复用户消息后发送“添加操作员”')
     }
 
     try {
@@ -1934,13 +2267,14 @@ export function registerFeatureToggles(bot, ensureChat) {
         }
       }
 
-      // 更新内存中的操作员列表
-      const chat = await prisma.chat.findUnique({
-        where: { id: chatId },
-        select: { id: true, title: true }
-      })
-      if (chat) {
-        await syncSettingsToMemory(ctx, { id: chatId, title: chat.title }, chatId, true)
+      const chatState = ensureChat(ctx)
+      if (chatState?.operators) {
+        for (const username of usernames) {
+          chatState.operators.add(username)
+          const mappedId = chatState.userIdByUsername.get(username) || chatState.userIdByUsername.get(`@${username}`)
+          if (mappedId) chatState.operatorIds.add(mappedId)
+        }
+        chatState._operatorsLastSync = Date.now()
       }
 
       await ctx.reply(`✅ 已添加 ${added} 个操作员`)
@@ -1960,7 +2294,7 @@ export function registerFeatureToggles(bot, ensureChat) {
     const chatId = String(ctx.chat.id)
 
     // 权限检查：仅管理员可操作
-    if (!isAdmin(ctx)) {
+    if (!(await isAdmin(ctx))) {
       return ctx.reply('⚠️ 权限不足。只有管理员可以删除操作员。')
     }
 
@@ -1985,14 +2319,14 @@ export function registerFeatureToggles(bot, ensureChat) {
           deleted += result.count
         }
       }
-
-      // 更新内存中的操作员列表
-      const chat = await prisma.chat.findUnique({
-        where: { id: chatId },
-        select: { id: true, title: true }
-      })
-      if (chat) {
-        await syncSettingsToMemory(ctx, { id: chatId, title: chat.title }, chatId, true)
+      const chatState = ensureChat(ctx)
+      if (chatState?.operators) {
+        for (const username of usernames) {
+          chatState.operators.delete(username)
+          const mappedId = chatState.userIdByUsername.get(username) || chatState.userIdByUsername.get(`@${username}`)
+          if (mappedId) chatState.operatorIds.delete(mappedId)
+        }
+        chatState._operatorsLastSync = Date.now()
       }
 
       await ctx.reply(`✅ 已删除 ${deleted} 个操作员`)
