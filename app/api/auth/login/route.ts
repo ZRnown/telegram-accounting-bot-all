@@ -11,15 +11,26 @@ const BRUTE_FORCE_BLOCKED_IPS = new Map<string, { blockedAt: number; reason: str
 const MAX_LOGIN_ATTEMPTS_PER_DAY = 3
 const BRUTE_FORCE_CHECK_WINDOW = 24 * 60 * 60 * 1000 // 24小时
 
+const ADMIN_LOGIN_ATTEMPT_DDL = `CREATE TABLE IF NOT EXISTS AdminLoginAttempt (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  username TEXT, ip TEXT, success INTEGER,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);`
+
 // 检查IP是否被永久封禁
 function isIpPermanentlyBlocked(ip: string): boolean {
   const blocked = BRUTE_FORCE_BLOCKED_IPS.get(ip)
   return blocked ? true : false
 }
 
+async function ensureAdminLoginAttemptTable() {
+  try { await prisma.$executeRawUnsafe(ADMIN_LOGIN_ATTEMPT_DDL) } catch {}
+}
+
 // 检查IP当天登录失败次数
 async function getFailedAttemptsToday(ip: string): Promise<number> {
   try {
+    await ensureAdminLoginAttemptTable()
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const fails: any = await prisma.$queryRaw`
@@ -56,6 +67,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Access permanently denied due to security policy' }, { status: 403 })
     }
 
+    try {
+      const dbUrl = process.env.DATABASE_URL || ''
+      if (dbUrl.startsWith('file:')) {
+        let p = dbUrl.slice(5)
+        if (!p) throw new Error('Empty sqlite path')
+        if (!p.startsWith('/')) p = path.resolve(process.cwd(), p)
+        const dir = path.dirname(p)
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+        if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, 'a'))
+      }
+    } catch {}
+
     // 🛡️ 密码爆破防护：检查当天失败次数
     const failedAttemptsToday = await getFailedAttemptsToday(ip)
     if (failedAttemptsToday >= MAX_LOGIN_ATTEMPTS_PER_DAY) {
@@ -74,17 +97,6 @@ export async function POST(req: NextRequest) {
     if (!rl.ok) {
       return NextResponse.json({ error: `Too many attempts. Retry after ${rl.retryAfter}s` }, { status: 429 })
     }
-    try {
-      const dbUrl = process.env.DATABASE_URL || ''
-      if (dbUrl.startsWith('file:')) {
-        let p = dbUrl.slice(5)
-        if (!p) throw new Error('Empty sqlite path')
-        if (!p.startsWith('/')) p = path.resolve(process.cwd(), p)
-        const dir = path.dirname(p)
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        if (!fs.existsSync(p)) fs.closeSync(fs.openSync(p, 'a'))
-      }
-    } catch {}
     const body = await req.json().catch(() => ({})) as { username?: string; password?: string }
     const username = (body.username || '').trim()
     const password = (body.password || '').trim()
@@ -93,13 +105,7 @@ export async function POST(req: NextRequest) {
     // ensure table exists (use Unsafe for static DDL string)
     await prisma.$executeRawUnsafe(TABLE_SQL)
 
-    // persisted attempts table
-    const ATTEMPT_DDL = `CREATE TABLE IF NOT EXISTS AdminLoginAttempt (
-      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-      username TEXT, ip TEXT, success INTEGER,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    );`
-    try { await prisma.$executeRawUnsafe(ATTEMPT_DDL) } catch {}
+    await ensureAdminLoginAttemptTable()
 
 
     // throttle by recent failures
@@ -147,7 +153,7 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     const res = NextResponse.json({ ok: true, username })
-    setSessionCookie(res, username, ver)
+    setSessionCookie(res, username, ver, req)
     return res
   } catch (e) {
     console.error(e)

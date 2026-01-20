@@ -103,6 +103,13 @@ function buildCardName(bankName, cardTypeName) {
   return `${bankName}银行卡(银联卡)`
 }
 
+function normalizeCardName(rawName) {
+  if (!rawName) return ''
+  const trimmed = String(rawName).trim()
+  if (!trimmed) return ''
+  return trimmed.replace(/(借记卡|贷记卡|信用卡|准贷记卡)卡+/g, '$1卡')
+}
+
 function stripHtmlTags(input) {
   return String(input || '').replace(/<[^>]*>/g, '').replace(/\s+/g, '').trim()
 }
@@ -343,8 +350,9 @@ export function registerCheckUSDT(bot, ensureChat) {
 
       const bankName = normalizeBankName(bankInfo.bankNameRaw)
       const bankCode = getBankCodeFromName(bankName)
-      const cardTypeName = bankInfo.cardType || '未知'
-      const cardName = bankInfo.cardName || buildCardName(bankName, cardTypeName)
+      const cardTypeName = (bankInfo.cardType || '未知').trim() || '未知'
+      const normalizedCardName = normalizeCardName(bankInfo.cardName)
+      const cardName = normalizedCardName || buildCardName(bankName, cardTypeName)
       const regionText = areaInfo?.address?.trim() || '-'
 
       const lines = [

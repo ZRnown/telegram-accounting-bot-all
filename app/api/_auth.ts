@@ -36,16 +36,18 @@ export function verifySession(raw: string | null) {
   }
 }
 
-export function setSessionCookie(res: NextResponse, username: string, ver: number = 0) {
+export function setSessionCookie(res: NextResponse, username: string, ver: number = 0, req?: NextRequest) {
   const v = createSession(username, ver)
 
   // 🔥 安全增强：检测当前请求是否为HTTPS
   // 检查请求头或环境变量
-  const isHttps = process.env.NODE_ENV === 'production' ||
-                  process.env.FORCE_HTTPS === 'true' ||
-                  res.headers.get('x-forwarded-proto') === 'https' ||
-                  res.headers.get('x-scheme') === 'https' ||
-                  (typeof window !== 'undefined' && window.location?.protocol === 'https:')
+  const forceHttp = process.env.FORCE_HTTP === 'true'
+  const reqHeaders = req?.headers
+  const forwardedProto = reqHeaders?.get('x-forwarded-proto') || reqHeaders?.get('x-forwarded-protocol') || reqHeaders?.get('x-scheme') || ''
+  const isHttps = !forceHttp && (
+    process.env.FORCE_HTTPS === 'true' ||
+    forwardedProto === 'https'
+  )
 
   // 🔥 安全增强：根据环境和请求特征调整SameSite策略
   // 开发环境、本地环境使用lax，生产环境使用strict（但可通过环境变量调整）
@@ -59,7 +61,7 @@ export function setSessionCookie(res: NextResponse, username: string, ver: numbe
   }
 
   // 本地开发环境检测（通过主机名判断）
-  const hostname = res.headers.get('host') || ''
+  const hostname = reqHeaders?.get('host') || ''
   if (hostname.includes('localhost') || hostname.includes('127.0.0.1') || hostname.includes('0.0.0.0')) {
     sameSite = 'lax'
     console.log('[Auth] Local development detected, using lax SameSite')
