@@ -1,3 +1,7 @@
+import dotenv from 'dotenv'
+
+dotenv.config()
+
 /** @type {import('next').NextConfig} */
 const forceHttp = process.env.FORCE_HTTP === 'true'
 const nextConfig = {
