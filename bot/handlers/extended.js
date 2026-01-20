@@ -12,8 +12,9 @@ import { syncSettingsToMemory } from '../database.js'
 // TRONSCAN API (用于查询 USDT-TRC20)
 const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
 const TRONSCAN_RATE_API = 'https://apilist.tronscanapi.com/api/exchange/rate'
-// 使用更稳定的交易查询API
-const TRONSCAN_TRANSACTIONS_API = 'https://apilist.tronscanapi.com/api/transaction'
+// 使用TRC20专用API查询USDT转账记录
+const USDT_CONTRACT_ADDRESS = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+const TRONSCAN_TRC20_TRANSFERS_API = 'https://apilist.tronscanapi.com/api/token_trc20/transfers'
 const HAOSHUDI_BASE_URL = 'https://www.haoshudi.com'
 const HAOSHUDI_BANK_QUERY_API = `${HAOSHUDI_BASE_URL}/api/bank/query/`
 const HAOSHUDI_BANK_AREA_API = `${HAOSHUDI_BASE_URL}/api/bank/area/`
@@ -373,11 +374,11 @@ export function registerCheckUSDT(bot, ensureChat) {
     }
 
     try {
-      // 并行查询余额、汇率和最近交易
+      // 并行查询余额、汇率和最近USDT交易（使用TRC20专用API）
       const [balanceRes, rateRes, transactionsRes] = await Promise.allSettled([
         fetch(`${TRONSCAN_API}?address=${address}`),
         fetch(TRONSCAN_RATE_API),
-        fetch(`https://apilist.tronscanapi.com/api/transaction?address=${address}&limit=10&start=0`, { signal: AbortSignal.timeout(10000) })
+        fetch(`${TRONSCAN_TRC20_TRANSFERS_API}?relatedAddress=${address}&contract_address=${USDT_CONTRACT_ADDRESS}&limit=10&start=0`, { signal: AbortSignal.timeout(10000) })
       ])
 
       // 处理余额查询
@@ -404,7 +405,7 @@ export function registerCheckUSDT(bot, ensureChat) {
         balanceError = '网络连接失败'
       }
 
-      // 处理交易记录查询
+      // 处理交易记录查询（TRC20 USDT专用API）
       let transactionsError = null
       if (transactionsRes.status === 'fulfilled') {
         try {
@@ -412,26 +413,25 @@ export function registerCheckUSDT(bot, ensureChat) {
 
           // 调试：记录API响应
           if (process.env.DEBUG_BOT === 'true') {
-            console.log('[TronScan Transactions Response]:', JSON.stringify(transactionsData, null, 2))
+            console.log('[TronScan TRC20 Transfers Response]:', JSON.stringify(transactionsData, null, 2))
           }
 
-          // 处理不同的响应格式
-          let transactions = []
-          if (transactionsData && Array.isArray(transactionsData.data)) {
-            transactions = transactionsData.data
+          // TRC20 transfers API 返回格式：{ token_transfers: [...], total: number }
+          let transfers = []
+          if (transactionsData && Array.isArray(transactionsData.token_transfers)) {
+            transfers = transactionsData.token_transfers
           } else if (Array.isArray(transactionsData)) {
-            transactions = transactionsData
+            transfers = transactionsData
           }
 
-          if (transactions.length > 0) {
-            // 统计所有交易次数（不仅仅是最近10条）
+          if (transfers.length > 0) {
+            // 统计所有交易次数
             let outgoingCount = 0
             let incomingCount = 0
 
             // 先统计所有交易的类型
-            transactions.forEach(tx => {
-              let from = tx.ownerAddress || tx.contractData?.owner_address || ''
-              let to = tx.toAddress || tx.contractData?.to_address || ''
+            transfers.forEach(tx => {
+              const to = tx.to_address || tx.toAddress || ''
               const isIncoming = to === address
               if (isIncoming) {
                 incomingCount++
@@ -440,27 +440,17 @@ export function registerCheckUSDT(bot, ensureChat) {
               }
             })
 
-            recentTransactions = transactions.slice(0, 10).map(tx => {
-              // 处理 TronScan API 返回的数据结构
-              let amount = 0
-              let from = tx.ownerAddress || tx.contractData?.owner_address || ''
-              let to = tx.toAddress || tx.contractData?.to_address || ''
-              let timestamp = tx.timestamp
-              let txID = tx.hash || tx.txID || tx.id || ''
+            recentTransactions = transfers.slice(0, 10).map(tx => {
+              // TRC20 transfers API 返回的数据结构
+              const from = tx.from_address || tx.fromAddress || ''
+              const to = tx.to_address || tx.toAddress || ''
+              const timestamp = tx.block_ts || tx.timestamp || Date.now()
+              const txID = tx.transaction_id || tx.hash || tx.txID || ''
 
-              // 获取交易金额 - 修复 USDT 转账金额解析
-              if (tx.contractData) {
-                // TRC20 代币转账（包括 USDT）
-                if (tx.contractData.amount) {
-                  amount = Number(tx.contractData.amount) / Math.pow(10, tx.contractData.decimals || 6)
-                }
-              } else if (tx.amount) {
-                // TRX 原生转账
-                amount = Number(tx.amount) / 1000000
-              } else if (tx.value) {
-                // 备用字段
-                amount = Number(tx.value) / 1000000
-              }
+              // TRC20 代币金额（USDT精度为6位）
+              const quant = tx.quant || tx.value || tx.amount || '0'
+              const decimals = tx.tokenInfo?.tokenDecimal || 6
+              const amount = Number(quant) / Math.pow(10, decimals)
 
               // 判断是转入还是转出
               const isIncoming = to === address
@@ -478,7 +468,7 @@ export function registerCheckUSDT(bot, ensureChat) {
                 direction,
                 amount,
                 counterpart: isIncoming ? from : to,
-                type: tx.contractType === 1 ? 'TRX Transfer' : 'Other',
+                type: 'USDT Transfer',
                 hash: txID.substring(0, 16) + '...' // 缩短哈希显示
               }
             })
@@ -491,14 +481,14 @@ export function registerCheckUSDT(bot, ensureChat) {
           }
         } catch (e) {
           if (process.env.DEBUG_BOT === 'true') {
-            console.error('[TronScan Transactions Parse Error]:', e)
+            console.error('[TronScan TRC20 Transfers Parse Error]:', e)
           }
           transactionsError = '交易记录查询失败'
         }
       } else {
         const error = transactionsRes.reason
         if (process.env.DEBUG_BOT === 'true') {
-          console.error('[TronScan Transactions API Error]:', error)
+          console.error('[TronScan TRC20 Transfers API Error]:', error)
         }
         transactionsError = `交易记录接口连接失败: ${error?.message || '未知错误'}`
       }

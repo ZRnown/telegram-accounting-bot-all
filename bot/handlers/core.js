@@ -1,7 +1,7 @@
 // 核心命令处理器（start, myid, help, dashboard等）
 import { prisma } from '../../lib/db.js'
 import { getChat } from '../state.js'
-import { buildInlineKb } from '../helpers.js'
+import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 
@@ -259,8 +259,8 @@ export function registerViewBill(bot, ensureChat) {
  */
 export function registerCommandMenuAction(bot) {
   bot.action('command_menu', async (ctx) => {
-    try { 
-      await ctx.answerCbQuery() 
+    try {
+      await ctx.answerCbQuery()
     } catch (e) {
       console.error('[command_menu][answerCbQuery]', e)
     }
@@ -274,9 +274,9 @@ export function registerCommandMenuAction(bot) {
       // 🔥 发送完整的使用说明（与 help action 一致，MarkdownV2格式）
       const help = getHelpText()
       const inlineKb = await buildInlineKb(ctx)
-      await ctx.reply(help, { 
-        parse_mode: 'MarkdownV2', 
-        ...inlineKb 
+      await ctx.reply(help, {
+        parse_mode: 'MarkdownV2',
+        ...inlineKb
       })
     } catch (e) {
       console.error('[command_menu][reply-error]', e)
@@ -285,13 +285,103 @@ export function registerCommandMenuAction(bot) {
     const help = getHelpText()
         // 移除 MarkdownV2 转义字符
         const plainHelp = help.replace(/\\([\\_*\[\]()~`>#+\-=|{}.!])/g, '$1')
-        await ctx.reply(plainHelp, { 
+        await ctx.reply(plainHelp, {
           ...(await buildInlineKb(ctx))
         })
       } catch (e2) {
         console.error('[command_menu][fallback-error]', e2)
         await ctx.reply('❌ 发送使用说明失败，请稍后重试').catch(() => {})
       }
+    }
+  })
+}
+
+/**
+ * 注册个人中心 action
+ */
+export function registerPersonalCenter(bot) {
+  bot.action('personal_center', async (ctx) => {
+    try {
+      await ctx.answerCbQuery()
+    } catch (e) {
+      console.error('[personal_center][answerCbQuery]', e)
+    }
+
+    // 只在私聊中处理
+    if (ctx.chat?.type !== 'private') {
+      return
+    }
+
+    const userId = ctx.from?.id
+    const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
+    const firstName = ctx.from?.first_name || ''
+    const lastName = ctx.from?.last_name || ''
+    const fullName = `${firstName} ${lastName}`.trim() || '无'
+
+    try {
+      // 检查白名单状态
+      const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
+
+      let msg = `👤 *您的用户信息：*\n\n`
+      msg += `🆔 用户ID：\`${userId}\`\n`
+      msg += `👤 用户名：${username}\n`
+      msg += `📛 昵称：${fullName}\n\n`
+
+      if (isWhitelisted) {
+        msg += `✅ 您已在白名单中，可以邀请机器人进群自动授权`
+      } else {
+        msg += `⚠️ 您不在白名单中，请联系管理员将您加入白名单`
+      }
+
+      const inlineKb = await buildInlineKb(ctx)
+      await ctx.reply(msg, {
+        parse_mode: 'Markdown',
+        ...inlineKb
+      })
+    } catch (e) {
+      console.error('[personal_center][error]', e)
+      await ctx.reply('❌ 获取个人信息失败，请稍后重试').catch(() => {})
+    }
+  })
+}
+
+/**
+ * 注册联系客服 action
+ */
+export function registerContactSupport(bot) {
+  bot.action('contact_support', async (ctx) => {
+    try {
+      await ctx.answerCbQuery()
+    } catch (e) {
+      console.error('[contact_support][answerCbQuery]', e)
+    }
+
+    // 只在私聊中处理
+    if (ctx.chat?.type !== 'private') {
+      return
+    }
+
+    try {
+      // 从 GlobalConfig 读取客服联系方式
+      const config = await prisma.globalConfig.findUnique({
+        where: { key: 'support_contact' }
+      })
+
+      let msg = `📞 *联系客服*\n\n`
+      if (config?.value) {
+        msg += config.value
+      } else {
+        msg += `暂未设置客服联系方式\n\n请联系管理员配置客服信息`
+      }
+
+      const inlineKb = await buildInlineKb(ctx)
+      await ctx.reply(msg, {
+        parse_mode: 'Markdown',
+        ...inlineKb
+      })
+    } catch (e) {
+      console.error('[contact_support][error]', e)
+      await ctx.reply('❌ 获取客服信息失败，请稍后重试').catch(() => {})
     }
   })
 }

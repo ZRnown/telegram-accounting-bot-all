@@ -1,16 +1,16 @@
 // 统一注册所有命令处理器
-import { 
-  registerStartAccounting, 
+import {
+  registerStartAccounting,
   registerStopAccounting,
-  registerIncome, 
+  registerIncome,
   registerDispatch,
   registerIncomeWithRemark,
   registerIncomeWithTarget,
   registerDispatchWithTarget
 } from './accounting.js'
-import { 
-  registerSetFee, 
-  registerSetRate, 
+import {
+  registerSetFee,
+  registerSetRate,
   registerSetRealtimeRate,
   registerRefreshRate,
   registerShowRate,
@@ -40,9 +40,11 @@ import { registerZ0, registerLZ, registerLW, registerLK, registerZAmountU, regis
 import { registerCustomCommandHandlers } from './custom-command-handler.js'
 import { registerDisplayMode, registerAccountingModes, registerCommissionMode } from './modes.js'
 import { registerBotLeave, registerQueryRate, registerAdminInfo, registerListGroups } from './admin.js'
-import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill } from './core.js'
+import { registerStart, registerHelp, registerHelpCommand, registerDashboard, registerCommandMenuAction, registerViewBill, registerPersonalCenter, registerContactSupport } from './core.js'
 import { registerCheckUSDT, registerBroadcast, registerGroupBroadcast, registerBroadcastButtons, registerGroupManagement, registerGroupManagementButtons, registerGroupManagementText, registerGroupList, registerFeatureToggles } from './extended.js'
 import { registerMessageHandlers } from './message-handler.js'
+import { registerUserSettings } from './user-settings.js'
+import { registerUsdtMonitorHandler, initUsdtMonitor } from './usdt-monitor-handler.js'
 
 /**
  * 注册所有命令处理器
@@ -55,6 +57,8 @@ export function registerAllHandlers(bot, ensureChat) {
   registerDashboard(bot)
   registerCommandMenuAction(bot)
   registerViewBill(bot, ensureChat)
+  registerPersonalCenter(bot) // 🔥 个人中心
+  registerContactSupport(bot) // 🔥 联系客服
   // 自定义指令（文本+图片）
   registerCustomCommandHandlers(bot) // 🔥 自定义指令处理器
   
@@ -127,7 +131,18 @@ export function registerAllHandlers(bot, ensureChat) {
   registerGroupList(bot)
   registerFeatureToggles(bot, ensureChat) // 🔥 功能开关处理器
 
+  // 用户设置（私聊）
+  registerUserSettings(bot) // 🔥 功能设置菜单
+
+  // USDT监听
+  registerUsdtMonitorHandler(bot) // 🔥 USDT监听处理器
+
   // 消息处理器（地址验证、白名单检测等）
   registerMessageHandlers(bot)
+
+  // 初始化USDT监听服务
+  initUsdtMonitor().catch(e => {
+    console.error('[USDT Monitor] 初始化失败:', e.message)
+  })
 }
 

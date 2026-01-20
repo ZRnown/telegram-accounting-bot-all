@@ -252,3 +252,16 @@ model GlobalConfig {
 
   @@index([key])
 }
+
+model UsdtMonitor {
+  id        String   @id @default(cuid())
+  userId    String   // Telegram用户ID
+  address   String   // 监听的TRC20地址
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, address])
+  @@index([userId])
+  @@index([address])
+}
