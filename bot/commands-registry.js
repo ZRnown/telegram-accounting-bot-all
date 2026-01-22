@@ -52,7 +52,7 @@ export const commandsRegistry = [
   { type: 'exact', key: 'lk', title: 'lk', desc: 'OKX 银行卡U价', examples: ['lk'], group: 'OKX' },
 
   // 查询
-  { type: 'prefix', key: '查', title: '查', desc: '查询TRON地址/手机号/银行卡信息', examples: ['查 T开头地址', '查 15210340568', '查 6228 4800 1868 2950 870'], group: '查询' },
+  { type: 'prefix', key: '查', title: '查', desc: '查询TRON地址/手机号/银行卡信息', examples: ['查 T开头地址', '查 18888888888', '查 20000000000000000'], group: '查询' },
 
   // 其他
   { type: 'prefix', key: '设置标题', title: '设置标题', desc: '自定义账单标题', examples: ['设置标题 本群账单'], group: '其他' },

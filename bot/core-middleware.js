@@ -1,6 +1,7 @@
 import { prisma } from '../lib/db.js'
 import { ensureChat, ensureCurrentBotId } from './bot-identity.js'
 import { ensureDbChat } from './database.js'
+import { hasWhitelistOnlyPermission } from './helpers.js'
 import logger from './logger.js'
 
 // 简易告警节流：每个群 60s 内只提醒一次
@@ -13,10 +14,72 @@ function shouldWarnNow(chatId) {
     return true
 }
 
+const NON_WHITELIST_ALLOWED_TEXT = /^(?:\/start|\/help|使用说明|开始记账|开始)$/i
+const NON_WHITELIST_ALLOWED_CALLBACK = new Set(['help'])
+const COMMAND_PREFIXES = [
+    '+',
+    '-',
+    '下发',
+    '备注',
+    '显示',
+    '查看',
+    '保存',
+    '删除',
+    '设置',
+    '隐藏',
+    '开启',
+    '关闭',
+    '打开',
+    '刷新',
+    '撤销',
+    '开始',
+    '停止',
+    '上课',
+    '下课',
+    '解除禁言',
+    '开口',
+    '查询',
+    '单显',
+    '双显',
+    '人民币',
+    '我的',
+    '指定',
+    '账单',
+    '添加',
+    '自定义指令',
+    '查',
+    'z',
+    'z0',
+    'lz',
+    'lw',
+    'lk',
+    '全员广播',
+    '分组',
+    '群列表',
+    '机器人退群',
+    '管理员',
+    '权限人'
+]
+
+function isLikelyBotCommand(text) {
+    const t = String(text || '').trim()
+    if (!t) return false
+    if (t.startsWith('/') || t.startsWith('+') || t.startsWith('-')) return true
+    return COMMAND_PREFIXES.some(prefix => t.startsWith(prefix))
+}
+
 export function registerCoreMiddleware(bot) {
     bot.use(async (ctx, next) => {
-        // 🔥 如果是回调查询（callback_query），直接放行，让 action 处理
+        // 🔥 回调查询：允许使用说明，其余需要白名单
         if (ctx.update.callback_query) {
+            const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
+            if (!isWhitelisted) {
+                const data = String(ctx.update.callback_query.data || '')
+                if (!NON_WHITELIST_ALLOWED_CALLBACK.has(data)) {
+                    try { await ctx.answerCbQuery('⚠️ 仅白名单用户可用', { show_alert: true }) } catch { }
+                    return
+                }
+            }
             return next()
         }
 
@@ -44,15 +107,22 @@ export function registerCoreMiddleware(bot) {
             }
         } catch { }
 
+        const isCommandLike = text ? isLikelyBotCommand(text) : false
+        const shouldCheckWhitelist = text && (ctx.chat.type === 'private' || isCommandLike)
+        const isWhitelisted = shouldCheckWhitelist ? await hasWhitelistOnlyPermission(ctx) : true
+
         // 🔥 私聊：允许使用部分命令，但大部分功能需要通过内联菜单
         if (ctx.chat.type === 'private') {
-            // 允许的命令：/start, /myid, /我, /help, 使用说明
-            const allowedInPrivate = /^(?:\/start|\/myid|\/我|\/help|使用说明)$/i.test(text)
-            if (!allowedInPrivate && !text.includes('我的账单')) {
-                // 对于其他命令，不回复（避免频繁提示），让用户使用内联菜单
+            if (!isWhitelisted && !NON_WHITELIST_ALLOWED_TEXT.test(text)) {
                 return
             }
-            // 对于允许的命令，继续处理（不在这里 return）
+        }
+
+        if (text && !isWhitelisted && isCommandLike && !NON_WHITELIST_ALLOWED_TEXT.test(text)) {
+            if (shouldWarnNow(String(ctx.chat?.id || ''))) {
+                try { await ctx.reply('⚠️ 您不在白名单中，仅可使用：使用说明、开始记账') } catch { }
+            }
+            return
         }
 
         const botId = await ensureCurrentBotId(bot)

@@ -112,21 +112,32 @@ export async function buildInlineKb(ctx, options = {}) {
   }
 
   if (ctx.chat?.type === 'private') {
+    const userId = String(ctx.from?.id || '')
+    let isWhitelisted = false
+    try {
+      if (userId) {
+        const whitelistedUser = await prisma.whitelistedUser.findUnique({
+          where: { userId }
+        })
+        isWhitelisted = !!whitelistedUser
+      }
+    } catch {}
+
     // 🔥 私聊：显示完整的功能菜单
-    // 第一行：使用说明 + 联系客服
-    rows.push([
-      Markup.button.callback('📋 使用说明', 'help'),
-      Markup.button.callback('📞 联系客服', 'contact_support')
-    ])
-    // 第二行：个人中心 + 功能设置
-    rows.push([
-      Markup.button.callback('👤 个人中心', 'personal_center'),
-      Markup.button.callback('⚙️ 功能设置', 'user_settings')
-    ])
-    // 第三行：USDT监听
-    rows.push([
-      Markup.button.callback('💰 USDT监听', 'usdt_monitor')
-    ])
+    // 第一行：使用说明
+    rows.push([Markup.button.callback('📋 使用说明', 'help')])
+
+    if (isWhitelisted) {
+      // 第二行：联系客服
+      rows.push([Markup.button.callback('📞 联系客服', 'contact_support')])
+      // 第三行：个人中心 + 功能设置
+      rows.push([
+        Markup.button.callback('👤 个人中心', 'personal_center'),
+        Markup.button.callback('⚙️ 功能设置', 'user_settings')
+      ])
+      // 第四行：USDT监听
+      rows.push([Markup.button.callback('💰 USDT监听', 'usdt_monitor')])
+    }
 
     // 🔥 直接生成邀请链接，不需要点击后再跳转
     try {

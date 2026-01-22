@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/db.js'
 import { ensureCurrentBotId } from '../bot-identity.js'
+import { hasWhitelistOnlyPermission } from '../helpers.js'
 import logger from '../logger.js'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
@@ -114,6 +115,9 @@ export function registerCustomCommandHandlers(bot) {
         try {
             let text = (ctx.message?.text || '').trim();
             if (!text) return next();
+
+            const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
+            if (!isWhitelisted) return next()
 
             // 🔥 修复：支持 / 开头的指令触发，例如输入 "/小八" 也能触发 "小八"
             const triggerText = text.startsWith('/') ? text.substring(1) : text;

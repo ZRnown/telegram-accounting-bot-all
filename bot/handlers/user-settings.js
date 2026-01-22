@@ -2,10 +2,36 @@
 import { prisma } from '../../lib/db.js'
 import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
 
+const userInputStates = new Map()
+const INPUT_TIMEOUT_MS = 5 * 60 * 1000
+
 /**
  * 注册功能设置相关的 action
  */
 export function registerUserSettings(bot) {
+  async function showSettingsMenu(ctx) {
+    const { Markup } = await import('telegraf')
+
+    const msg = `⚙️ *功能设置*\n\n请选择要设置的功能：`
+
+    const inlineKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('📊 记账模式', 'settings_accounting_mode')],
+      [Markup.button.callback('🔘 按钮显示', 'settings_button_display')],
+      [Markup.button.callback('📞 客服文本', 'settings_support_contact')],
+      [Markup.button.callback('🔙 返回主菜单', 'back_to_main')]
+    ])
+
+    try {
+      await ctx.reply(msg, {
+        parse_mode: 'Markdown',
+        ...inlineKeyboard
+      })
+    } catch (e) {
+      console.error('[user_settings][error]', e)
+      await ctx.reply('❌ 打开功能设置失败，请稍后重试').catch(() => {})
+    }
+  }
+
   // 主菜单：功能设置
   bot.action('user_settings', async (ctx) => {
     try {
@@ -25,25 +51,7 @@ export function registerUserSettings(bot) {
       return ctx.reply('⚠️ 您不在白名单中，无法使用功能设置')
     }
 
-    const { Markup } = await import('telegraf')
-
-    const msg = `⚙️ *功能设置*\n\n请选择要设置的功能：`
-
-    const inlineKeyboard = Markup.inlineKeyboard([
-      [Markup.button.callback('📊 记账模式', 'settings_accounting_mode')],
-      [Markup.button.callback('🔘 按钮显示', 'settings_button_display')],
-      [Markup.button.callback('🔙 返回主菜单', 'back_to_main')]
-    ])
-
-    try {
-      await ctx.reply(msg, {
-        parse_mode: 'Markdown',
-        ...inlineKeyboard
-      })
-    } catch (e) {
-      console.error('[user_settings][error]', e)
-      await ctx.reply('❌ 打开功能设置失败，请稍后重试').catch(() => {})
-    }
+    await showSettingsMenu(ctx)
   })
 
   // 记账模式设置
@@ -163,6 +171,55 @@ export function registerUserSettings(bot) {
     }
   })
 
+  // 设置联系客服文本
+  bot.action('settings_support_contact', async (ctx) => {
+    try {
+      await ctx.answerCbQuery()
+    } catch (e) {
+      console.error('[settings_support_contact][answerCbQuery]', e)
+    }
+
+    // 只在私聊中处理
+    if (ctx.chat?.type !== 'private') {
+      return
+    }
+
+    const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
+    if (!isWhitelisted) {
+      return ctx.reply('⚠️ 您不在白名单中，无法设置客服文本')
+    }
+
+    const userId = String(ctx.from?.id || '')
+    userInputStates.set(userId, {
+      action: 'support_contact',
+      timestamp: Date.now()
+    })
+
+    const { Markup } = await import('telegraf')
+    const inlineKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('❌ 取消', 'settings_support_contact_cancel')]
+    ])
+
+    await ctx.reply('📞 *设置联系客服文本*\n\n请发送要展示的客服信息文本：', {
+      parse_mode: 'Markdown',
+      ...inlineKeyboard
+    })
+  })
+
+  // 取消设置客服文本
+  bot.action('settings_support_contact_cancel', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
+    userInputStates.delete(userId)
+
+    try {
+      await ctx.answerCbQuery('已取消')
+    } catch (e) {
+      console.error('[settings_support_contact_cancel][answerCbQuery]', e)
+    }
+
+    await showSettingsMenu(ctx)
+  })
+
   // 显示使用说明按钮
   bot.action('btn_show_help', async (ctx) => {
     try {
@@ -245,6 +302,46 @@ export function registerUserSettings(bot) {
     } catch (e) {
       console.error('[back_to_main][error]', e)
       await ctx.reply('❌ 返回主菜单失败，请发送 /start').catch(() => {})
+    }
+  })
+
+  // 处理客服文本输入
+  bot.on('text', async (ctx, next) => {
+    const userId = String(ctx.from?.id || '')
+    const state = userInputStates.get(userId)
+
+    if (!state || Date.now() - state.timestamp > INPUT_TIMEOUT_MS) {
+      userInputStates.delete(userId)
+      return next()
+    }
+
+    if (ctx.chat?.type !== 'private') {
+      return next()
+    }
+
+    if (state.action !== 'support_contact') {
+      return next()
+    }
+
+    userInputStates.delete(userId)
+
+    const content = ctx.message.text?.trim() || ''
+    if (!content) {
+      return ctx.reply('❌ 客服文本不能为空')
+    }
+
+    try {
+      await prisma.globalConfig.upsert({
+        where: { key: 'support_contact' },
+        create: { key: 'support_contact', value: content, description: '客服联系方式', updatedBy: userId },
+        update: { value: content, updatedAt: new Date(), updatedBy: userId }
+      })
+
+      await ctx.reply('✅ 客服文本已更新')
+      await showSettingsMenu(ctx)
+    } catch (e) {
+      console.error('[support_contact][save-error]', e)
+      await ctx.reply('❌ 保存失败，请稍后重试')
     }
   })
 }
