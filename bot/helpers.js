@@ -1,6 +1,6 @@
 // 辅助函数模块
 import { prisma } from '../lib/db.js'
-import { formatMoney, isPublicUrl } from './utils.js'
+import { formatMoney } from './utils.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 
@@ -174,7 +174,7 @@ export async function buildInlineKb(ctx, options = {}) {
 
     // 查看完整订单按钮（根据设置决定是否显示）
     if (!setting?.hideOrderButton) {
-      if (isPublicUrl(BACKEND_URL)) {
+      if (BACKEND_URL) {
         try {
           const u = new URL(BACKEND_URL)
           u.searchParams.set('chatId', chatId)
@@ -182,14 +182,12 @@ export async function buildInlineKb(ctx, options = {}) {
         } catch {
           rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
         }
-      } else if (BACKEND_URL) {
-        rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
       }
     }
   } catch {
     // 默认情况下都显示
     rows.push([Markup.button.callback('使用说明', 'help')])
-    if (isPublicUrl(BACKEND_URL)) {
+    if (BACKEND_URL) {
       try {
         const u = new URL(BACKEND_URL)
         u.searchParams.set('chatId', chatId)
@@ -197,15 +195,11 @@ export async function buildInlineKb(ctx, options = {}) {
       } catch {
         rows.push([Markup.button.url('查看完整订单', BACKEND_URL)])
       }
-    } else if (BACKEND_URL) {
-      rows.push([Markup.button.callback('查看完整订单', 'open_dashboard')])
     }
   }
 
   return Markup.inlineKeyboard(rows)
 }
-
-// isPublicUrl 已从 utils.js 导入
 
 /**
  * 检查是否是管理员

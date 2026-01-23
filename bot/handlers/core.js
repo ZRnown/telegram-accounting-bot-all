@@ -5,6 +5,19 @@ import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 
+function buildDashboardUrl(chatId) {
+  if (!BACKEND_URL) return null
+  try {
+    const u = new URL(BACKEND_URL)
+    if (chatId) {
+      u.searchParams.set('chatId', chatId)
+    }
+    return u.toString()
+  } catch {
+    return BACKEND_URL
+  }
+}
+
 /**
  * 注册 start 命令
  */
@@ -88,7 +101,7 @@ function getHelpText() {
     '• 下发\\-10 \\- 撤销下发',
     '• 显示账单 或 \\+0 \\- 查看当前账单',
     '• 显示历史账单 \\- 查看已保存账单',
-    '• 查看账单 \\- 查看完整账单（后台链接）',
+    '• 查看账单 \\- 查看完整账单（点击按钮打开）',
     '• 保存账单 \\- 保存并清空当前',
     '• 删除账单 \\- 清空当前（不保存）',
     '• 删除全部账单 \\- 清除全部账单（请谨慎使用）',
@@ -207,44 +220,56 @@ export function registerHelpCommand(bot, ensureChat) {
  */
 export function registerDashboard(bot) {
   bot.action('open_dashboard', async (ctx) => {
-    try { await ctx.answerCbQuery('已发送链接') } catch { }
-    if (!BACKEND_URL) return ctx.reply('未配置后台地址。')
     const chatId = String(ctx.chat?.id || '')
+    const url = buildDashboardUrl(chatId)
+    if (!url) return ctx.reply('未配置后台地址。')
+
     try {
-      const u = new URL(BACKEND_URL)
-      u.searchParams.set('chatId', chatId)
-      await ctx.reply(`查看完整订单：\n${u.toString()}`)
+      await ctx.answerCbQuery({ url })
+      return
     } catch {
-      await ctx.reply(`查看完整订单：\n${BACKEND_URL}`)
+      try { await ctx.answerCbQuery() } catch { }
+    }
+
+    try {
+      const { Markup } = await import('telegraf')
+      const inlineKeyboard = Markup.inlineKeyboard([
+        [Markup.button.url('查看完整订单', url)]
+      ])
+      await ctx.reply('📊 点击下方按钮查看完整账单：', {
+        ...inlineKeyboard
+      })
+    } catch (e) {
+      await ctx.reply(`查看完整订单：\n${url}`)
     }
   })
 }
 
 /**
- * 注册查看账单命令（发送账单链接）
+ * 注册查看账单命令（发送账单按钮）
  */
 export function registerViewBill(bot, ensureChat) {
   bot.hears(/^查看账单$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
 
-    if (!BACKEND_URL) {
+    const chatId = String(ctx.chat?.id || '')
+    const url = buildDashboardUrl(chatId)
+    if (!url) {
       return ctx.reply('❌ 未配置后台地址')
     }
 
-    const chatId = String(ctx.chat?.id || '')
     try {
-      const u = new URL(BACKEND_URL)
-      u.searchParams.set('chatId', chatId)
+      const { Markup } = await import('telegraf')
+      const inlineKeyboard = Markup.inlineKeyboard([
+        [Markup.button.url('查看完整订单', url)]
+      ])
       await ctx.reply(
-        `📊 查看完整账单：\n${u.toString()}`,
-        { ...(await buildInlineKb(ctx)) }
+        '📊 点击下方按钮查看完整账单：',
+        { ...inlineKeyboard }
       )
     } catch {
-      await ctx.reply(
-        `📊 查看完整账单：\n${BACKEND_URL}`,
-        { ...(await buildInlineKb(ctx)) }
-      )
+      await ctx.reply(`查看完整订单：\n${url}`)
     }
   })
 }

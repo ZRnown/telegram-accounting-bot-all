@@ -8,7 +8,7 @@ export const commandsRegistry = [
   // 账单相关
   { type: 'exact', key: '显示账单', title: '显示账单', desc: '查看当前账单', examples: ['显示账单', '+0'], group: '账单' },
   { type: 'exact', key: '显示历史账单', title: '显示历史账单', desc: '查看已保存账单', examples: ['显示历史账单'], group: '账单' },
-  { type: 'exact', key: '查看账单', title: '查看账单', desc: '查看完整账单（后台链接）', examples: ['查看账单'], group: '账单' },
+  { type: 'exact', key: '查看账单', title: '查看账单', desc: '查看完整账单（点击按钮打开）', examples: ['查看账单'], group: '账单' },
   { type: 'exact', key: '保存账单', title: '保存账单', desc: '保存并清空当前', examples: ['保存账单'], group: '账单' },
   { type: 'exact', key: '删除账单', title: '删除账单', desc: '清空当前（不保存）', examples: ['删除账单'], group: '账单' },
   { type: 'exact', key: '删除全部账单', title: '删除全部账单', desc: '清除全部账单', examples: ['删除全部账单'], group: '账单' },
