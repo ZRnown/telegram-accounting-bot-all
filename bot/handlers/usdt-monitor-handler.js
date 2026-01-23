@@ -2,9 +2,7 @@
 import { prisma } from '../../lib/db.js'
 import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
 import { addMonitor, removeMonitor, getUserMonitors, setTransferCallback, loadAllMonitors } from '../usdt-monitor.js'
-
-// 存储用户的输入状态
-const userInputStates = new Map()
+import { setUserInputState, getUserInputState, clearUserInputState } from '../user-input-state.js'
 
 /**
  * 注册USDT监听相关的 action
@@ -116,10 +114,7 @@ export function registerUsdtMonitorHandler(bot) {
     const userId = String(ctx.from?.id || '')
 
     // 设置用户输入状态
-    userInputStates.set(userId, {
-      action: 'add_address',
-      timestamp: Date.now()
-    })
+    setUserInputState(userId, 'usdt_add_address')
 
     const { Markup } = await import('telegraf')
     const inlineKeyboard = Markup.inlineKeyboard([
@@ -239,7 +234,7 @@ export function registerUsdtMonitorHandler(bot) {
   // 取消输入
   bot.action('usdt_cancel_input', async (ctx) => {
     const userId = String(ctx.from?.id || '')
-    userInputStates.delete(userId)
+    clearUserInputState(userId, 'usdt_add_address')
 
     try {
       await ctx.answerCbQuery('已取消')
@@ -253,13 +248,8 @@ export function registerUsdtMonitorHandler(bot) {
   // 处理用户输入的地址
   bot.on('text', async (ctx, next) => {
     const userId = String(ctx.from?.id || '')
-    const state = userInputStates.get(userId)
-
-    // 检查是否在等待输入状态
-    if (!state || Date.now() - state.timestamp > 300000) { // 5分钟超时
-      userInputStates.delete(userId)
-      return next()
-    }
+    const state = getUserInputState(userId)
+    if (!state) return next()
 
     // 只在私聊中处理
     if (ctx.chat?.type !== 'private') {
@@ -268,8 +258,8 @@ export function registerUsdtMonitorHandler(bot) {
 
     const text = ctx.message.text?.trim() || ''
 
-    if (state.action === 'add_address') {
-      userInputStates.delete(userId)
+    if (state.action === 'usdt_add_address') {
+      clearUserInputState(userId, 'usdt_add_address')
 
       // 验证地址格式
       if (!text || text.length !== 34 || !text.startsWith('T')) {

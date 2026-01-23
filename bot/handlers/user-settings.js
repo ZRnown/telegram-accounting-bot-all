@@ -1,9 +1,7 @@
 // 用户功能设置处理器
 import { prisma } from '../../lib/db.js'
 import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
-
-const userInputStates = new Map()
-const INPUT_TIMEOUT_MS = 5 * 60 * 1000
+import { setUserInputState, getUserInputState, clearUserInputState } from '../user-input-state.js'
 
 /**
  * 注册功能设置相关的 action
@@ -190,10 +188,7 @@ export function registerUserSettings(bot) {
     }
 
     const userId = String(ctx.from?.id || '')
-    userInputStates.set(userId, {
-      action: 'support_contact',
-      timestamp: Date.now()
-    })
+    setUserInputState(userId, 'support_contact')
 
     const { Markup } = await import('telegraf')
     const inlineKeyboard = Markup.inlineKeyboard([
@@ -209,7 +204,7 @@ export function registerUserSettings(bot) {
   // 取消设置客服文本
   bot.action('settings_support_contact_cancel', async (ctx) => {
     const userId = String(ctx.from?.id || '')
-    userInputStates.delete(userId)
+    clearUserInputState(userId, 'support_contact')
 
     try {
       await ctx.answerCbQuery('已取消')
@@ -308,12 +303,8 @@ export function registerUserSettings(bot) {
   // 处理客服文本输入
   bot.on('text', async (ctx, next) => {
     const userId = String(ctx.from?.id || '')
-    const state = userInputStates.get(userId)
-
-    if (!state || Date.now() - state.timestamp > INPUT_TIMEOUT_MS) {
-      userInputStates.delete(userId)
-      return next()
-    }
+    const state = getUserInputState(userId)
+    if (!state) return next()
 
     if (ctx.chat?.type !== 'private') {
       return next()
@@ -323,7 +314,7 @@ export function registerUserSettings(bot) {
       return next()
     }
 
-    userInputStates.delete(userId)
+    clearUserInputState(userId, 'support_contact')
 
     const content = ctx.message.text?.trim() || ''
     if (!content) {

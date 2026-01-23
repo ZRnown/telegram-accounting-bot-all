@@ -27,6 +27,7 @@ import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } fr
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
+import { hasPendingUserInput } from './user-input-state.js'
 import logger from './logger.js'
 
 logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
@@ -497,7 +498,9 @@ bot.use(async (ctx, next) => {
   if (ctx.chat.type === 'private') {
     // 允许的命令：/start, /myid, /我, /help, 使用说明
     const allowedInPrivate = /^(?:\/start|\/myid|\/我|\/help|使用说明)$/i.test(text)
-    if (!allowedInPrivate && !text.includes('我的账单')) {
+    const userId = String(ctx.from?.id || '')
+    const allowPendingInput = hasPendingUserInput(userId)
+    if (!allowedInPrivate && !text.includes('我的账单') && !allowPendingInput) {
       // 对于其他命令，不回复（避免频繁提示），让用户使用内联菜单
       return
     }
