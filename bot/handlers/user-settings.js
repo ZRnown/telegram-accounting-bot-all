@@ -52,7 +52,7 @@ export function registerUserSettings(bot) {
     await showSettingsMenu(ctx)
   })
 
-  // 记账模式设置
+  // 记账模式设置（全局）
   bot.action('settings_accounting_mode', async (ctx) => {
     try {
       await ctx.answerCbQuery()
@@ -62,11 +62,27 @@ export function registerUserSettings(bot) {
 
     const { Markup } = await import('telegraf')
 
-    const msg = `📊 *记账模式设置*\n\n` +
-      `选择记账模式：\n\n` +
-      `• **累计模式**：账单金额累计，不自动清零\n` +
-      `• **清零模式**：每天自动清零账单\n` +
-      `• **单笔订单**：每天只有一笔订单`
+    // 获取当前全局记账模式
+    let currentMode = 'DAILY_RESET'
+    try {
+      const config = await prisma.globalConfig.findUnique({
+        where: { key: 'global_accounting_mode' }
+      })
+      if (config?.value) currentMode = config.value
+    } catch {}
+
+    const modeLabels = {
+      'CARRY_OVER': '📈 累计模式',
+      'DAILY_RESET': '🔄 清零模式',
+      'SINGLE_BILL_PER_DAY': '📝 单笔订单'
+    }
+
+    const msg = `📊 *全局记账模式设置*\n\n` +
+      `当前模式：${modeLabels[currentMode] || currentMode}\n\n` +
+      `选择记账模式（设置后对所有群组生效）：\n\n` +
+      `• *累计模式*：账单金额累计，不自动清零\n` +
+      `• *清零模式*：每天自动清零账单\n` +
+      `• *单笔订单*：每天只有一笔订单`
 
     const inlineKeyboard = Markup.inlineKeyboard([
       [Markup.button.callback('📈 累计模式', 'set_mode_carry_over')],
@@ -89,46 +105,64 @@ export function registerUserSettings(bot) {
     }
   })
 
-  // 设置累计模式
+  // 设置累计模式（全局）
   bot.action('set_mode_carry_over', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
     try {
+      await prisma.globalConfig.upsert({
+        where: { key: 'global_accounting_mode' },
+        create: { key: 'global_accounting_mode', value: 'CARRY_OVER', description: '全局记账模式', updatedBy: userId },
+        update: { value: 'CARRY_OVER', updatedBy: userId }
+      })
       await ctx.answerCbQuery('✅ 已设置为累计模式')
+      await ctx.reply(`✅ 全局记账模式已设置为：*累计模式*\n\n账单金额将累计，不自动清零。\n\n此设置对所有群组生效。`, {
+        parse_mode: 'Markdown'
+      })
     } catch (e) {
-      console.error('[set_mode_carry_over][answerCbQuery]', e)
+      console.error('[set_mode_carry_over][error]', e)
+      await ctx.answerCbQuery('❌ 设置失败')
     }
-
-    await ctx.reply(`✅ 记账模式已设置为：**累计模式**\n\n账单金额将累计，不自动清零。\n\n注意：此设置需要在群组中使用"设置记账模式 累计模式"命令来应用。`, {
-      parse_mode: 'Markdown'
-    })
   })
 
-  // 设置清零模式
+  // 设置清零模式（全局）
   bot.action('set_mode_daily_reset', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
     try {
+      await prisma.globalConfig.upsert({
+        where: { key: 'global_accounting_mode' },
+        create: { key: 'global_accounting_mode', value: 'DAILY_RESET', description: '全局记账模式', updatedBy: userId },
+        update: { value: 'DAILY_RESET', updatedBy: userId }
+      })
       await ctx.answerCbQuery('✅ 已设置为清零模式')
+      await ctx.reply(`✅ 全局记账模式已设置为：*清零模式*\n\n每天自动清零账单。\n\n此设置对所有群组生效。`, {
+        parse_mode: 'Markdown'
+      })
     } catch (e) {
-      console.error('[set_mode_daily_reset][answerCbQuery]', e)
+      console.error('[set_mode_daily_reset][error]', e)
+      await ctx.answerCbQuery('❌ 设置失败')
     }
-
-    await ctx.reply(`✅ 记账模式已设置为：**清零模式**\n\n每天自动清零账单。\n\n注意：此设置需要在群组中使用"设置记账模式 清零模式"命令来应用。`, {
-      parse_mode: 'Markdown'
-    })
   })
 
-  // 设置单笔订单模式
+  // 设置单笔订单模式（全局）
   bot.action('set_mode_single_bill', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
     try {
+      await prisma.globalConfig.upsert({
+        where: { key: 'global_accounting_mode' },
+        create: { key: 'global_accounting_mode', value: 'SINGLE_BILL_PER_DAY', description: '全局记账模式', updatedBy: userId },
+        update: { value: 'SINGLE_BILL_PER_DAY', updatedBy: userId }
+      })
       await ctx.answerCbQuery('✅ 已设置为单笔订单')
+      await ctx.reply(`✅ 全局记账模式已设置为：*单笔订单*\n\n每天只有一笔订单。\n\n此设置对所有群组生效。`, {
+        parse_mode: 'Markdown'
+      })
     } catch (e) {
-      console.error('[set_mode_single_bill][answerCbQuery]', e)
+      console.error('[set_mode_single_bill][error]', e)
+      await ctx.answerCbQuery('❌ 设置失败')
     }
-
-    await ctx.reply(`✅ 记账模式已设置为：**单笔订单**\n\n每天只有一笔订单。\n\n注意：此设置需要在群组中使用"设置记账模式 单笔订单"命令来应用。`, {
-      parse_mode: 'Markdown'
-    })
   })
 
-  // 按钮显示设置
+  // 按钮显示设置（全局）
   bot.action('settings_button_display', async (ctx) => {
     try {
       await ctx.answerCbQuery()
@@ -138,19 +172,29 @@ export function registerUserSettings(bot) {
 
     const { Markup } = await import('telegraf')
 
-    const msg = `🔘 *按钮显示设置*\n\n` +
-      `控制群组中显示的按钮：\n\n` +
-      `• 使用说明按钮\n` +
-      `• 查看订单按钮`
+    // 获取当前全局按钮显示设置
+    let hideHelp = false
+    let hideOrder = false
+    try {
+      const [helpConfig, orderConfig] = await Promise.all([
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_help_button' } }),
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_order_button' } })
+      ])
+      hideHelp = helpConfig?.value === 'true'
+      hideOrder = orderConfig?.value === 'true'
+    } catch {}
+
+    const msg = `🔘 *全局按钮显示设置*\n\n` +
+      `控制所有群组中显示的按钮：\n\n` +
+      `• 使用说明按钮：${hideHelp ? '🚫 已隐藏' : '✅ 显示中'}\n` +
+      `• 查看订单按钮：${hideOrder ? '🚫 已隐藏' : '✅ 显示中'}`
 
     const inlineKeyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('📋 显示使用说明', 'btn_show_help'),
-        Markup.button.callback('🚫 隐藏使用说明', 'btn_hide_help')
+        Markup.button.callback(hideHelp ? '✅ 显示使用说明' : '🚫 隐藏使用说明', 'btn_toggle_help')
       ],
       [
-        Markup.button.callback('📊 显示查看订单', 'btn_show_order'),
-        Markup.button.callback('🚫 隐藏查看订单', 'btn_hide_order')
+        Markup.button.callback(hideOrder ? '✅ 显示查看订单' : '🚫 隐藏查看订单', 'btn_toggle_order')
       ],
       [Markup.button.callback('🔙 返回设置', 'user_settings')]
     ])
@@ -215,56 +259,96 @@ export function registerUserSettings(bot) {
     await showSettingsMenu(ctx)
   })
 
-  // 显示使用说明按钮
-  bot.action('btn_show_help', async (ctx) => {
+  // 切换使用说明按钮显示（全局）
+  bot.action('btn_toggle_help', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
     try {
-      await ctx.answerCbQuery('ℹ️ 请在群组中使用此设置')
-    } catch (e) {
-      console.error('[btn_show_help][answerCbQuery]', e)
-    }
+      // 获取当前状态
+      const config = await prisma.globalConfig.findUnique({
+        where: { key: 'global_hide_help_button' }
+      })
+      const currentHide = config?.value === 'true'
+      const newValue = currentHide ? 'false' : 'true'
 
-    await ctx.reply(`ℹ️ 要显示使用说明按钮，请在对应群组中发送：\n\n\`显示使用说明按钮\``, {
-      parse_mode: 'Markdown'
-    })
+      await prisma.globalConfig.upsert({
+        where: { key: 'global_hide_help_button' },
+        create: { key: 'global_hide_help_button', value: newValue, description: '全局隐藏使用说明按钮', updatedBy: userId },
+        update: { value: newValue, updatedBy: userId }
+      })
+
+      await ctx.answerCbQuery(newValue === 'true' ? '✅ 已隐藏使用说明按钮' : '✅ 已显示使用说明按钮')
+
+      // 刷新按钮显示设置菜单
+      const { Markup } = await import('telegraf')
+      const [helpConfig, orderConfig] = await Promise.all([
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_help_button' } }),
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_order_button' } })
+      ])
+      const hideHelp = helpConfig?.value === 'true'
+      const hideOrder = orderConfig?.value === 'true'
+
+      const msg = `🔘 *全局按钮显示设置*\n\n` +
+        `控制所有群组中显示的按钮：\n\n` +
+        `• 使用说明按钮：${hideHelp ? '🚫 已隐藏' : '✅ 显示中'}\n` +
+        `• 查看订单按钮：${hideOrder ? '🚫 已隐藏' : '✅ 显示中'}`
+
+      const inlineKeyboard = Markup.inlineKeyboard([
+        [Markup.button.callback(hideHelp ? '✅ 显示使用说明' : '🚫 隐藏使用说明', 'btn_toggle_help')],
+        [Markup.button.callback(hideOrder ? '✅ 显示查看订单' : '🚫 隐藏查看订单', 'btn_toggle_order')],
+        [Markup.button.callback('🔙 返回设置', 'user_settings')]
+      ])
+
+      await ctx.editMessageText(msg, { parse_mode: 'Markdown', ...inlineKeyboard })
+    } catch (e) {
+      console.error('[btn_toggle_help][error]', e)
+      await ctx.answerCbQuery('❌ 设置失败')
+    }
   })
 
-  // 隐藏使用说明按钮
-  bot.action('btn_hide_help', async (ctx) => {
+  // 切换查看订单按钮显示（全局）
+  bot.action('btn_toggle_order', async (ctx) => {
+    const userId = String(ctx.from?.id || '')
     try {
-      await ctx.answerCbQuery('ℹ️ 请在群组中使用此设置')
+      // 获取当前状态
+      const config = await prisma.globalConfig.findUnique({
+        where: { key: 'global_hide_order_button' }
+      })
+      const currentHide = config?.value === 'true'
+      const newValue = currentHide ? 'false' : 'true'
+
+      await prisma.globalConfig.upsert({
+        where: { key: 'global_hide_order_button' },
+        create: { key: 'global_hide_order_button', value: newValue, description: '全局隐藏查看订单按钮', updatedBy: userId },
+        update: { value: newValue, updatedBy: userId }
+      })
+
+      await ctx.answerCbQuery(newValue === 'true' ? '✅ 已隐藏查看订单按钮' : '✅ 已显示查看订单按钮')
+
+      // 刷新按钮显示设置菜单
+      const { Markup } = await import('telegraf')
+      const [helpConfig, orderConfig] = await Promise.all([
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_help_button' } }),
+        prisma.globalConfig.findUnique({ where: { key: 'global_hide_order_button' } })
+      ])
+      const hideHelp = helpConfig?.value === 'true'
+      const hideOrder = orderConfig?.value === 'true'
+
+      const msg = `🔘 *全局按钮显示设置*\n\n` +
+        `控制所有群组中显示的按钮：\n\n` +
+        `• 使用说明按钮：${hideHelp ? '🚫 已隐藏' : '✅ 显示中'}\n` +
+        `• 查看订单按钮：${hideOrder ? '🚫 已隐藏' : '✅ 显示中'}`
+
+      const inlineKeyboard = Markup.inlineKeyboard([
+        [Markup.button.callback(hideHelp ? '✅ 显示使用说明' : '🚫 隐藏使用说明', 'btn_toggle_help')],
+        [Markup.button.callback(hideOrder ? '✅ 显示查看订单' : '🚫 隐藏查看订单', 'btn_toggle_order')],
+        [Markup.button.callback('🔙 返回设置', 'user_settings')]
+      ])
+
+      await ctx.editMessageText(msg, { parse_mode: 'Markdown', ...inlineKeyboard })
     } catch (e) {
-      console.error('[btn_hide_help][answerCbQuery]', e)
+      console.error('[btn_toggle_order][error]', e)
+      await ctx.answerCbQuery('❌ 设置失败')
     }
-
-    await ctx.reply(`ℹ️ 要隐藏使用说明按钮，请在对应群组中发送：\n\n\`隐藏使用说明按钮\``, {
-      parse_mode: 'Markdown'
-    })
-  })
-
-  // 显示查看订单按钮
-  bot.action('btn_show_order', async (ctx) => {
-    try {
-      await ctx.answerCbQuery('ℹ️ 请在群组中使用此设置')
-    } catch (e) {
-      console.error('[btn_show_order][answerCbQuery]', e)
-    }
-
-    await ctx.reply(`ℹ️ 要显示查看订单按钮，请在对应群组中发送：\n\n\`显示订单按钮\``, {
-      parse_mode: 'Markdown'
-    })
-  })
-
-  // 隐藏查看订单按钮
-  bot.action('btn_hide_order', async (ctx) => {
-    try {
-      await ctx.answerCbQuery('ℹ️ 请在群组中使用此设置')
-    } catch (e) {
-      console.error('[btn_hide_order][answerCbQuery]', e)
-    }
-
-    await ctx.reply(`ℹ️ 要隐藏查看订单按钮，请在对应群组中发送：\n\n\`隐藏订单按钮\``, {
-      parse_mode: 'Markdown'
-    })
   })
 
   // 返回主菜单

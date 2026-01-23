@@ -2,7 +2,7 @@
 import { prisma } from '../lib/db.js'
 import { summarize } from './state.js'
 import { formatMoney, getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
-import { checkAndClearIfNewDay, getOrCreateTodayBill } from './database.js'
+import { checkAndClearIfNewDay, getOrCreateTodayBill, getAccountingMode } from './database.js'
 
 /**
  * 格式化账单摘要
@@ -96,7 +96,8 @@ export async function formatSummary(ctx, chat, options = {}) {
     ])
 
     settings = settingsResult // 🔥 赋值给外部变量
-    accountingMode = settings?.accountingMode || 'DAILY_RESET'
+    // 🔥 使用全局记账模式
+    accountingMode = await getAccountingMode(chatId)
 
     // 🔥 累计模式不再需要历史未下发计算
 

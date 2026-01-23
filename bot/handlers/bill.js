@@ -1,7 +1,7 @@
 // 账单相关命令处理器
 import { prisma } from '../../lib/db.js'
 import { getChat } from '../state.js'
-import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, deleteIncomeByMessageId, deleteDispatchByMessageId, getChatDailyCutoffHour } from '../database.js'
+import { ensureDbChat, getOrCreateTodayBill, deleteLastIncome, deleteLastDispatch, deleteIncomeByMessageId, deleteDispatchByMessageId, getChatDailyCutoffHour, getAccountingMode } from '../database.js'
 import { buildInlineKb, hasPermissionWithWhitelist } from '../helpers.js'
 import { formatSummary } from '../formatting.js'
 import { getGlobalDailyCutoffHour } from '../utils.js'
@@ -34,12 +34,8 @@ export function registerSaveBill(bot, ensureChat) {
     const chatId = await ensureDbChat(ctx, chat)
 
     try {
-      // 🔥 检查记账模式
-      const settings = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { accountingMode: true }
-      })
-      const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+      // 🔥 使用全局记账模式
+      const accountingMode = await getAccountingMode(chatId)
       const isCumulativeMode = accountingMode === 'CARRY_OVER'
       const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
 
@@ -168,11 +164,8 @@ export function registerDeleteBill(bot, ensureChat) {
 
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
-      const settings = await prisma.setting.findUnique({
-        where: { chatId },
-        select: { accountingMode: true }
-      })
-      const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+      const accountingMode = await getAccountingMode(chatId)
+      const isCumulativeMode = accountingMode === 'CARRY_OVER'
 
       if (isCumulativeMode) {
         // 累计模式：完全删除账单（使用事务确保原子性）
@@ -272,11 +265,8 @@ export function registerDeleteBill(bot, ensureChat) {
 
       // 🔥 累计模式：删除账单和所有账单项，确保该账单不再计入其他账单的历史数据
       // 🔥 清零模式：只删除账单项，保留账单（保持原有逻辑）
-      const settings = await prisma.setting.findUnique({
-        where: { chatId: finalChatId },
-        select: { accountingMode: true }
-      })
-      const isCumulativeMode = settings?.accountingMode === 'CARRY_OVER'
+      const accountingMode = await getAccountingMode(finalChatId)
+      const isCumulativeMode = accountingMode === 'CARRY_OVER'
 
       if (isCumulativeMode) {
         // 累计模式：完全删除账单（使用事务确保原子性）

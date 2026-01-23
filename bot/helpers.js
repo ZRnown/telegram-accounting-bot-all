@@ -162,18 +162,22 @@ export async function buildInlineKb(ctx, options = {}) {
   }
 
   try {
-    const setting = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { hideHelpButton: true, hideOrderButton: true }
-    })
+    // 🔥 优先读取全局设置
+    const [globalHelpConfig, globalOrderConfig] = await Promise.all([
+      prisma.globalConfig.findUnique({ where: { key: 'global_hide_help_button' } }),
+      prisma.globalConfig.findUnique({ where: { key: 'global_hide_order_button' } })
+    ])
 
-    // 使用说明按钮（根据设置决定是否显示）
-    if (!setting?.hideHelpButton) {
+    const hideHelpButton = globalHelpConfig?.value === 'true'
+    const hideOrderButton = globalOrderConfig?.value === 'true'
+
+    // 使用说明按钮（根据全局设置决定是否显示）
+    if (!hideHelpButton) {
       rows.push([Markup.button.callback('使用说明', 'help')])
     }
 
-    // 查看完整订单按钮（根据设置决定是否显示）
-    if (!setting?.hideOrderButton) {
+    // 查看完整订单按钮（根据全局设置决定是否显示）
+    if (!hideOrderButton) {
       if (BACKEND_URL) {
         try {
           const u = new URL(BACKEND_URL)

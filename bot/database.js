@@ -3,6 +3,38 @@ import { prisma } from '../lib/db.js'
 import { getGlobalDailyCutoffHour, startOfDay, endOfDay } from './utils.js'
 
 /**
+ * 获取记账模式（优先全局设置，其次群组设置）
+ * @param {string} chatId - 聊天ID（可选，用于获取群组设置作为备选）
+ * @returns {Promise<string>} - 记账模式
+ */
+export async function getAccountingMode(chatId = null) {
+  try {
+    // 优先读取全局设置
+    const globalConfig = await prisma.globalConfig.findUnique({
+      where: { key: 'global_accounting_mode' }
+    })
+    if (globalConfig?.value) {
+      return globalConfig.value
+    }
+  } catch {}
+
+  // 如果没有全局设置，尝试读取群组设置
+  if (chatId) {
+    try {
+      const settings = await prisma.setting.findUnique({
+        where: { chatId },
+        select: { accountingMode: true }
+      })
+      if (settings?.accountingMode) {
+        return settings.accountingMode
+      }
+    } catch {}
+  }
+
+  return 'DAILY_RESET' // 默认清零模式
+}
+
+/**
  * 确保数据库中的聊天记录存在（简化版本）
  */
 export async function ensureDbChat(ctx, chat = null) {
@@ -48,15 +80,17 @@ export async function checkAndClearIfNewDay(chat, chatId) {
   try {
     if (!chat || !chatId) return false
 
-    const settings = await prisma.setting.findUnique({
-      where: { chatId },
-      select: { accountingMode: true, dailyCutoffHour: true }
-    })
-
-    const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+    // 🔥 使用全局记账模式
+    const accountingMode = await getAccountingMode(chatId)
 
     // 只有每日清零模式才需要清空内存数据
     if (accountingMode !== 'DAILY_RESET') return false
+
+    // 获取日切时间
+    const settings = await prisma.setting.findUnique({
+      where: { chatId },
+      select: { dailyCutoffHour: true }
+    })
 
     // 🔥 修复：优先使用群组级别的日切时间，与 getOrCreateTodayBill 保持一致
     const cutoffHour = settings?.dailyCutoffHour != null && settings.dailyCutoffHour >= 0 && settings.dailyCutoffHour <= 23
@@ -141,12 +175,8 @@ export async function getChatDailyCutoffHour(chatId) {
  * - 如果当前时间是3号凌晨1点（< 3号02:00），归入2号的账单（2025/11/02 02:00:00 — 2025/11/03 02:00:00）
  */
 export async function getOrCreateTodayBill(chatId) {
-  // 🔥 先检查记账模式
-  const settings = await prisma.setting.findUnique({
-    where: { chatId },
-    select: { accountingMode: true }
-  })
-  const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+  // 🔥 使用全局记账模式
+  const accountingMode = await getAccountingMode(chatId)
   const isCumulativeMode = accountingMode === 'CARRY_OVER'
   const isSingleBillMode = accountingMode === 'SINGLE_BILL_PER_DAY'
 
@@ -411,11 +441,20 @@ export async function performAutoDailyCutoff(getChat) {
       return 0
     }
 
+    // 🔥 优先获取全局记账模式
+    let globalAccountingMode = null
+    try {
+      const globalConfig = await prisma.globalConfig.findUnique({
+        where: { key: 'global_accounting_mode' }
+      })
+      globalAccountingMode = globalConfig?.value || null
+    } catch {}
+
     // 🔥 性能优化：批量查询所有群组的设置，避免N+1查询问题
     const chatIds = openBills.map(b => b.chatId)
     const allSettings = await prisma.setting.findMany({
       where: { chatId: { in: chatIds } },
-      select: { chatId: true, accountingMode: true, dailyCutoffHour: true }
+      select: { chatId: true, dailyCutoffHour: true }
     })
     const settingsMap = new Map(allSettings.map(s => [s.chatId, s]))
 
@@ -425,9 +464,9 @@ export async function performAutoDailyCutoff(getChat) {
       try {
         const chatId = bill.chatId
 
-        // 🔥 从缓存中获取设置，避免重复查询
+        // 🔥 优先使用全局记账模式
         const settings = settingsMap.get(chatId)
-        const accountingMode = settings?.accountingMode || 'DAILY_RESET'
+        const accountingMode = globalAccountingMode || 'DAILY_RESET'
 
         // 🔥 所有模式：不再自动关闭账单，必须手动关闭
         // 只有 SINGLE_BILL_PER_DAY 模式在日切时自动关闭（这是该模式的特性）
