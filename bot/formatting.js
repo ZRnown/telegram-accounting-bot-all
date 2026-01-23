@@ -340,7 +340,7 @@ export async function formatSummary(ctx, chat, options = {}) {
       }
       // 🔥 显示费率（如果有）
       if (i.feeRate) {
-        line += ` *${(i.feeRate * 100).toFixed(0)}%`
+        line += ` ×${(i.feeRate * 100).toFixed(0)}%`
       }
       // 🔥 显示备注（如果有）
       if (remark) {
