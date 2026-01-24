@@ -1,7 +1,7 @@
 // 核心命令处理器（start, myid, help, dashboard等）
 import { prisma } from '../../lib/db.js'
 import { getChat } from '../state.js'
-import { buildInlineKb, hasWhitelistOnlyPermission } from '../helpers.js'
+import { buildInlineKb, buildBotDeepLink, hasWhitelistOnlyPermission } from '../helpers.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 
@@ -23,6 +23,7 @@ function buildDashboardUrl(chatId) {
  */
 export function registerStart(bot, ensureChat) {
   bot.start(async (ctx) => {
+    const startPayload = ctx.startPayload || ''
     const userId = ctx.from?.id
     const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
     const firstName = ctx.from?.first_name || ''
@@ -30,6 +31,11 @@ export function registerStart(bot, ensureChat) {
     const fullName = `${firstName} ${lastName}`.trim()
 
     if (ctx.chat?.type === 'private') {
+      if (startPayload === 'help') {
+        const help = getHelpText()
+        await ctx.reply(help, { parse_mode: 'MarkdownV2', ...(await buildInlineKb(ctx)) })
+        return
+      }
       // 🔥 私聊：检查是否在白名单，显示不同的提示信息
       const userIdStr = String(userId || '')
       const whitelistedUser = await prisma.whitelistedUser.findUnique({
@@ -177,7 +183,20 @@ export function registerHelp(bot) {
     }
 
     try {
-      // 🔥 私聊和群聊都显示完整的使用说明（MarkdownV2格式）
+      if (ctx.chat?.type !== 'private') {
+        const helpLink = await buildBotDeepLink(ctx, 'help')
+        if (!helpLink) {
+          return ctx.reply('请私聊机器人查看使用说明')
+        }
+        const { Markup } = await import('telegraf')
+        const inlineKeyboard = Markup.inlineKeyboard([
+          [Markup.button.url('私聊查看使用说明', helpLink)]
+        ])
+        return ctx.reply('请点击下方按钮私聊查看使用说明：', {
+          ...inlineKeyboard
+        })
+      }
+      // 🔥 私聊显示完整使用说明（MarkdownV2格式）
       const help = getHelpText()
       const inlineKb = await buildInlineKb(ctx)
       await ctx.reply(help, { 
@@ -209,6 +228,20 @@ export function registerHelpCommand(bot, ensureChat) {
   bot.hears(/^使用说明$/i, async (ctx) => {
     const chat = ensureChat(ctx)
     if (!chat) return
+
+    if (ctx.chat?.type !== 'private') {
+      const helpLink = await buildBotDeepLink(ctx, 'help')
+      if (!helpLink) {
+        return ctx.reply('请私聊机器人查看使用说明')
+      }
+      const { Markup } = await import('telegraf')
+      const inlineKeyboard = Markup.inlineKeyboard([
+        [Markup.button.url('私聊查看使用说明', helpLink)]
+      ])
+      return ctx.reply('请点击下方按钮私聊查看使用说明：', {
+        ...inlineKeyboard
+      })
+    }
 
     const help = getHelpText()
     await ctx.reply(help, { parse_mode: 'MarkdownV2', ...(await buildInlineKb(ctx)) })

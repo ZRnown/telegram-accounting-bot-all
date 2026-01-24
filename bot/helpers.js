@@ -3,6 +3,7 @@ import { prisma } from '../lib/db.js'
 import { formatMoney } from './utils.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
+let cachedBotUsername = null
 
 /**
  * 获取货币符号或简码
@@ -173,7 +174,12 @@ export async function buildInlineKb(ctx, options = {}) {
 
     // 使用说明按钮（根据全局设置决定是否显示）
     if (!hideHelpButton) {
-      rows.push([Markup.button.callback('使用说明', 'help')])
+      const helpLink = await buildBotDeepLink(ctx, 'help')
+      if (helpLink) {
+        rows.push([Markup.button.url('使用说明', helpLink)])
+      } else {
+        rows.push([Markup.button.callback('使用说明', 'help')])
+      }
     }
 
     // 查看完整订单按钮（根据全局设置决定是否显示）
@@ -190,7 +196,12 @@ export async function buildInlineKb(ctx, options = {}) {
     }
   } catch {
     // 默认情况下都显示
-    rows.push([Markup.button.callback('使用说明', 'help')])
+    const helpLink = await buildBotDeepLink(ctx, 'help')
+    if (helpLink) {
+      rows.push([Markup.button.url('使用说明', helpLink)])
+    } else {
+      rows.push([Markup.button.callback('使用说明', 'help')])
+    }
     if (BACKEND_URL) {
       try {
         const u = new URL(BACKEND_URL)
@@ -203,6 +214,33 @@ export async function buildInlineKb(ctx, options = {}) {
   }
 
   return Markup.inlineKeyboard(rows)
+}
+
+async function getBotUsername(ctx) {
+  if (cachedBotUsername) return cachedBotUsername
+  const botUsername = ctx.botInfo?.username
+  if (botUsername) {
+    cachedBotUsername = botUsername
+    return botUsername
+  }
+  try {
+    const me = await ctx.telegram.getMe()
+    if (me?.username) {
+      cachedBotUsername = me.username
+      return cachedBotUsername
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+export async function buildBotDeepLink(ctx, payload = '') {
+  const botUsername = await getBotUsername(ctx)
+  if (!botUsername) return null
+  const base = `https://t.me/${botUsername}`
+  if (!payload) return base
+  return `${base}?start=${encodeURIComponent(payload)}`
 }
 
 /**
