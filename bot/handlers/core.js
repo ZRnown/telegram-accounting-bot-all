@@ -255,7 +255,7 @@ export function registerHelp(bot) {
         const inlineKeyboard = Markup.inlineKeyboard([
           [Markup.button.url('私聊查看使用说明', helpLink)]
         ])
-        return ctx.reply('请点击下方按钮私聊查看使用说明（若未收到，请在私聊点击 Start）：', {
+        return ctx.reply('请点击下方按钮私聊查看使用说明：', {
           ...inlineKeyboard
         })
       }
@@ -285,7 +285,7 @@ export function registerHelpCommand(bot, ensureChat) {
       const inlineKeyboard = Markup.inlineKeyboard([
         [Markup.button.url('私聊查看使用说明', helpLink)]
       ])
-      return ctx.reply('请点击下方按钮私聊查看使用说明（若未收到，请在私聊点击 Start）：', {
+      return ctx.reply('请点击下方按钮私聊查看使用说明：', {
         ...inlineKeyboard
       })
     }
