@@ -18,6 +18,70 @@ function buildDashboardUrl(chatId) {
   }
 }
 
+function splitText(text, maxLen = 3500) {
+  if (!text) return []
+  const lines = text.split('\n')
+  const chunks = []
+  let buf = ''
+
+  for (const line of lines) {
+    if (!buf) {
+      if (line.length > maxLen) {
+        for (let i = 0; i < line.length; i += maxLen) {
+          chunks.push(line.slice(i, i + maxLen))
+        }
+      } else {
+        buf = line
+      }
+      continue
+    }
+
+    if (buf.length + 1 + line.length > maxLen) {
+      chunks.push(buf)
+      if (line.length > maxLen) {
+        for (let i = 0; i < line.length; i += maxLen) {
+          chunks.push(line.slice(i, i + maxLen))
+        }
+        buf = ''
+      } else {
+        buf = line
+      }
+    } else {
+      buf += `\n${line}`
+    }
+  }
+
+  if (buf) chunks.push(buf)
+  return chunks
+}
+
+async function sendHelpMessage(ctx) {
+  const help = getHelpText()
+  let inlineKb = null
+
+  try {
+    inlineKb = await buildInlineKb(ctx)
+  } catch (e) {
+    console.error('[help][keyboard-error]', e)
+  }
+
+  try {
+    await ctx.reply(help, { parse_mode: 'MarkdownV2', ...(inlineKb || {}) })
+    return
+  } catch (e) {
+    console.error('[help][reply-error]', e)
+  }
+
+  const plainHelp = help.replace(/\\([\\_*\[\]()~`>#+\-=|{}.!])/g, '$1')
+  const chunks = splitText(plainHelp)
+  for (let i = 0; i < chunks.length; i += 1) {
+    const extra = i === 0 && inlineKb ? inlineKb : {}
+    await ctx.reply(chunks[i], { ...extra }).catch((e) => {
+      console.error('[help][fallback-error]', e)
+    })
+  }
+}
+
 /**
  * 注册 start 命令
  */
@@ -32,8 +96,7 @@ export function registerStart(bot, ensureChat) {
 
     if (ctx.chat?.type === 'private') {
       if (startPayload === 'help') {
-        const help = getHelpText()
-        await ctx.reply(help, { parse_mode: 'MarkdownV2', ...(await buildInlineKb(ctx)) })
+        await sendHelpMessage(ctx)
         return
       }
       // 🔥 私聊：检查是否在白名单，显示不同的提示信息
@@ -192,31 +255,15 @@ export function registerHelp(bot) {
         const inlineKeyboard = Markup.inlineKeyboard([
           [Markup.button.url('私聊查看使用说明', helpLink)]
         ])
-        return ctx.reply('请点击下方按钮私聊查看使用说明：', {
+        return ctx.reply('请点击下方按钮私聊查看使用说明（若未收到，请在私聊点击 Start）：', {
           ...inlineKeyboard
         })
       }
       // 🔥 私聊显示完整使用说明（MarkdownV2格式）
-      const help = getHelpText()
-      const inlineKb = await buildInlineKb(ctx)
-      await ctx.reply(help, { 
-        parse_mode: 'MarkdownV2', 
-        ...inlineKb 
-      })
+      await sendHelpMessage(ctx)
     } catch (e) {
       console.error('[help-action][reply-error]', e)
-      // 如果 MarkdownV2 失败，尝试使用普通文本
-      try {
-    const help = getHelpText()
-        // 移除 MarkdownV2 转义字符
-        const plainHelp = help.replace(/\\([\\_*\[\]()~`>#+\-=|{}.!])/g, '$1')
-        await ctx.reply(plainHelp, { 
-          ...(await buildInlineKb(ctx))
-        })
-      } catch (e2) {
-        console.error('[help-action][fallback-error]', e2)
-        await ctx.reply('❌ 发送使用说明失败，请稍后重试').catch(() => {})
-      }
+      await ctx.reply('❌ 发送使用说明失败，请稍后重试').catch(() => {})
     }
   })
 }
@@ -238,13 +285,12 @@ export function registerHelpCommand(bot, ensureChat) {
       const inlineKeyboard = Markup.inlineKeyboard([
         [Markup.button.url('私聊查看使用说明', helpLink)]
       ])
-      return ctx.reply('请点击下方按钮私聊查看使用说明：', {
+      return ctx.reply('请点击下方按钮私聊查看使用说明（若未收到，请在私聊点击 Start）：', {
         ...inlineKeyboard
       })
     }
 
-    const help = getHelpText()
-    await ctx.reply(help, { parse_mode: 'MarkdownV2', ...(await buildInlineKb(ctx)) })
+    await sendHelpMessage(ctx)
   })
 }
 
