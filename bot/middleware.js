@@ -3,6 +3,7 @@ import { prisma } from '../lib/db.js'
 import { ensureDbChat } from './database.js'
 import { LRUCache } from './lru-cache.js'
 import { DEFAULT_FEATURES } from './constants.js'
+import { getMessageTextOrCaption, isAccountingCommandText } from './command-utils.js'
 
 // 功能开关缓存（🔥 内存优化：减少缓存大小）
 const featureCache = new LRUCache(100)
@@ -61,16 +62,7 @@ export function clearFeatureCache(chatId) {
  * 判断是否是记账命令
  */
 export function isAccountingCommand(text) {
-  if (!text) return false
-  const t = text.trim()
-  if (/^(开始记账|开始|停止记账|停止)$/i.test(t)) return true // 🔥 添加开始/停止命令
-  if (/^[+\-]\s*[\d+\-*/.()]/i.test(t)) return true
-  if (/^(下发)\b/.test(t)) return true
-  if (/^(显示账单|\+0)$/i.test(t)) return true
-  if (/^显示历史账单$/i.test(t)) return true
-  if (/^(保存账单|删除账单|删除全部账单|清除全部账单)$/i.test(t)) return true
-  if (/^(我的账单|\/我)$/i.test(t)) return true
-  return false
+  return isAccountingCommandText(text)
 }
 
 // 🔥 记账开关缓存（减少数据库查询，🔥 内存优化：减少缓存大小）
@@ -120,7 +112,7 @@ export function clearAccountingCache(chatId) {
 export function createPermissionMiddleware() {
   return async (ctx, next) => {
     try {
-      const text = ctx.message?.text
+      const text = getMessageTextOrCaption(ctx.message)
       if (!text || !isAccountingCommand(text)) {
         return next()
       }

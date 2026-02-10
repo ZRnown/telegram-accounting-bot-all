@@ -8,6 +8,7 @@ import { ensureDefaultFeatures } from '../constants.js'
 import { safeCalculate, getChat } from '../state.js'
 import { ensureChat } from '../bot-identity.js'
 import { syncSettingsToMemory } from '../database.js'
+import { getMuteChatPermissions, getUnmuteChatPermissions } from '../command-utils.js'
 
 // TRONSCAN API (用于查询 USDT-TRC20)
 const TRONSCAN_API = 'https://apilist.tronscanapi.com/api/account'
@@ -2397,7 +2398,7 @@ export function registerFeatureToggles(bot, ensureChat) {
   })
 
   // 上课功能
-  bot.hears(/^(上课|开始上课)$/i, async (ctx) => {
+  bot.hears(/^\s*(上课|开始上课)\s*$/i, async (ctx) => {
     try {
       const chatId = String(ctx.chat.id)
 
@@ -2417,16 +2418,7 @@ export function registerFeatureToggles(bot, ensureChat) {
 
       // 解除禁言
       try {
-        await ctx.telegram.setChatPermissions(chatId, {
-          can_send_messages: true,
-          can_send_media_messages: true,
-          can_send_polls: true,
-          can_send_other_messages: true,
-          can_add_web_page_previews: true,
-          can_change_info: true,
-          can_invite_users: true,
-          can_pin_messages: true
-        })
+        await ctx.telegram.setChatPermissions(chatId, getUnmuteChatPermissions())
       } catch (e) {
         console.error('[上课] 解除禁言失败:', e.message)
         // 继续执行，不影响其他功能
@@ -2444,7 +2436,7 @@ export function registerFeatureToggles(bot, ensureChat) {
   })
 
   // 下课功能
-  bot.hears(/^下课$/i, async (ctx) => {
+  bot.hears(/^\s*下课\s*$/i, async (ctx) => {
     try {
       const chatId = String(ctx.chat.id)
 
@@ -2464,16 +2456,7 @@ export function registerFeatureToggles(bot, ensureChat) {
 
       // 设置禁言（只允许管理员发送消息）
       try {
-        await ctx.telegram.setChatPermissions(chatId, {
-          can_send_messages: false, // 禁言普通成员
-          can_send_media_messages: false,
-          can_send_polls: false,
-          can_send_other_messages: false,
-          can_add_web_page_previews: false,
-          can_change_info: false,
-          can_invite_users: false,
-          can_pin_messages: false
-        })
+        await ctx.telegram.setChatPermissions(chatId, getMuteChatPermissions())
       } catch (e) {
         console.error('[下课] 设置禁言失败:', e.message)
         // 继续执行，不影响其他功能

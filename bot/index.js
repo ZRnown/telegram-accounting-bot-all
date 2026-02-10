@@ -23,11 +23,12 @@ import {
 } from './utils.js'
 // 新模块导入
 import { ensureDbChat, updateSettings, syncSettingsToMemory, getOrCreateTodayBill, checkAndClearIfNewDay, performAutoDailyCutoff, deleteLastIncome, deleteLastDispatch, deleteIncomeByMessageId, deleteDispatchByMessageId } from './database.js'
-import { createPermissionMiddleware, isAccountingCommand, clearFeatureCache } from './middleware.js'
+import { createPermissionMiddleware } from './middleware.js'
 import { buildInlineKb, fetchRealtimeRateUSDTtoCNY, getUsername, isAdmin, hasPermissionWithWhitelist } from './helpers.js'
 import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
 import { hasPendingUserInput } from './user-input-state.js'
+import { promoteCaptionToText } from './command-utils.js'
 import logger from './logger.js'
 
 logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
@@ -465,6 +466,12 @@ function shouldWarnNow(chatId) {
   LAST_WARN_AT.set(chatId, now)
   return true
 }
+
+// 将图片/视频 caption 中的记账与上下课命令提升为 text，复用现有命令处理链路
+bot.use(async (ctx, next) => {
+  promoteCaptionToText(ctx)
+  return next()
+})
 
 bot.use(async (ctx, next) => {
   // 🔥 如果是回调查询（callback_query），直接放行，让 action 处理
