@@ -213,6 +213,10 @@ export async function buildInlineKb(ctx, options = {}) {
     }
   }
 
+  if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') {
+    rows.push([Markup.button.callback('👥 查看业务员', 'view_salespeople')])
+  }
+
   return Markup.inlineKeyboard(rows)
 }
 

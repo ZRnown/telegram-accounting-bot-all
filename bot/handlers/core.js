@@ -411,6 +411,11 @@ export function registerPersonalCenter(bot) {
       return
     }
 
+    const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
+    if (!isWhitelisted) {
+      return ctx.reply('⚠️ 您不在白名单中，无法查看个人中心')
+    }
+
     const userId = ctx.from?.id
     const username = ctx.from?.username ? `@${ctx.from.username}` : '无'
     const firstName = ctx.from?.first_name || ''
@@ -418,19 +423,11 @@ export function registerPersonalCenter(bot) {
     const fullName = `${firstName} ${lastName}`.trim() || '无'
 
     try {
-      // 检查白名单状态
-      const isWhitelisted = await hasWhitelistOnlyPermission(ctx)
-
       let msg = `👤 *您的用户信息：*\n\n`
       msg += `🆔 用户ID：\`${userId}\`\n`
       msg += `👤 用户名：${username}\n`
       msg += `📛 昵称：${fullName}\n\n`
-
-      if (isWhitelisted) {
-        msg += `✅ 您已在白名单中，可以邀请机器人进群自动授权`
-      } else {
-        msg += `⚠️ 您不在白名单中，请联系管理员将您加入白名单`
-      }
+      msg += `✅ 您已在白名单中，可以邀请机器人进群自动授权`
 
       const inlineKb = await buildInlineKb(ctx)
       await ctx.reply(msg, {

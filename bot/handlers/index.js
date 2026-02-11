@@ -45,6 +45,7 @@ import { registerCheckUSDT, registerBroadcast, registerGroupBroadcast, registerB
 import { registerMessageHandlers } from './message-handler.js'
 import { registerUserSettings } from './user-settings.js'
 import { registerUsdtMonitorHandler, initUsdtMonitor } from './usdt-monitor-handler.js'
+import { registerSalespeopleHandler } from './salespeople-handler.js'
 
 /**
  * 注册所有命令处理器
@@ -59,6 +60,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerViewBill(bot, ensureChat)
   registerPersonalCenter(bot) // 🔥 个人中心
   registerContactSupport(bot) // 🔥 联系客服
+  registerSalespeopleHandler(bot) // 🔥 业务员管理
   // 自定义指令（文本+图片）
   registerCustomCommandHandlers(bot) // 🔥 自定义指令处理器
   
@@ -145,4 +147,3 @@ export function registerAllHandlers(bot, ensureChat) {
     console.error('[USDT Monitor] 初始化失败:', e.message)
   })
 }
-
