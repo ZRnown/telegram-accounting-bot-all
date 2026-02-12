@@ -1,4 +1,5 @@
 export const SALESPEOPLE_CONFIG_KEY = 'salespeople_user_ids'
+export const SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY = 'salespeople_show_in_group'
 
 function uniquePush(list, seen, value) {
   if (!value || seen.has(value)) return
@@ -65,6 +66,14 @@ export function parseSalespersonConfigValue(value) {
   } catch {
     return []
   }
+}
+
+export function parseSalespeopleGroupButtonValue(value, defaultValue = true) {
+  if (value == null || value === '') return defaultValue
+  const normalized = String(value).trim().toLowerCase()
+  if (['1', 'true', 'on', 'yes', 'y', '开', '显示'].includes(normalized)) return true
+  if (['0', 'false', 'off', 'no', 'n', '关', '隐藏'].includes(normalized)) return false
+  return defaultValue
 }
 
 export function buildSalespersonListText(salespeople) {

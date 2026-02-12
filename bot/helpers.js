@@ -1,6 +1,10 @@
 // 辅助函数模块
 import { prisma } from '../lib/db.js'
 import { formatMoney } from './utils.js'
+import {
+  SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY,
+  parseSalespeopleGroupButtonValue
+} from './salespeople-utils.js'
 
 const BACKEND_URL = process.env.BACKEND_URL
 let cachedBotUsername = null
@@ -214,7 +218,18 @@ export async function buildInlineKb(ctx, options = {}) {
   }
 
   if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') {
-    rows.push([Markup.button.callback('👥 查看业务员', 'view_salespeople')])
+    let showSalespeopleButton = true
+    try {
+      const config = await prisma.globalConfig.findUnique({
+        where: { key: SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY },
+        select: { value: true }
+      })
+      showSalespeopleButton = parseSalespeopleGroupButtonValue(config?.value, true)
+    } catch {}
+
+    if (showSalespeopleButton) {
+      rows.push([Markup.button.callback('👥 查看业务员', 'view_salespeople')])
+    }
   }
 
   return Markup.inlineKeyboard(rows)

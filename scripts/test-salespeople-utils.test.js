@@ -2,13 +2,19 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   SALESPEOPLE_CONFIG_KEY,
+  SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY,
   parseSalespersonTokens,
   parseSalespersonConfigValue,
+  parseSalespeopleGroupButtonValue,
   buildSalespersonListText
 } from '../bot/salespeople-utils.js'
 
 test('uses stable config key for salespeople', () => {
   assert.equal(SALESPEOPLE_CONFIG_KEY, 'salespeople_user_ids')
+})
+
+test('uses stable config key for group salesperson button', () => {
+  assert.equal(SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY, 'salespeople_show_in_group')
 })
 
 test('parses mixed user ids and usernames', () => {
@@ -41,4 +47,13 @@ test('builds readable salesperson list message', () => {
   assert.equal(text.includes('1. @alice'), true)
   assert.equal(text.includes('2. ID: 456'), true)
   assert.equal(text.includes('备注：客服A'), true)
+})
+
+test('parses salesperson group button visibility value', () => {
+  assert.equal(parseSalespeopleGroupButtonValue('开'), true)
+  assert.equal(parseSalespeopleGroupButtonValue('显示'), true)
+  assert.equal(parseSalespeopleGroupButtonValue('off'), false)
+  assert.equal(parseSalespeopleGroupButtonValue('隐藏'), false)
+  assert.equal(parseSalespeopleGroupButtonValue(''), true)
+  assert.equal(parseSalespeopleGroupButtonValue('unknown', false), false)
 })
