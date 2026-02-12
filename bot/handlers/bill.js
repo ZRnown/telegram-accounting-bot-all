@@ -807,26 +807,26 @@ export function registerAllBill(bot, ensureChat) {
       const lines = []
       lines.push('📊 *全部账单汇总*\n')
       lines.push(`入款（${allIncomes.length}笔）：${totalIncome.toFixed(2)} 元`)
-      if (totalIncomeUSDT > 0) {
+      if (!chat.rmbMode && totalIncomeUSDT > 0) {
         lines.push(`入款USDT：${totalIncomeUSDT.toFixed(1)} U`)
       }
       lines.push(`下发（${allDispatches.length}笔）：${totalDispatch.toFixed(2)} 元`)
-      if (totalDispatchUSDT > 0) {
+      if (!chat.rmbMode && totalDispatchUSDT > 0) {
         lines.push(`下发USDT：${totalDispatchUSDT.toFixed(1)} U`)
       }
       if (feePercent > 0) {
         lines.push(`手续费：${fee.toFixed(2)} 元（${feePercent}%）`)
       }
       lines.push(`应下发：${shouldDispatch.toFixed(2)} 元`)
-      if (shouldDispatchUSDT > 0) {
+      if (!chat.rmbMode && shouldDispatchUSDT > 0) {
         lines.push(`应下发USDT：${shouldDispatchUSDT.toFixed(1)} U`)
       }
       lines.push(`已下发：${totalDispatch.toFixed(2)} 元`)
-      if (totalDispatchUSDT > 0) {
+      if (!chat.rmbMode && totalDispatchUSDT > 0) {
         lines.push(`已下发USDT：${totalDispatchUSDT.toFixed(1)} U`)
       }
       lines.push(`未下发：${(shouldDispatch - totalDispatch).toFixed(2)} 元`)
-      if (shouldDispatchUSDT > 0) {
+      if (!chat.rmbMode && shouldDispatchUSDT > 0) {
         lines.push(`未下发USDT：${(shouldDispatchUSDT - totalDispatchUSDT).toFixed(1)} U`)
       }
 
@@ -1012,4 +1012,3 @@ export function registerMyBill(bot, ensureChat) {
     }
   })
 }
-

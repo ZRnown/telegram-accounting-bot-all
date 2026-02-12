@@ -336,7 +336,7 @@ export async function formatSummary(ctx, chat, options = {}) {
       } catch {}
 
       let line = `${t} ${amountText}`
-      if (rate) {
+      if (rate && !chat.rmbMode) {
         line += ` / ${rate}=${usdt}U`
       }
       // 🔥 显示费率（如果有）
@@ -370,7 +370,10 @@ export async function formatSummary(ctx, chat, options = {}) {
       const usdt = Math.abs(d.usdt)
       const who = d.displayName || d.replier || d.operator || ''
       
-      let line = `${t} ${formatMoney(amount)} (${formatMoney(usdt)}U)`
+      let line = `${t} ${formatMoney(amount)}`
+      if (!chat.rmbMode) {
+        line += ` (${formatMoney(usdt)}U)`
+      }
       
       // 同一行显示用户名称（去掉 @），名称可点击打开用户详情
       if (who) {
@@ -397,7 +400,7 @@ export async function formatSummary(ctx, chat, options = {}) {
     incPart,
     `\n已下发（${disCount}笔）：`,
     disPart,
-    `\n总入款金额：${formatMoney(s.totalIncome)}${(s.totalIncomeUSDT && s.totalIncomeUSDT !== 0) ? ` | ${formatMoney(s.totalIncomeUSDT)}U` : ''}`, // 🔥 显示总入款的U（逐笔汇率聚合）
+    `\n总入款金额：${formatMoney(s.totalIncome)}${(!chat.rmbMode && s.totalIncomeUSDT && s.totalIncomeUSDT !== 0) ? ` | ${formatMoney(s.totalIncomeUSDT)}U` : ''}`, // 🔥 双显模式显示总入款U
     `费率：${s.feePercent}%`,
     `${rateLabel}：${rateVal || '未设置'}`,
     ...(chat.rmbMode
@@ -414,4 +417,3 @@ export async function formatSummary(ctx, chat, options = {}) {
     ),
   ].join('\n')
 }
-
