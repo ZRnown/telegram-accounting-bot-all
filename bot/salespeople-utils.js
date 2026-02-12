@@ -68,6 +68,59 @@ export function parseSalespersonConfigValue(value) {
   }
 }
 
+export function parseSalespersonConfigEntries(value) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(String(value))
+    if (!Array.isArray(parsed)) return []
+
+    const entries = []
+    const seenIds = new Set()
+    const seenUsernames = new Set()
+
+    for (const item of parsed) {
+      if (typeof item === 'string') {
+        const id = String(item || '').trim()
+        if (!id || !/^\d+$/.test(id) || seenIds.has(id)) continue
+        seenIds.add(id)
+        entries.push({ userId: id, username: null, note: null })
+        continue
+      }
+
+      if (!item || typeof item !== 'object') continue
+      const userId = String(item.userId || '').trim()
+      const username = String(item.username || '').trim().toLowerCase()
+      const note = item.note ? String(item.note) : null
+
+      if (userId && /^\d+$/.test(userId) && !seenIds.has(userId)) {
+        seenIds.add(userId)
+        entries.push({ userId, username: username || null, note })
+        continue
+      }
+
+      if (username && /^[A-Za-z][A-Za-z0-9_]{2,}$/.test(username) && !seenUsernames.has(username)) {
+        seenUsernames.add(username)
+        entries.push({ userId: null, username, note })
+      }
+    }
+
+    return entries
+  } catch {
+    return []
+  }
+}
+
+export function buildSalespersonEntriesFromTokens(parsedTokens) {
+  const entries = []
+  for (const userId of parsedTokens.userIds || []) {
+    entries.push({ userId, username: null, note: null })
+  }
+  for (const username of parsedTokens.usernames || []) {
+    entries.push({ userId: null, username, note: null })
+  }
+  return entries
+}
+
 export function parseSalespeopleGroupButtonValue(value, defaultValue = true) {
   if (value == null || value === '') return defaultValue
   const normalized = String(value).trim().toLowerCase()
@@ -85,7 +138,9 @@ export function buildSalespersonListText(salespeople) {
   salespeople.forEach((person, index) => {
     const username = person?.username ? `@${person.username}` : null
     const id = String(person?.userId || '').trim()
-    const title = username ? `${index + 1}. ${username} (ID: ${id || '-'})` : `${index + 1}. ID: ${id || '-'}`
+    const title = username && id
+      ? `${index + 1}. ${username} (ID: ${id})`
+      : (username ? `${index + 1}. ${username}` : `${index + 1}. ID: ${id || '-'}`)
     lines.push(title)
     if (person?.note) {
       lines.push(`   备注：${person.note}`)

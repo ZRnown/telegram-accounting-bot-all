@@ -2,9 +2,10 @@ import { prisma } from '../../lib/db.js'
 import {
   SALESPEOPLE_CONFIG_KEY,
   SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY,
+  buildSalespersonEntriesFromTokens,
   buildSalespersonListText,
   parseSalespeopleGroupButtonValue,
-  parseSalespersonConfigValue,
+  parseSalespersonConfigEntries,
   parseSalespersonTokens
 } from '../salespeople-utils.js'
 import { hasWhitelistOnlyPermission } from '../helpers.js'
@@ -15,32 +16,25 @@ async function loadSalespeople() {
     select: { value: true }
   })
 
-  const ids = parseSalespersonConfigValue(config?.value)
-  if (ids.length === 0) {
-    return { ids: [], users: [] }
+  const entries = parseSalespersonConfigEntries(config?.value)
+  if (entries.length === 0) {
+    return { entries: [], users: [] }
   }
 
-  const users = await prisma.whitelistedUser.findMany({
-    where: { userId: { in: ids } },
-    select: { userId: true, username: true, note: true }
-  })
-
-  const userMap = new Map(users.map(user => [String(user.userId), user]))
-  const orderedUsers = ids.map(id => userMap.get(id)).filter(Boolean)
-  return { ids, users: orderedUsers }
+  return { entries, users: entries }
 }
 
-async function saveSalespeople(ids, updatedBy) {
+async function saveSalespeople(entries, updatedBy) {
   await prisma.globalConfig.upsert({
     where: { key: SALESPEOPLE_CONFIG_KEY },
     create: {
       key: SALESPEOPLE_CONFIG_KEY,
-      value: JSON.stringify(ids),
-      description: '业务员白名单用户ID列表',
+      value: JSON.stringify(entries),
+      description: '业务员列表（用户名/用户ID）',
       updatedBy
     },
     update: {
-      value: JSON.stringify(ids),
+      value: JSON.stringify(entries),
       updatedBy,
       updatedAt: new Date()
     }
@@ -75,58 +69,13 @@ async function loadSalespeopleGroupButtonVisible() {
 async function resolveSalespeopleFromInput(rawInput) {
   const parsed = parseSalespersonTokens(rawInput)
   if (parsed.userIds.length === 0 && parsed.usernames.length === 0 && parsed.invalid.length === 0) {
-    return { users: [], unresolved: [], invalid: [] }
+    return { users: [], invalid: [] }
   }
 
-  const matchedById = parsed.userIds.length > 0
-    ? await prisma.whitelistedUser.findMany({
-      where: { userId: { in: parsed.userIds } },
-      select: { userId: true, username: true, note: true }
-    })
-    : []
-
-  const usersWithUsername = parsed.usernames.length > 0
-    ? await prisma.whitelistedUser.findMany({
-      where: { username: { not: null } },
-      select: { userId: true, username: true, note: true }
-    })
-    : []
-
-  const usernameMap = new Map()
-  for (const user of usersWithUsername) {
-    const key = String(user.username || '').toLowerCase().trim()
-    if (!key || usernameMap.has(key)) continue
-    usernameMap.set(key, user)
-  }
-
-  const unresolved = []
-  const matchedIdSet = new Set(matchedById.map(user => String(user.userId)))
-  for (const userId of parsed.userIds) {
-    if (!matchedIdSet.has(userId)) unresolved.push(userId)
-  }
-
-  const matchedByUsername = []
-  for (const username of parsed.usernames) {
-    const user = usernameMap.get(username)
-    if (!user) {
-      unresolved.push(`@${username}`)
-      continue
-    }
-    matchedByUsername.push(user)
-  }
-
-  const users = []
-  const seen = new Set()
-  for (const user of [...matchedById, ...matchedByUsername]) {
-    const userId = String(user.userId)
-    if (seen.has(userId)) continue
-    seen.add(userId)
-    users.push(user)
-  }
+  const users = buildSalespersonEntriesFromTokens(parsed)
 
   return {
     users,
-    unresolved,
     invalid: parsed.invalid
   }
 }
@@ -172,24 +121,19 @@ export function registerSalespeopleHandler(bot) {
     const updatedBy = String(ctx.from?.id || '')
 
     try {
-      const { users, unresolved, invalid } = await resolveSalespeopleFromInput(rawInput)
+      const { users, invalid } = await resolveSalespeopleFromInput(rawInput)
 
       if (invalid.length > 0) {
         return ctx.reply(`❌ 以下输入格式无效：${invalid.join('、')}`)
-      }
-
-      if (unresolved.length > 0) {
-        return ctx.reply(`❌ 以下用户不在白名单：${unresolved.join('、')}`)
       }
 
       if (users.length === 0) {
         return ctx.reply('❌ 未匹配到有效业务员，请检查输入')
       }
 
-      const ids = users.map(user => String(user.userId))
-      await saveSalespeople(ids, updatedBy)
+      await saveSalespeople(users, updatedBy)
 
-      await ctx.reply(`✅ 业务员已更新，共 ${ids.length} 人\n\n${buildSalespersonListText(users)}`)
+      await ctx.reply(`✅ 业务员已更新，共 ${users.length} 人\n\n${buildSalespersonListText(users)}`)
     } catch (e) {
       console.error('[设置业务员][error]', e)
       await ctx.reply('❌ 设置业务员失败，请稍后重试')
@@ -221,25 +165,28 @@ export function registerSalespeopleHandler(bot) {
         return ctx.reply(`❌ 以下输入格式无效：${matched.invalid.join('、')}`)
       }
 
-      if (matched.unresolved.length > 0) {
-        return ctx.reply(`❌ 以下用户不在白名单：${matched.unresolved.join('、')}`)
-      }
-
       if (matched.users.length === 0) {
         return ctx.reply('❌ 未匹配到有效业务员，请检查输入')
       }
 
-      const removeIdSet = new Set(matched.users.map(user => String(user.userId)))
-      const nextIds = current.ids.filter(id => !removeIdSet.has(String(id)))
-      if (nextIds.length === current.ids.length) {
+      const removeIdSet = new Set(matched.users.map(user => String(user.userId || '').trim()).filter(Boolean))
+      const removeUsernameSet = new Set(matched.users.map(user => String(user.username || '').trim().toLowerCase()).filter(Boolean))
+      const nextEntries = current.entries.filter(entry => {
+        const userId = String(entry.userId || '').trim()
+        const username = String(entry.username || '').trim().toLowerCase()
+        if (userId && removeIdSet.has(userId)) return false
+        if (username && removeUsernameSet.has(username)) return false
+        return true
+      })
+      if (nextEntries.length === current.entries.length) {
         return ctx.reply('⚠️ 指定用户不在当前业务员列表中')
       }
 
       const updatedBy = String(ctx.from?.id || '')
-      await saveSalespeople(nextIds, updatedBy)
+      await saveSalespeople(nextEntries, updatedBy)
 
       const after = await loadSalespeople()
-      await ctx.reply(`✅ 已删除业务员，当前共 ${after.ids.length} 人\n\n${buildSalespersonListText(after.users)}`)
+      await ctx.reply(`✅ 已删除业务员，当前共 ${after.entries.length} 人\n\n${buildSalespersonListText(after.users)}`)
     } catch (e) {
       console.error('[删除业务员][error]', e)
       await ctx.reply('❌ 删除业务员失败，请稍后重试')

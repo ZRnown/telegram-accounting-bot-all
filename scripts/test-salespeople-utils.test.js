@@ -5,6 +5,7 @@ import {
   SALESPEOPLE_GROUP_BUTTON_CONFIG_KEY,
   parseSalespersonTokens,
   parseSalespersonConfigValue,
+  parseSalespersonConfigEntries,
   parseSalespeopleGroupButtonValue,
   buildSalespersonListText
 } from '../bot/salespeople-utils.js'
@@ -36,6 +37,14 @@ test('filters duplicates and invalid tokens', () => {
 test('parses config json to unique ids', () => {
   const ids = parseSalespersonConfigValue('["123","123","456"]')
   assert.deepEqual(ids, ['123', '456'])
+})
+
+test('parses salesperson entries from config', () => {
+  const entries = parseSalespersonConfigEntries('[{"userId":"123"},{"username":"Alice"},{"username":"alice"}]')
+  assert.deepEqual(entries, [
+    { userId: '123', username: null, note: null },
+    { userId: null, username: 'alice', note: null }
+  ])
 })
 
 test('builds readable salesperson list message', () => {
