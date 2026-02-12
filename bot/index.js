@@ -504,7 +504,7 @@ bot.use(async (ctx, next) => {
   // 🔥 私聊：允许使用部分命令，但大部分功能需要通过内联菜单
   if (ctx.chat.type === 'private') {
     // 允许的命令：/start(含参数), /myid, /我, /help, 使用说明
-    const allowedInPrivate = /^(?:\/start(?:\s+\S+)?|\/myid|\/我|\/help|使用说明)$/i.test(text)
+    const allowedInPrivate = /^(?:\/start(?:\s+\S+)?|\/myid|\/我|\/help|使用说明|查看业务员(?:设置)?|设置业务员(?:\s+.+)?|删除业务员(?:\s+.+)?|清空业务员|设置业务员展示(?:\s+.+)?)$/i.test(text)
     const userId = String(ctx.from?.id || '')
     const allowPendingInput = hasPendingUserInput(userId)
     if (!allowedInPrivate && !text.includes('我的账单') && !allowPendingInput) {
