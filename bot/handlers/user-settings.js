@@ -79,7 +79,7 @@ export function registerUserSettings(bot) {
 
     const msg = `📊 *全局记账模式设置*\n\n` +
       `当前模式：${modeLabels[currentMode] || currentMode}\n\n` +
-      `选择记账模式（设置后对所有群组生效）：\n\n` +
+      `选择记账模式（对未单独设置的群组生效）：\n\n` +
       `• *累计模式*：账单金额累计，不自动清零\n` +
       `• *清零模式*：每天自动清零账单\n` +
       `• *单笔订单*：每天只有一笔订单`
@@ -115,7 +115,7 @@ export function registerUserSettings(bot) {
         update: { value: 'CARRY_OVER', updatedBy: userId }
       })
       await ctx.answerCbQuery('✅ 已设置为累计模式')
-      await ctx.reply(`✅ 全局记账模式已设置为：*累计模式*\n\n账单金额将累计，不自动清零。\n\n此设置对所有群组生效。`, {
+      await ctx.reply(`✅ 全局记账模式已设置为：*累计模式*\n\n账单金额将累计，不自动清零。\n\n此设置对未单独设置记账模式的群组生效。`, {
         parse_mode: 'Markdown'
       })
     } catch (e) {
@@ -134,7 +134,7 @@ export function registerUserSettings(bot) {
         update: { value: 'DAILY_RESET', updatedBy: userId }
       })
       await ctx.answerCbQuery('✅ 已设置为清零模式')
-      await ctx.reply(`✅ 全局记账模式已设置为：*清零模式*\n\n每天自动清零账单。\n\n此设置对所有群组生效。`, {
+      await ctx.reply(`✅ 全局记账模式已设置为：*清零模式*\n\n每天自动清零账单。\n\n此设置对未单独设置记账模式的群组生效。`, {
         parse_mode: 'Markdown'
       })
     } catch (e) {
@@ -153,7 +153,7 @@ export function registerUserSettings(bot) {
         update: { value: 'SINGLE_BILL_PER_DAY', updatedBy: userId }
       })
       await ctx.answerCbQuery('✅ 已设置为单笔订单')
-      await ctx.reply(`✅ 全局记账模式已设置为：*单笔订单*\n\n每天只有一笔订单。\n\n此设置对所有群组生效。`, {
+      await ctx.reply(`✅ 全局记账模式已设置为：*单笔订单*\n\n每天只有一笔订单。\n\n此设置对未单独设置记账模式的群组生效。`, {
         parse_mode: 'Markdown'
       })
     } catch (e) {

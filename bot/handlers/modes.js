@@ -1,7 +1,6 @@
 // 显示/记账/佣金 模式相关指令
-import { prisma } from '../../lib/db.js'
 import { hasPermissionWithWhitelist, buildInlineKb } from '../helpers.js'
-import { ensureDbChat, updateSettings } from '../database.js'
+import { ensureDbChat, updateSettings, getAccountingMode } from '../database.js'
 
 export function registerDisplayMode(bot, ensureChat) {
   // 显示模式[1-6]
@@ -117,8 +116,7 @@ export function registerAccountingModes(bot, ensureChat) {
     const chat = ensureChat(ctx)
     if (!chat) return
     const chatId = await ensureDbChat(ctx)
-    const settings = await prisma.setting.findUnique({ where: { chatId } })
-    const mode = settings?.accountingMode || 'DAILY_RESET'
+    const mode = await getAccountingMode(chatId)
     let modeName = '清零模式（按日清零）'
     let desc = '当前模式：每日账单独立计算，不结转历史'
 

@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { assertAdmin } from '@/app/api/_auth'
 
+const ACCOUNTING_MODE_VALUES = new Set(['DAILY_RESET', 'CARRY_OVER', 'SINGLE_BILL_PER_DAY'])
+const getChatAccountingModeKey = (chatId: string) => `chat_accounting_mode:${chatId}`
+
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     // 🔥 安全检查：只有管理员才能查看特定群组的设置
@@ -87,7 +90,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (fixedRate !== undefined) patchData.fixedRate = fixedRate
     if (realtimeRate !== undefined) patchData.realtimeRate = realtimeRate
     if (typeof body.feePercent === 'number') patchData.feePercent = body.feePercent
-    if (body.accountingMode === 'DAILY_RESET' || body.accountingMode === 'CARRY_OVER' || body.accountingMode === 'SINGLE_BILL_PER_DAY') {
+    const hasAccountingMode = typeof body.accountingMode === 'string' && ACCOUNTING_MODE_VALUES.has(body.accountingMode)
+    if (hasAccountingMode) {
       patchData.accountingMode = body.accountingMode
     }
     if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) patchData.featureWarningMode = body.featureWarningMode
@@ -130,11 +134,34 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     
     // 🔥 如果patchData为空但有传入字段，说明可能是保存默认值，仍然执行upsert
 
-    await prisma.setting.upsert({
-      where: { chatId },
-      update: patchData,
-      create: { chatId, ...patchData },
-    })
+    if (hasAccountingMode) {
+      await prisma.$transaction([
+        prisma.setting.upsert({
+          where: { chatId },
+          update: patchData,
+          create: { chatId, ...patchData },
+        }),
+        prisma.globalConfig.upsert({
+          where: { key: getChatAccountingModeKey(chatId) },
+          create: {
+            key: getChatAccountingModeKey(chatId),
+            value: String(body.accountingMode),
+            description: '群组记账模式覆盖',
+            updatedBy: 'dashboard'
+          },
+          update: {
+            value: String(body.accountingMode),
+            updatedBy: 'dashboard'
+          }
+        })
+      ])
+    } else {
+      await prisma.setting.upsert({
+        where: { chatId },
+        update: patchData,
+        create: { chatId, ...patchData },
+      })
+    }
 
     // 🔥 如果更新了featureWarningMode，清除相关的警告记录，确保新设置立即生效
     if (body.featureWarningMode && ['always', 'once', 'daily', 'silent'].includes(body.featureWarningMode)) {
@@ -151,4 +178,3 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     return new Response('Server error', { status: 500 })
   }
 }
-
