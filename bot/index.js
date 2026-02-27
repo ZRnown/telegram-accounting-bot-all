@@ -29,6 +29,8 @@ import { formatSummary } from './formatting.js'
 import { registerAllHandlers } from './handlers/index.js'
 import { hasPendingUserInput } from './user-input-state.js'
 import { promoteCaptionToText } from './command-utils.js'
+import { getChatSubscriptionStatus, getSubscriptionConfig } from './subscription-service.js'
+import { formatSubscriptionExpiry } from './subscription-utils.js'
 import logger from './logger.js'
 
 logger.initLogger({ dir: 'logs', level: process.env.DEBUG_BOT === 'true' ? 'debug' : 'info', stdout: true })
@@ -504,7 +506,7 @@ bot.use(async (ctx, next) => {
   // 🔥 私聊：允许使用部分命令，但大部分功能需要通过内联菜单
   if (ctx.chat.type === 'private') {
     // 允许的命令：/start(含参数), /myid, /我, /help, 使用说明
-    const allowedInPrivate = /^(?:\/start(?:\s+\S+)?|\/myid|\/我|\/help|使用说明|查看业务员(?:设置)?|设置业务员(?:\s+.+)?|删除业务员(?:\s+.+)?|清空业务员|设置业务员展示(?:\s+.+)?)$/i.test(text)
+    const allowedInPrivate = /^(?:\/start(?:\s+\S+)?|\/myid|\/我|\/help|使用说明|查看业务员(?:设置)?|设置业务员(?:\s+.+)?|删除业务员(?:\s+.+)?|清空业务员|设置业务员展示(?:\s+.+)?|查看订阅配置|设置订阅地址\s+\S+|设置订阅单价\s+\d+(?:\.\d+)?|设置试用天数\s+\d+|设置群到期\s+-?\d+\s+\d{4}-\d{2}-\d{2}|延长群到期\s+-?\d+\s+\d+)$/i.test(text)
     const userId = String(ctx.from?.id || '')
     const allowPendingInput = hasPendingUserInput(userId)
     if (!allowedInPrivate && !text.includes('我的账单') && !allowPendingInput) {
@@ -566,6 +568,33 @@ bot.use(async (ctx, next) => {
     try { await ctx.reply(msg) } catch {}
     return
   }
+
+  // 订阅到期拦截：除“订阅状态 / 续费”外，群内功能全部停用
+  try {
+    const subBypass = /^(?:订阅状态|续费\s+\d+\s+[A-Fa-f0-9]{64})$/i.test(text || '')
+    if (!subBypass) {
+      const subscription = await getChatSubscriptionStatus(chatId)
+      if (!subscription.active) {
+        const cfg = await getSubscriptionConfig()
+        const renewalGuide = cfg.receiveAddress
+          ? `请向地址 ${cfg.receiveAddress} 转账后发送：续费 天数 交易哈希`
+          : '管理员尚未配置收款地址，请联系管理员处理续费。'
+        try {
+          await ctx.reply(
+            `⛔ 当前群订阅已到期，功能已暂停。\n` +
+            `到期时间：${formatSubscriptionExpiry(subscription.expiresAt)}\n` +
+            `续费单价：${cfg.usdtPerDay} USDT/天\n` +
+            `${renewalGuide}\n` +
+            `你也可以发送“订阅状态”查看详情。`
+          )
+        } catch {}
+        return
+      }
+    }
+  } catch (e) {
+    console.error('[subscription-check][error]', e)
+  }
+
   return next()
 })
 

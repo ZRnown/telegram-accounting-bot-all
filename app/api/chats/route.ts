@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { assertAdmin } from '@/app/api/_auth'
 
+function buildSubscriptionExpiryKey(chatId: string) {
+  return `subscription_chat_expires:${chatId}`
+}
+
 export async function GET(req: NextRequest) {
   try {
     const unauth = assertAdmin(req)
@@ -66,11 +70,24 @@ export async function GET(req: NextRequest) {
         group: { select: { id: true, name: true } }, // 🔥 新增：分组信息
       },
     })
+
+    const keys = chats.map((item: { id: string }) => buildSubscriptionExpiryKey(item.id))
+    const subRows = keys.length > 0
+      ? await prisma.globalConfig.findMany({
+        where: { key: { in: keys } },
+        select: { key: true, value: true }
+      })
+      : []
+    const subMap = new Map(subRows.map((row: { key: string; value: string }) => [row.key, row.value]))
+    const withSubscription = chats.map((item: { id: string }) => ({
+      ...item,
+      subscriptionExpiresAt: subMap.get(buildSubscriptionExpiryKey(item.id)) || null
+    }))
     
     // 🔥 移除实时验证，直接返回数据（提升加载速度）
     // 验证逻辑已移除，避免阻塞响应和导致群组消失
     
-    return NextResponse.json({ items: chats })
+    return NextResponse.json({ items: withSubscription })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

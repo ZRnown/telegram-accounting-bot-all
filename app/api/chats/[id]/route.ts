@@ -3,6 +3,10 @@ import { prisma } from '@/lib/db'
 import { assertAdmin, rateLimit } from '@/app/api/_auth'
 import { ProxyAgent } from 'undici'
 
+function buildSubscriptionExpiryKey(chatId: string) {
+  return `subscription_chat_expires:${chatId}`
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const unauth = assertAdmin(req)
@@ -15,6 +19,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       title?: string
       status?: string
       botId?: string | null
+      subscriptionExpiresAt?: string | null
     }
 
     const data: any = {}
@@ -77,7 +82,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         botId: true,
       },
     })
-    return NextResponse.json(updated)
+
+    if (body.subscriptionExpiresAt !== undefined) {
+      const key = buildSubscriptionExpiryKey(id)
+      if (!body.subscriptionExpiresAt) {
+        await prisma.globalConfig.deleteMany({ where: { key } })
+      } else {
+        const expiresAt = new Date(body.subscriptionExpiresAt)
+        if (!Number.isFinite(expiresAt.getTime())) {
+          return NextResponse.json({ error: 'Invalid subscriptionExpiresAt' }, { status: 400 })
+        }
+        await prisma.globalConfig.upsert({
+          where: { key },
+          create: {
+            key,
+            value: expiresAt.toISOString(),
+            description: '群组订阅到期时间',
+            updatedBy: 'admin-api'
+          },
+          update: {
+            value: expiresAt.toISOString(),
+            updatedAt: new Date(),
+            updatedBy: 'admin-api'
+          }
+        })
+      }
+    }
+
+    const subCfg = await prisma.globalConfig.findUnique({
+      where: { key: buildSubscriptionExpiryKey(id) },
+      select: { value: true }
+    })
+
+    const subscriptionExpiresAt = subCfg?.value || null
+    return NextResponse.json({ ...updated, subscriptionExpiresAt })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
@@ -103,7 +141,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     })
     if (!chat) return new NextResponse('Not Found', { status: 404 })
-    return NextResponse.json(chat)
+    const subCfg = await prisma.globalConfig.findUnique({
+      where: { key: buildSubscriptionExpiryKey(id) },
+      select: { value: true }
+    })
+    return NextResponse.json({ ...chat, subscriptionExpiresAt: subCfg?.value || null })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

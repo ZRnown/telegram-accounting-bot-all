@@ -44,6 +44,8 @@ export const commandsRegistry = [
   { type: 'prefix', key: '添加操作员', title: '添加操作员', desc: '添加多个操作员', examples: ['添加操作员 @AAA @BBB'], group: '权限' },
   { type: 'prefix', key: '删除操作员', title: '删除操作员', desc: '删除多个操作员', examples: ['删除操作员 @AAA @BBB'], group: '权限' },
   { type: 'exact', key: '显示操作人', title: '显示操作人', desc: '显示群组权限信息', examples: ['显示操作人', '管理员', '权限人'], group: '权限' },
+  { type: 'exact', key: '订阅状态', title: '订阅状态', desc: '查看本群订阅到期时间', examples: ['订阅状态'], group: '权限' },
+  { type: 'prefix', key: '续费', title: 'USDT续费', desc: '按天数和交易哈希续费', examples: ['续费 30 交易哈希'], group: '权限' },
 
   // OKX 查询
   { type: 'exact', key: 'z0', title: 'z0', desc: 'OKX 实时U价', examples: ['z0'], group: 'OKX' },

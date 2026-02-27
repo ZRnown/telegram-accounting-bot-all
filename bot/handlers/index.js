@@ -46,6 +46,7 @@ import { registerMessageHandlers } from './message-handler.js'
 import { registerUserSettings } from './user-settings.js'
 import { registerUsdtMonitorHandler, initUsdtMonitor } from './usdt-monitor-handler.js'
 import { registerSalespeopleHandler } from './salespeople-handler.js'
+import { registerSubscriptionHandler } from './subscription-handler.js'
 
 /**
  * 注册所有命令处理器
@@ -61,6 +62,7 @@ export function registerAllHandlers(bot, ensureChat) {
   registerPersonalCenter(bot) // 🔥 个人中心
   registerContactSupport(bot) // 🔥 联系客服
   registerSalespeopleHandler(bot) // 🔥 业务员管理
+  registerSubscriptionHandler(bot) // 订阅与续费
   // 自定义指令（文本+图片）
   registerCustomCommandHandlers(bot) // 🔥 自定义指令处理器
   
